@@ -51,7 +51,13 @@ class FilledDataBuilderNg(
         requireAuthentication: Boolean = true,
     ): FilledData {
         val autoLockMinutes = resolveAutoLockTimeoutForAutofill()
-        val isVaultLocked = !securityManager.canAccessVaultNowStrict(context, autoLockMinutes)
+        // 用户设置“永不过期/不锁定”(autoLockMinutes == -1)时，只要密钥材料当前可读即视为已解锁，
+        // 避免自动填充独立进程因会话状态不可见而每次填充都强制二次解锁。
+        val isVaultLocked = if (autoLockMinutes == -1) {
+            !securityManager.canAccessVaultMaterialNow()
+        } else {
+            !securityManager.canAccessVaultNowStrict(context, autoLockMinutes)
+        }
         val maxCipherInlineSuggestionsCount = (request.maxInlineSuggestionsCount - 1)
             .coerceAtMost(MAX_INLINE_SUGGESTION_COUNT)
 

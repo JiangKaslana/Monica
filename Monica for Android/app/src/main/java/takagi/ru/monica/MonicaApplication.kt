@@ -19,6 +19,7 @@ import takagi.ru.monica.security.AppUpdateSecurityGuard
 import takagi.ru.monica.sync.AndroidSyncNetworkGate
 import takagi.ru.monica.sync.SyncTaskRunner
 import takagi.ru.monica.utils.AppLauncherIconManager
+import takagi.ru.monica.security.SessionManager
 import takagi.ru.monica.utils.SettingsManager
 import takagi.ru.monica.webdav.WebDavBackoffState
 import takagi.ru.monica.workers.KeePassRemoteUploadWorker
@@ -41,6 +42,8 @@ class MonicaApplication : Application() {
     
     override fun onCreate() {
         super.onCreate()
+
+        SessionManager.attachAppContext(this)
 
         AppUpdateSecurityGuard.enforceLockIfAppUpdated(
             context = this,
