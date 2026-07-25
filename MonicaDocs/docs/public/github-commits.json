@@ -1,16 +1,12 @@
 {
   "repo": "Monica-Pass/Monica",
   "repoUrl": "https://github.com/Monica-Pass/Monica",
-  "generatedAt": "2026-07-24T21:20:04.087Z",
+  "generatedAt": "2026-07-25T21:08:23.268Z",
   "range": {
-    "from": "2025-07-25",
-    "to": "2026-07-24"
+    "from": "2025-07-26",
+    "to": "2026-07-25"
   },
   "activity": [
-    {
-      "date": "2025-07-25",
-      "count": 0
-    },
     {
       "date": "2025-07-26",
       "count": 0
@@ -1466,9 +1462,58 @@
     {
       "date": "2026-07-24",
       "count": 3
+    },
+    {
+      "date": "2026-07-25",
+      "count": 5
     }
   ],
   "latest": [
+    {
+      "sha": "b4a18aaa67a63274e7937c973568cbc876a746d4",
+      "shortSha": "b4a18aa",
+      "message": "Merge pull request #78 from Mrmiaomrzh/main",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-25T16:30:20Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/b4a18aaa67a63274e7937c973568cbc876a746d4"
+    },
+    {
+      "sha": "7185e3e7f4b6d352e46bfac1305763f0378c20a6",
+      "shortSha": "7185e3e",
+      "message": "fix: 修复赞助者表格的 HTML 结构，添加 tbody 标签，添加爱发电默认用户名保护",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-07-25T16:16:40Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/7185e3e7f4b6d352e46bfac1305763f0378c20a6"
+    },
+    {
+      "sha": "8450baa1e2da543789b0eccbd70bf7201f84b18e",
+      "shortSha": "8450baa",
+      "message": "feat: 添加赞助者列表",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-07-25T16:10:02Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/8450baa1e2da543789b0eccbd70bf7201f84b18e"
+    },
+    {
+      "sha": "b94139d19af725d670345058cc16cbb80a2cf4c1",
+      "shortSha": "b94139d",
+      "message": "Merge branch 'main' of https://github.com/Mrmiaomrzh/Monica",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-07-25T15:57:00Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/b94139d19af725d670345058cc16cbb80a2cf4c1"
+    },
+    {
+      "sha": "37314f51d556b723e80c23e318678840ae6a5f0a",
+      "shortSha": "37314f5",
+      "message": "fix: 修正文档路径项，并更新依赖项版本",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-07-25T15:56:50Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/37314f51d556b723e80c23e318678840ae6a5f0a"
+    },
     {
       "sha": "2613d0be426dea53d5606b1e8168730a366c8652",
       "shortSha": "2613d0b",
@@ -1513,51 +1558,6 @@
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
       "date": "2026-07-23T05:04:18Z",
       "url": "https://github.com/Monica-Pass/Monica/commit/307b6add0b741af7f7ace73123921339fd54cae1"
-    },
-    {
-      "sha": "ef1d9a28e3189c3f2719200739c425651d19ebe5",
-      "shortSha": "ef1d9a2",
-      "message": "feat(navigation): unify authenticator and passkey dock",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-22T16:47:11Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/ef1d9a28e3189c3f2719200739c425651d19ebe5"
-    },
-    {
-      "sha": "4268da3da9c97098b9d4cc44f3fd93e8d482ffa2",
-      "shortSha": "4268da3",
-      "message": "refactor(plus): remove retired remote licensing",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-22T14:38:43Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/4268da3da9c97098b9d4cc44f3fd93e8d482ffa2"
-    },
-    {
-      "sha": "fe47402c3c6e3d021b59647ef2cf90b97971d44c",
-      "shortSha": "fe47402",
-      "message": "Merge pull request #75 from Chaniug/fix/autofill-webview-paste",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-22T14:32:41Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/fe47402c3c6e3d021b59647ef2cf90b97971d44c"
-    },
-    {
-      "sha": "d9ed2bb1c7990ac6182abd52ae1531dc28c195f3",
-      "shortSha": "d9ed2bb",
-      "message": "fix(autofill): harden active fill and WebView paste",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-22T14:24:06Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/d9ed2bb1c7990ac6182abd52ae1531dc28c195f3"
-    },
-    {
-      "sha": "8fcaf0dd2bd024620415e00462aea7eed4188d84",
-      "shortSha": "8fcaf0d",
-      "message": "fix(autofill): WebView 填充改用 ACTION_PASTE 优先",
-      "authorName": "Chaniug",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
-      "date": "2026-07-22T05:02:59Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/8fcaf0dd2bd024620415e00462aea7eed4188d84"
     }
   ]
 }
