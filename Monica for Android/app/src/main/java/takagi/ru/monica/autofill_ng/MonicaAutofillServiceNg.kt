@@ -270,10 +270,14 @@ class MonicaAutofillServiceNg : AutofillService() {
                 )
             )
             if (firstPassTargets.isEmpty()) {
+                val knownLoginPackage = synchronized(passwordMemoryByPackage) {
+                    passwordMemoryByPackage.containsKey(fallbackPackage)
+                }
                 val weakParsed = parser.parse(
                     structure = structure,
                     respectAutofillOff = respectAutofillOff,
                     allowWeakTargets = true,
+                    knownLoginPackage = knownLoginPackage,
                 )
                 AutofillLogger.d(
                     "AF",
@@ -282,6 +286,7 @@ class MonicaAutofillServiceNg : AutofillService() {
                         "requestId" to requestId,
                         "firstPassItemCount" to parsed.items.size,
                         "weakItemCount" to weakParsed.items.size,
+                        "knownLoginPackage" to knownLoginPackage,
                     )
                 )
                 parsed = weakParsed

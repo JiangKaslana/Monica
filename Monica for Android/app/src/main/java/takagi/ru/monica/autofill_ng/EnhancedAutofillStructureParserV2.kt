@@ -499,6 +499,7 @@ class EnhancedAutofillStructureParserV2 {
         structure: AssistStructure,
         respectAutofillOff: Boolean = true,
         allowWeakTargets: Boolean = false,
+        knownLoginPackage: Boolean = false,
     ): ParsedStructure {
         var applicationId: String? = structure.activityComponent?.packageName
         var rawStructure: RawParsedStructure? = null
@@ -569,10 +570,15 @@ class EnhancedAutofillStructureParserV2 {
         val hasPasswordInItems = confidenceFilteredItems.any {
             it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
         }
-        val loginFilteredItems = if (hasPasswordInItems) {
-            confidenceFilteredItems
-        } else {
-            confidenceFilteredItems.filterNot {
+        // 已知登录包（历史上出现过密码框）在弱目标模式下放行低精度账号字段：
+        // 这类 App（如影视类自定义登录框、电影猎手）的账号框常被弱推断为低精度 USERNAME，
+        // 且密码框在聚焦账号框时可能尚未可见/未被识别，首轮保守解析会丢弃全部字段导致不弹面板。
+        // 此处仅对「已知登录包」放宽，未知包（如 QQ 搜索框）仍按原逻辑过滤，避免误弹非登录弱推断字段。
+        // 放行的字段最终仍会经过上层 selectFillableTargets（isSupportedFillableHint + shouldKeepTarget）过滤。
+        val allowWeakLoginTargets = allowWeakTargets && knownLoginPackage
+        val loginFilteredItems = when {
+            hasPasswordInItems || allowWeakLoginTargets -> confidenceFilteredItems
+            else -> confidenceFilteredItems.filterNot {
                 (it.hint == InternalHint.USERNAME ||
                     it.hint == InternalHint.EMAIL_ADDRESS ||
                     it.hint == InternalHint.PHONE_NUMBER) &&
@@ -590,6 +596,8 @@ class EnhancedAutofillStructureParserV2 {
                 "loginFilteredCount" to loginFilteredItems.size,
                 "candidates" to candidateItems.joinToString { "${it.hint}:${it.accuracy.name}" },
                 "allowWeakTargets" to allowWeakTargets,
+                "knownLoginPackage" to knownLoginPackage,
+                "allowWeakLoginTargets" to allowWeakLoginTargets,
             )
         )
         loginFilteredItems
