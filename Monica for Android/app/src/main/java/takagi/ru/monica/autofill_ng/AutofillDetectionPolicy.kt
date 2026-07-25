@@ -37,7 +37,12 @@ internal object AutofillDetectionPolicy {
         hint: FieldHint,
         accuracy: Accuracy,
     ): Boolean {
-        val credentialHint = isAccountHint(hint) || isPasswordHint(hint)
+        // 密码类是强登录信号，即便是低精度（如 VISIBLE_PASSWORD / NUMBER_PASSWORD
+        // 变体映射为 LOW）且当前不可见，也应纳入解析，避免电影猎手这类 App 在聚焦
+        // 账号框时因密码框尚未可见而被整体丢弃、导致密码填充失效。账号类仍需较高
+        // 精度，避免把隐藏的搜索/备注等误判为登录账号（QQ 搜索框修复不受影响）。
+        if (isPasswordHint(hint)) return accuracy.score >= Accuracy.LOWEST.score
+        val credentialHint = isAccountHint(hint)
         return credentialHint && accuracy.score >= Accuracy.MEDIUM.score
     }
 
