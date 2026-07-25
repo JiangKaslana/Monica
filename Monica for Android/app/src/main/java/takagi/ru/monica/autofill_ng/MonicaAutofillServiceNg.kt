@@ -248,6 +248,13 @@ class MonicaAutofillServiceNg : AutofillService() {
         var usedWeakReparse = false
         if (!isManualRequest) {
             val firstPassTargets = selectFillableTargets(parsed.items, isManualRequest)
+            Log.d(
+                "MonicaAutofill",
+                "DIAG firstPassTargets=${firstPassTargets.size} " +
+                    "hints=[${firstPassTargets.joinToString { it.hint.name }}] " +
+                    "parsedItems=${parsed.items.size} " +
+                    "parsedHints=[${parsed.items.joinToString { "${it.hint}:${it.accuracy.name}" }}]"
+            )
             if (firstPassTargets.isEmpty()) {
                 val weakParsed = parser.parse(
                     structure = structure,
@@ -335,6 +342,13 @@ class MonicaAutofillServiceNg : AutofillService() {
         val fillableTargets = selectFillableTargets(
             items = parsed.items,
             manualRequest = isManualRequest || usedWeakReparse,
+        )
+        Log.d(
+            "MonicaAutofill",
+            "DIAG fillableTargets=${fillableTargets.size} " +
+                "hints=[${fillableTargets.joinToString { it.hint.name }}] " +
+                "usedWeakReparse=$usedWeakReparse " +
+                "hasLoginTargets=${fillableTargets.any { isLoginHint(it.hint) }}"
         )
         if (fillableTargets.isEmpty()) {
             AutofillLogger.i(

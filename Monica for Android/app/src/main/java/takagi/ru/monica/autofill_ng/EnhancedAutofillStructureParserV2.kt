@@ -581,6 +581,12 @@ class EnhancedAutofillStructureParserV2 {
         }
 
         val items = mutableListOf<ParsedItem>()
+        Log.d(
+            "MonicaAutofill",
+            "DIAG confidenceFiltered.size=${confidenceFilteredItems.size} " +
+                "loginFiltered.size=${loginFilteredItems.size} " +
+                "candidates=[${candidateItems.joinToString { "${it.hint}:${it.accuracy.name}" }}]"
+        )
         loginFilteredItems
             .groupBy { it.id }
             .forEach { groupedById ->
@@ -710,7 +716,8 @@ class EnhancedAutofillStructureParserV2 {
             "parse result: items=${items.size}, totalNodes=${parseContext.totalNodesVisited}, " +
                 "withAutofillId=${parseContext.nodesWithAutofillId}, " +
                 "withoutAutofillId=${parseContext.nodesWithoutAutofillId}, " +
-                "webDomain=$effectiveWebDomain, webScheme=${rawStructure?.webScheme}"
+                "webDomain=$effectiveWebDomain, webScheme=${rawStructure?.webScheme}, " +
+                "itemHints=[${items.joinToString { "${it.hint}:${it.accuracy.name}" }}]"
         )
 
         return ParsedStructure(
