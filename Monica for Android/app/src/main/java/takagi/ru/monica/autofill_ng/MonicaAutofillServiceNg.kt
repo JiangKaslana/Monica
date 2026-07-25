@@ -16,6 +16,7 @@ import android.service.autofill.SaveCallback
 import android.service.autofill.SaveRequest
 import android.view.View
 import android.view.autofill.AutofillId
+import android.text.InputType
 import android.view.inputmethod.InlineSuggestionsRequest
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -235,11 +236,46 @@ class MonicaAutofillServiceNg : AutofillService() {
 
         val respectAutofillOff = autofillPreferences.isV2RespectAutofillOffEnabled.first()
         val isManualRequest = request.flags and FillRequest.FLAG_MANUAL_REQUEST != 0
-        val parsed = parser.parse(
+        var parsed = parser.parse(
             structure = structure,
             respectAutofillOff = respectAutofillOff,
             allowWeakTargets = isManualRequest,
         )
+        // 兼容回退（Bitwarden 式）：部分 App（如影视类自定义登录框）的登录字段没有标准
+        // autofill hint，首轮保守解析会丢弃全部字段导致不弹面板。此时二次解析开启弱目标，
+        // 再由 selectFillableTargets / shouldKeepTarget / isSupportedFillableHint 过滤掉
+        // 搜索框、昵称等非登录误报。仅自动模式触发，手动模式本就开启弱目标。
+        var usedWeakReparse = false
+        if (!isManualRequest) {
+            val firstPassTargets = selectFillableTargets(parsed.items, isManualRequest)
+            if (firstPassTargets.isEmpty()) {
+                val weakParsed = parser.parse(
+                    structure = structure,
+                    respectAutofillOff = respectAutofillOff,
+                    allowWeakTargets = true,
+                )
+                AutofillLogger.d(
+                    "AF",
+                    "Weak-target compatibility reparse triggered",
+                    metadata = mapOf(
+                        "requestId" to requestId,
+                        "firstPassItemCount" to parsed.items.size,
+                        "weakItemCount" to weakParsed.items.size,
+                    )
+                )
+                parsed = weakParsed
+                usedWeakReparse = true
+            }
+        }
+        // 兼容回退（Bitwarden 式）：把当前聚焦的字段也纳入可填充目标。
+        // 部分小众/自定义登录框（如影视类 App）的密码框未被解析识别，
+        // 仅识别到账号字段，导致聚焦密码框时框架找不到可填充目标而不弹面板。
+        // 这里直接依据聚焦节点的 inputType 推断 hint（密码框→PASSWORD），
+        // 保证聚焦字段上也能显示填充提示，并让选择器正确回填账号与密码。
+        val focusedSyntheticItems = buildFocusedSyntheticItems(structure, parsed.items)
+        if (focusedSyntheticItems.isNotEmpty()) {
+            parsed = parsed.copy(items = parsed.items + focusedSyntheticItems)
+        }
         val packageName = resolveEffectivePackageName(
             parsedApplicationId = parsed.applicationId,
             fallbackPackage = fallbackPackage,
@@ -282,9 +318,12 @@ class MonicaAutofillServiceNg : AutofillService() {
             return null
         }
 
+        // 兼容回退路径（usedWeakReparse）：首轮保守解析零字段、二次弱解析才找回的字段，
+        // 在选择期也放宽账号字段的精度/密码门槛（作用同 manualRequest 的 shouldKeepTarget 宽松分支），
+        // 但非登录类字段仍被 isSupportedFillableHint 挡掉，不会误弹搜索框/昵称。
         val fillableTargets = selectFillableTargets(
             items = parsed.items,
-            manualRequest = isManualRequest,
+            manualRequest = isManualRequest || usedWeakReparse,
         )
         if (fillableTargets.isEmpty()) {
             AutofillLogger.i(
@@ -1159,6 +1198,81 @@ class MonicaAutofillServiceNg : AutofillService() {
             }
         }
         return null
+    }
+
+    /**
+     * 收集当前聚焦且未被已解析条目覆盖的可编辑字段，依据其 inputType 推断 hint 后
+     * 合成 ParsedItem，使响应能锚定到用户实际聚焦的框（如密码框），对齐 Bitwarden 行为。
+     */
+    private fun buildFocusedSyntheticItems(
+        structure: AssistStructure,
+        existingItems: List<EnhancedAutofillStructureParserV2.ParsedItem>,
+    ): List<EnhancedAutofillStructureParserV2.ParsedItem> {
+        val existingIds = existingItems.map { it.id }.toSet()
+        val out = mutableListOf<EnhancedAutofillStructureParserV2.ParsedItem>()
+        for (index in 0 until structure.windowNodeCount) {
+            collectFocusedSyntheticItems(
+                node = structure.getWindowNodeAt(index).rootViewNode,
+                existingIds = existingIds,
+                out = out,
+            )
+        }
+        return out
+    }
+
+    private fun collectFocusedSyntheticItems(
+        node: AssistStructure.ViewNode,
+        existingIds: Set<AutofillId>,
+        out: MutableList<EnhancedAutofillStructureParserV2.ParsedItem>,
+    ) {
+        if (node.isFocused &&
+            node.autofillId != null &&
+            !existingIds.contains(node.autofillId)
+        ) {
+            val inferredHint = inferFocusedFieldHint(node)
+            if (inferredHint != null) {
+                out += EnhancedAutofillStructureParserV2.ParsedItem(
+                    id = node.autofillId!!,
+                    hint = inferredHint,
+                    accuracy = EnhancedAutofillStructureParserV2.Accuracy.MEDIUM,
+                    isFocused = true,
+                    isVisible = node.visibility == View.VISIBLE,
+                    traversalIndex = 0,
+                )
+            }
+        }
+        for (childIndex in 0 until node.childCount) {
+            node.getChildAt(childIndex)?.let {
+                collectFocusedSyntheticItems(node = it, existingIds = existingIds, out = out)
+            }
+        }
+    }
+
+    private fun inferFocusedFieldHint(node: AssistStructure.ViewNode): FieldHint? {
+        val inputType = node.inputType
+        val classBits = inputType and InputType.TYPE_MASK_CLASS
+        if (classBits == InputType.TYPE_CLASS_TEXT) {
+            when (inputType and InputType.TYPE_MASK_VARIATION) {
+                InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                -> return FieldHint.PASSWORD
+
+                InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+                -> return FieldHint.EMAIL_ADDRESS
+
+                InputType.TYPE_TEXT_VARIATION_PHONETIC -> return FieldHint.PHONE_NUMBER
+            }
+        } else if (classBits == InputType.TYPE_CLASS_NUMBER) {
+            if ((inputType and InputType.TYPE_MASK_VARIATION) ==
+                InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            ) {
+                return FieldHint.PASSWORD
+            }
+        }
+        // 默认当作账号字段，确保至少能把填充提示锚定到聚焦框
+        return FieldHint.USERNAME
     }
 
     override fun onConnected() {

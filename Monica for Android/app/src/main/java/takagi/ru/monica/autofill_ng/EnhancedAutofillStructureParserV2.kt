@@ -1385,22 +1385,13 @@ class EnhancedAutofillStructureParserV2 {
                         inputType,
                         InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
                     ) -> {
-                        val hasUsername = out.any {
-                            it.hint == InternalHint.USERNAME ||
-                                it.hint == InternalHint.EMAIL_ADDRESS ||
-                                it.hint == InternalHint.PHONE_NUMBER
-                        }
-                        if (hasUsername) {
-                            out += ParsedItemBuilder(
-                                accuracy = Accuracy.LOWEST,
-                                hint = InternalHint.PASSWORD,
-                            )
-                        } else {
-                            out += ParsedItemBuilder(
-                                accuracy = Accuracy.LOWEST,
-                                hint = InternalHint.USERNAME,
-                            )
-                        }
+                        // 可见密码变体一定是密码框（如"显示密码"切换），
+                        // 原逻辑要求同节点已存在 username 才判定为 password，
+                        // 但账号/密码通常是独立节点，导致密码框被误判为 username。
+                        out += ParsedItemBuilder(
+                            accuracy = Accuracy.LOW,
+                            hint = InternalHint.PASSWORD,
+                        )
                     }
 
                     inputIsVariationType(

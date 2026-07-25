@@ -7,8 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.Parcelable
 import android.service.autofill.Dataset
 import android.service.autofill.FillResponse
@@ -104,7 +102,6 @@ import takagi.ru.monica.repository.CustomFieldRepository
 import takagi.ru.monica.repository.PasswordRepository
 import takagi.ru.monica.repository.SecureItemRepository
 import takagi.ru.monica.security.SecurityManager
-import takagi.ru.monica.service.MonicaAccessibilityService
 import takagi.ru.monica.ui.theme.MonicaTheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import takagi.ru.monica.data.model.TotpData
@@ -157,9 +154,6 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
         const val EXTRA_MANUAL_TARGET_PACKAGE = "extra_manual_target_package"
         const val EXTRA_IME_MODE = "extra_ime_mode"
         private const val DUPLICATE_LAUNCH_WINDOW_MS = 1500L
-        private const val MANUAL_ACCESSIBILITY_FILL_DELAY_MS = 450L
-        private const val MANUAL_ACCESSIBILITY_RETRY_DELAY_MS = 250L
-        private const val MANUAL_ACCESSIBILITY_MAX_ATTEMPTS = 8
         @Volatile
         private var lastLaunchSignature: String? = null
         @Volatile
@@ -648,11 +642,8 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
                         finish()
                     }
                     is PasswordAutofillPreparation.Manual -> {
-                        if (scheduleManualAccessibilityFill(preparation.accountValue, preparation.passwordValue)) {
-                            finish()
-                            return@launch
-                        }
-                        copyManualCredentialFallback(preparation.accountValue, preparation.passwordValue)
+                        scheduleManualClipboardFill(preparation.accountValue, preparation.passwordValue)
+                        return@launch
                     }
                     is PasswordAutofillPreparation.Fill -> {
                         val autofillIds = args.autofillIds.orEmpty()
@@ -888,23 +879,13 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
         if (password.isBlank()) return
 
         if (isManualMode) {
-            if (scheduleManualAccessibilityFill("", password, preferPasswordField = true)) {
-                finish()
-                return
-            }
-            copyToClipboard(getString(R.string.autofill_password), password, true)
-            finish()
+            scheduleManualClipboardFill("", password)
             return
         }
 
         val autofillIds = args.autofillIds
         if (autofillIds.isNullOrEmpty()) {
-            if (scheduleManualAccessibilityFill("", password, preferPasswordField = true)) {
-                finish()
-            } else {
-                copyToClipboard(getString(R.string.autofill_password), password, true)
-                finish()
-            }
+            scheduleManualClipboardFill("", password)
             return
         }
 
@@ -969,109 +950,11 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
         return filledValues
     }
 
-    private fun scheduleManualAccessibilityFill(
-        username: String,
-        password: String,
-        preferPasswordField: Boolean = false,
-        expectedTargetPackage: String? = manualTargetPackage,
-    ): Boolean {
-        if (!MonicaAccessibilityService.isCredentialFillAvailable(applicationContext)) {
-            AutofillLogger.i("PICKER", "Manual accessibility fill unavailable; service is not active")
-            return false
-        }
-
-        val appContext = applicationContext
-        val packageNameToSkip = packageName
-        Handler(Looper.getMainLooper()).postDelayed({
-            requestManualAccessibilityFillWithRetry(
-                appContext = appContext,
-                packageNameToSkip = packageNameToSkip,
-                expectedTargetPackage = expectedTargetPackage,
-                username = username,
-                password = password,
-                preferPasswordField = preferPasswordField,
-                attempt = 1
-            )
-        }, MANUAL_ACCESSIBILITY_FILL_DELAY_MS)
-
-        setResult(Activity.RESULT_CANCELED)
-        moveTaskToBack(true)
-        AutofillLogger.i("PICKER", "Manual accessibility fill scheduled")
+    private fun scheduleManualClipboardFill(username: String, password: String): Boolean {
+        copyManualCredentialFallback(username, password)
         return true
     }
 
-    private fun requestManualAccessibilityFillWithRetry(
-        appContext: Context,
-        packageNameToSkip: String,
-        expectedTargetPackage: String?,
-        username: String,
-        password: String,
-        preferPasswordField: Boolean,
-        attempt: Int,
-    ) {
-        val activePackage = MonicaAccessibilityService.getActiveWindowPackageName().orEmpty()
-        val resolvedTargetPackage = resolveManualFillTargetPackage(
-            activePackage = activePackage,
-            packageNameToSkip = packageNameToSkip,
-            expectedTargetPackage = expectedTargetPackage,
-        )
-        val filled = if (resolvedTargetPackage == null) {
-            false
-        } else {
-            MonicaAccessibilityService.requestCredentialFill(
-                targetPackageName = resolvedTargetPackage,
-                username = username,
-                password = password,
-                preferPasswordField = preferPasswordField
-            )
-        }
-
-        AutofillLogger.i(
-            "PICKER",
-            "Manual accessibility fill attempt: attempt=$attempt, filled=$filled, activePackage=${activePackage.ifBlank { "none" }}, expectedPackage=${expectedTargetPackage.orEmpty().ifBlank { "any" }}"
-        )
-
-        if (filled || attempt >= MANUAL_ACCESSIBILITY_MAX_ATTEMPTS) {
-            if (!filled) {
-                if (!expectedTargetPackage.isNullOrBlank()) {
-                    android.widget.Toast.makeText(
-                        appContext,
-                        R.string.autofill_active_fill_target_unavailable,
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                } else if (preferPasswordField && username.isBlank()) {
-                    ClipboardUtils.copyToClipboard(
-                        context = appContext,
-                        text = password,
-                        label = appContext.getString(R.string.autofill_password),
-                        sensitive = true
-                    )
-                    android.widget.Toast.makeText(appContext, R.string.password_copied, android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    copyManualCredentialFallback(
-                        context = appContext,
-                        username = username,
-                        password = password,
-                        usernameLabel = appContext.getString(R.string.autofill_username),
-                        passwordLabel = appContext.getString(R.string.autofill_password)
-                    )
-                }
-            }
-            return
-        }
-
-        Handler(Looper.getMainLooper()).postDelayed({
-            requestManualAccessibilityFillWithRetry(
-                appContext = appContext,
-                packageNameToSkip = packageNameToSkip,
-                expectedTargetPackage = expectedTargetPackage,
-                username = username,
-                password = password,
-                preferPasswordField = preferPasswordField,
-                attempt = attempt + 1
-            )
-        }, MANUAL_ACCESSIBILITY_RETRY_DELAY_MS)
-    }
 
     private fun copyManualCredentialFallback(username: String, password: String) {
         copyManualCredentialFallback(
