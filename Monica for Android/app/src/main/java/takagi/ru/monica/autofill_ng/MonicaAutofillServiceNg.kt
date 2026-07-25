@@ -67,6 +67,15 @@ class MonicaAutofillServiceNg : AutofillService() {
         private val fillRequestSequence = AtomicLong(0L)
     }
 
+    /**
+     * 跨请求登录字段记忆：缓存各包最近一次识别到的登录字段列表（账号 + 密码）。
+     * 用于应对电影猎手等 App 的密码框在部分 FillRequest 中因布局/动画时序而不可见、
+     * 被解析器丢弃，连带账号也被低精度过滤清掉，导致登录目标「时有时无」。
+     * 仅当缓存的所有登录字段 AutofillId 仍存在于当前 AssistStructure 时才整体回补，
+     * 避免注入失效 id。
+     */
+    private val passwordMemoryByPackage = mutableMapOf<String, List<ParsedItem>>()
+
     private data class RecentFillSuggestions(
         val key: String,
         val createdAtMs: Long,
@@ -249,12 +258,16 @@ class MonicaAutofillServiceNg : AutofillService() {
         var usedWeakReparse = false
         if (!isManualRequest) {
             val firstPassTargets = selectFillableTargets(parsed.items, isManualRequest)
-            Log.d(
-                "MonicaAutofill",
-                "DIAG firstPassTargets=${firstPassTargets.size} " +
-                    "hints=[${firstPassTargets.joinToString { it.hint.name }}] " +
-                    "parsedItems=${parsed.items.size} " +
-                    "parsedHints=[${parsed.items.joinToString { "${it.hint}:${it.accuracy.name}" }}]"
+            AutofillLogger.d(
+                "AF",
+                "DIAG firstPassTargets",
+                metadata = mapOf(
+                    "requestId" to requestId,
+                    "firstPassTargets" to firstPassTargets.size,
+                    "hints" to firstPassTargets.joinToString { it.hint.name },
+                    "parsedItems" to parsed.items.size,
+                    "parsedHints" to parsed.items.joinToString { "${it.hint}:${it.accuracy.name}" },
+                )
             )
             if (firstPassTargets.isEmpty()) {
                 val weakParsed = parser.parse(
@@ -294,6 +307,50 @@ class MonicaAutofillServiceNg : AutofillService() {
         }
         if (focusedSyntheticItems.isNotEmpty()) {
             parsed = parsed.copy(items = parsed.items + focusedSyntheticItems)
+        }
+        // 跨请求登录字段记忆与回补：电影猎手等 App 的密码框在部分 FillRequest 中因
+        // 布局/动画时序而不可见、被解析器连同账号一起丢弃，导致登录目标「时有时无」。
+        // 识别到登录字段时缓存（账号+密码）；后续同包请求若缺失密码、且缓存的所有登录
+        // 字段 id 仍存在于当前结构（可见或不可见均可）时，整体回补，保证面板稳定出现。
+        val pkgKey = parsed.applicationId ?: fallbackPackage
+        val currentPasswordItems = parsed.items.filter {
+            it.hint == FieldHint.PASSWORD || it.hint == FieldHint.NEW_PASSWORD
+        }
+        val currentHasLoginContext = parsed.items.any { isLoginHint(it.hint) }
+        synchronized(passwordMemoryByPackage) {
+            if (currentPasswordItems.isNotEmpty()) {
+                passwordMemoryByPackage[pkgKey] = parsed.items.filter { isLoginHint(it.hint) }
+            } else if (currentHasLoginContext || passwordMemoryByPackage.containsKey(pkgKey)) {
+                val cached = passwordMemoryByPackage[pkgKey]
+                if (cached != null && cached.isNotEmpty() &&
+                    cached.all { structureContainsAutofillId(structure, it.id) }
+                ) {
+                    val baseIndex = parsed.items.maxOfOrNull { it.traversalIndex } ?: 0
+                    val recovered = cached
+                        .filter { c -> parsed.items.none { it.id == c.id } }
+                        .mapIndexed { index, c ->
+                            c.copy(
+                                isVisible = findNodeVisibility(structure, c.id) ?: c.isVisible,
+                                isFocused = false,
+                                accuracy = EnhancedAutofillStructureParserV2.Accuracy.MEDIUM,
+                                traversalIndex = baseIndex + index + 1,
+                            )
+                        }
+                    if (recovered.isNotEmpty()) {
+                        parsed = parsed.copy(items = parsed.items + recovered)
+                        AutofillLogger.d(
+                            "AF",
+                            "Login targets recovered from memory",
+                            metadata = mapOf(
+                                "requestId" to requestId,
+                                "packageName" to pkgKey,
+                                "recoveredCount" to recovered.size,
+                                "recoveredHints" to recovered.joinToString { it.hint.name },
+                            )
+                        )
+                    }
+                }
+            }
         }
         val packageName = resolveEffectivePackageName(
             parsedApplicationId = parsed.applicationId,
@@ -344,12 +401,17 @@ class MonicaAutofillServiceNg : AutofillService() {
             items = parsed.items,
             manualRequest = isManualRequest || usedWeakReparse,
         )
-        Log.d(
-            "MonicaAutofill",
-            "DIAG fillableTargets=${fillableTargets.size} " +
-                "hints=[${fillableTargets.joinToString { it.hint.name }}] " +
-                "usedWeakReparse=$usedWeakReparse " +
-                "hasLoginTargets=${fillableTargets.any { isLoginHint(it.hint) }}"
+        AutofillLogger.d(
+            "AF",
+            "DIAG fillableTargets",
+            metadata = mapOf(
+                "requestId" to requestId,
+                "fillableTargets" to fillableTargets.size,
+                "hints" to fillableTargets.joinToString { it.hint.name },
+                "usedWeakReparse" to usedWeakReparse,
+                "hasLoginTargets" to fillableTargets.any { isLoginHint(it.hint) },
+                "hasPasswordTarget" to (fillableTargets.any { it.hint == FieldHint.PASSWORD || it.hint == FieldHint.NEW_PASSWORD }),
+            )
         )
         if (fillableTargets.isEmpty()) {
             AutofillLogger.i(
@@ -1314,6 +1376,66 @@ class MonicaAutofillServiceNg : AutofillService() {
         return if (hasPasswordTarget) FieldHint.USERNAME else null
     }
 
+    /**
+     * 判断指定 [AutofillId] 是否存在于当前 [AssistStructure]（可见或不可见均可）。
+     * 用于密码框跨请求携带时校验缓存 id 是否仍有效，避免注入失效 id。
+     */
+    private fun structureContainsAutofillId(
+        structure: AssistStructure,
+        id: AutofillId,
+    ): Boolean {
+        for (i in 0 until structure.windowNodeCount) {
+            if (containsAutofillId(structure.getWindowNodeAt(i).rootViewNode, id)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun containsAutofillId(
+        node: AssistStructure.ViewNode,
+        id: AutofillId,
+    ): Boolean {
+        if (node.autofillId == id) return true
+        for (i in 0 until node.childCount) {
+            node.getChildAt(i)?.let {
+                if (containsAutofillId(it, id)) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * 查找指定 [AutofillId] 在当前 [AssistStructure] 中的可见性；不存在则返回 null。
+     */
+    private fun findNodeVisibility(
+        structure: AssistStructure,
+        id: AutofillId,
+    ): Boolean? {
+        for (i in 0 until structure.windowNodeCount) {
+            val visibility = findNodeVisibilityInWindow(
+                structure.getWindowNodeAt(i).rootViewNode,
+                id,
+            )
+            if (visibility != null) return visibility
+        }
+        return null
+    }
+
+    private fun findNodeVisibilityInWindow(
+        node: AssistStructure.ViewNode,
+        id: AutofillId,
+    ): Boolean? {
+        if (node.autofillId == id) return node.visibility == View.VISIBLE
+        for (i in 0 until node.childCount) {
+            node.getChildAt(i)?.let {
+                val visibility = findNodeVisibilityInWindow(it, id)
+                if (visibility != null) return visibility
+            }
+        }
+        return null
+    }
+
     override fun onConnected() {
         super.onConnected()
         AutofillLogger.i("AF", "Service connected")
@@ -1321,6 +1443,7 @@ class MonicaAutofillServiceNg : AutofillService() {
 
     override fun onDisconnected() {
         AutofillSessionGrants.clear()
+        passwordMemoryByPackage.clear()
         super.onDisconnected()
         AutofillLogger.i("AF", "Service disconnected")
     }

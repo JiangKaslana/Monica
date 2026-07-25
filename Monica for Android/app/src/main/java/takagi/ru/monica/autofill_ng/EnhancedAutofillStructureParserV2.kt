@@ -581,11 +581,16 @@ class EnhancedAutofillStructureParserV2 {
         }
 
         val items = mutableListOf<ParsedItem>()
-        Log.d(
-            "MonicaAutofill",
-            "DIAG confidenceFiltered.size=${confidenceFilteredItems.size} " +
-                "loginFiltered.size=${loginFilteredItems.size} " +
-                "candidates=[${candidateItems.joinToString { "${it.hint}:${it.accuracy.name}" }}]"
+        AutofillLogger.d(
+            "PARSING",
+            "Parser field selection",
+            metadata = mapOf(
+                "candidateCount" to candidateItems.size,
+                "confidenceFilteredCount" to confidenceFilteredItems.size,
+                "loginFilteredCount" to loginFilteredItems.size,
+                "candidates" to candidateItems.joinToString { "${it.hint}:${it.accuracy.name}" },
+                "allowWeakTargets" to allowWeakTargets,
+            )
         )
         loginFilteredItems
             .groupBy { it.id }
