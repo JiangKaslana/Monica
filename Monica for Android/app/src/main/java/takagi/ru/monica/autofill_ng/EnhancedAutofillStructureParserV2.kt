@@ -567,8 +567,26 @@ class EnhancedAutofillStructureParserV2 {
             }
         }
 
+        // 登录上下文约束：屏幕上不存在密码框时，低置信度的账号类字段
+        // （由普通文本框/数字框弱推断而来）不应被视为登录目标，
+        // 否则会把搜索框、备注等误判为账号（如 QQ 搜索框弹出密码条目）。
+        // 高置信度的账号字段（如显式 autofill hint）即使无密码也保留。
+        val hasPasswordInItems = confidenceFilteredItems.any {
+            it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
+        }
+        val loginFilteredItems = if (hasPasswordInItems) {
+            confidenceFilteredItems
+        } else {
+            confidenceFilteredItems.filterNot {
+                (it.hint == InternalHint.USERNAME ||
+                    it.hint == InternalHint.EMAIL_ADDRESS ||
+                    it.hint == InternalHint.PHONE_NUMBER) &&
+                    it.accuracy.score < Accuracy.MEDIUM.score
+            }
+        }
+
         val items = mutableListOf<ParsedItem>()
-        confidenceFilteredItems
+        loginFilteredItems
             .groupBy { it.id }
             .forEach { groupedById ->
                 val forceAutofillOff = groupedById.value.any {

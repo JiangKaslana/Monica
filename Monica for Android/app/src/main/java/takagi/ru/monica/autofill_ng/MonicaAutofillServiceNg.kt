@@ -267,10 +267,10 @@ class MonicaAutofillServiceNg : AutofillService() {
                 usedWeakReparse = true
             }
         }
-        // 兼容回退（Bitwarden 式）：仅当首轮已识别到账号类字段、但未识别到密码字段时，
-        // 才把当前聚焦的字段纳入可填充目标。用于补全被漏识别的密码框（如影视类 App 使用
-        // VISIBLE_PASSWORD 变体的密码框），让聚焦密码框时也能弹面板并正确回填账号与密码。
-        // 普通输入框（搜索框/备注/昵称等）的聚焦不会触发此逻辑，避免误弹密码建议。
+        // 兼容回退（Bitwarden 式）：仅当屏幕已进入登录上下文（已识别到账号类字段
+        // 或密码字段）时，才把当前聚焦的字段纳入可填充目标，用于补全被漏识别的
+        // 登录字段（如影视类 App 的账号框/使用 VISIBLE_PASSWORD 变体的密码框）。
+        // 非登录屏幕（搜索框/备注/昵称等，且无密码框）不会触发此逻辑，避免误弹密码建议。
         val hasAccountTarget = parsed.items.any {
             it.hint == FieldHint.USERNAME ||
                 it.hint == FieldHint.EMAIL_ADDRESS ||
@@ -279,8 +279,8 @@ class MonicaAutofillServiceNg : AutofillService() {
         val hasPasswordTarget = parsed.items.any {
             it.hint == FieldHint.PASSWORD || it.hint == FieldHint.NEW_PASSWORD
         }
-        val focusedSyntheticItems = if (hasAccountTarget && !hasPasswordTarget) {
-            buildFocusedSyntheticItems(structure, parsed.items)
+        val focusedSyntheticItems = if (hasAccountTarget || hasPasswordTarget) {
+            buildFocusedSyntheticItems(structure, parsed.items, hasPasswordTarget)
         } else {
             emptyList()
         }
@@ -1218,6 +1218,7 @@ class MonicaAutofillServiceNg : AutofillService() {
     private fun buildFocusedSyntheticItems(
         structure: AssistStructure,
         existingItems: List<EnhancedAutofillStructureParserV2.ParsedItem>,
+        hasPasswordTarget: Boolean,
     ): List<EnhancedAutofillStructureParserV2.ParsedItem> {
         val existingIds = existingItems.map { it.id }.toSet()
         val out = mutableListOf<EnhancedAutofillStructureParserV2.ParsedItem>()
@@ -1225,6 +1226,7 @@ class MonicaAutofillServiceNg : AutofillService() {
             collectFocusedSyntheticItems(
                 node = structure.getWindowNodeAt(index).rootViewNode,
                 existingIds = existingIds,
+                hasPasswordTarget = hasPasswordTarget,
                 out = out,
             )
         }
@@ -1234,13 +1236,14 @@ class MonicaAutofillServiceNg : AutofillService() {
     private fun collectFocusedSyntheticItems(
         node: AssistStructure.ViewNode,
         existingIds: Set<AutofillId>,
+        hasPasswordTarget: Boolean,
         out: MutableList<EnhancedAutofillStructureParserV2.ParsedItem>,
     ) {
         if (node.isFocused &&
             node.autofillId != null &&
             !existingIds.contains(node.autofillId)
         ) {
-            val inferredHint = inferFocusedFieldHint(node)
+            val inferredHint = inferFocusedFieldHint(node, hasPasswordTarget)
             if (inferredHint != null) {
                 out += EnhancedAutofillStructureParserV2.ParsedItem(
                     id = node.autofillId!!,
@@ -1254,12 +1257,20 @@ class MonicaAutofillServiceNg : AutofillService() {
         }
         for (childIndex in 0 until node.childCount) {
             node.getChildAt(childIndex)?.let {
-                collectFocusedSyntheticItems(node = it, existingIds = existingIds, out = out)
+                collectFocusedSyntheticItems(
+                    node = it,
+                    existingIds = existingIds,
+                    hasPasswordTarget = hasPasswordTarget,
+                    out = out,
+                )
             }
         }
     }
 
-    private fun inferFocusedFieldHint(node: AssistStructure.ViewNode): FieldHint? {
+    private fun inferFocusedFieldHint(
+        node: AssistStructure.ViewNode,
+        hasPasswordTarget: Boolean,
+    ): FieldHint? {
         val inputType = node.inputType
         val classBits = inputType and InputType.TYPE_MASK_CLASS
         if (classBits == InputType.TYPE_CLASS_TEXT) {
@@ -1282,9 +1293,10 @@ class MonicaAutofillServiceNg : AutofillService() {
                 return FieldHint.PASSWORD
             }
         }
-        // 非密码/邮箱/电话类的聚焦文本框（搜索框、备注、昵称等）不合成账号条目，
-        // 避免普通输入框误弹密码建议。
-        return null
+        // 非密码/邮箱/电话类的聚焦文本框：仅当屏幕上已存在密码框（登录上下文）时，
+        // 才当作账号字段合成，用于补全漏识别的账号框（如影视类 App）。
+        // 无密码上下文的普通文本框（搜索框/备注/昵称等）不合成，避免误弹密码建议。
+        return if (hasPasswordTarget) FieldHint.USERNAME else null
     }
 
     override fun onConnected() {
