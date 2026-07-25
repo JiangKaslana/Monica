@@ -267,12 +267,23 @@ class MonicaAutofillServiceNg : AutofillService() {
                 usedWeakReparse = true
             }
         }
-        // 兼容回退（Bitwarden 式）：把当前聚焦的字段也纳入可填充目标。
-        // 部分小众/自定义登录框（如影视类 App）的密码框未被解析识别，
-        // 仅识别到账号字段，导致聚焦密码框时框架找不到可填充目标而不弹面板。
-        // 这里直接依据聚焦节点的 inputType 推断 hint（密码框→PASSWORD），
-        // 保证聚焦字段上也能显示填充提示，并让选择器正确回填账号与密码。
-        val focusedSyntheticItems = buildFocusedSyntheticItems(structure, parsed.items)
+        // 兼容回退（Bitwarden 式）：仅当首轮已识别到账号类字段、但未识别到密码字段时，
+        // 才把当前聚焦的字段纳入可填充目标。用于补全被漏识别的密码框（如影视类 App 使用
+        // VISIBLE_PASSWORD 变体的密码框），让聚焦密码框时也能弹面板并正确回填账号与密码。
+        // 普通输入框（搜索框/备注/昵称等）的聚焦不会触发此逻辑，避免误弹密码建议。
+        val hasAccountTarget = parsed.items.any {
+            it.hint == FieldHint.USERNAME ||
+                it.hint == FieldHint.EMAIL_ADDRESS ||
+                it.hint == FieldHint.PHONE_NUMBER
+        }
+        val hasPasswordTarget = parsed.items.any {
+            it.hint == FieldHint.PASSWORD || it.hint == FieldHint.NEW_PASSWORD
+        }
+        val focusedSyntheticItems = if (hasAccountTarget && !hasPasswordTarget) {
+            buildFocusedSyntheticItems(structure, parsed.items)
+        } else {
+            emptyList()
+        }
         if (focusedSyntheticItems.isNotEmpty()) {
             parsed = parsed.copy(items = parsed.items + focusedSyntheticItems)
         }
@@ -1271,8 +1282,9 @@ class MonicaAutofillServiceNg : AutofillService() {
                 return FieldHint.PASSWORD
             }
         }
-        // 默认当作账号字段，确保至少能把填充提示锚定到聚焦框
-        return FieldHint.USERNAME
+        // 非密码/邮箱/电话类的聚焦文本框（搜索框、备注、昵称等）不合成账号条目，
+        // 避免普通输入框误弹密码建议。
+        return null
     }
 
     override fun onConnected() {
