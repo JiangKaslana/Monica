@@ -88,6 +88,13 @@ def amount(value: object) -> Decimal:
         return Decimal("0")
 
 
+def display_name(value: object) -> str:
+    name = str(value or "爱发电支持者")
+    if len(name) == 11 and name.isdigit():
+        return f"{name[:3]}****{name[7:]}"
+    return name
+
+
 def current_month_total(orders: list[dict]) -> Decimal:
     now = shanghai_now()
     total = Decimal("0")
@@ -105,7 +112,7 @@ def render(sponsors: list[dict], month_total: Decimal) -> str:
     cards = []
     for sponsor in visible:
         user = sponsor.get("user") or {}
-        name = html.escape(str(user.get("name") or "爱发电支持者"), quote=True)
+        name = html.escape(display_name(user.get("name")), quote=True)
         avatar = html.escape(str(user.get("avatar") or "https://pic1.afdiancdn.com/default/avatar/avatar-purple.png?imageView2/1/"), quote=True)
         total = amount(sponsor.get("all_sum_amount"))
         cards.append(f'<td align="center" width="120"><a href="https://afdian.com/a/JoyinJoester" title="{name}"><img src="{avatar}" alt="{name}" width="56" height="56" /></a><br /><sub>{name}<br />¥{total:.2f}</sub></td>')

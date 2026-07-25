@@ -16,15 +16,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Update README
+      - name: Update sponsor acknowledgements
         env:
           AFDIAN_TOKEN: ${{ secrets.AFDIAN_TOKEN }}
           AFDIAN_USER_ID: 8b131882c4ec11f0b26e52540025c377
-        run: python .github/scripts/update_afdian_sponsors.py
-      - name: Commit README update
+        run: |
+          python .github/scripts/update_afdian_sponsors.py
+          python .github/scripts/update_afdian_sponsors.py --readme MonicaDocs/docs/personal.md
+      - name: Commit sponsor acknowledgements
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
+          git add README.md MonicaDocs/docs/personal.md
           git diff --cached --quiet || git commit -m "docs: update Afdian sponsor list"
           git push
