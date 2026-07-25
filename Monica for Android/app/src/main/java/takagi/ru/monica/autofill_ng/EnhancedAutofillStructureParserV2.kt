@@ -546,21 +546,16 @@ class EnhancedAutofillStructureParserV2 {
                 return@let list
             }
 
-            val hasUsernameAndPassword =
-                list.any {
-                    val usernameLike =
-                        it.hint == InternalHint.USERNAME ||
-                            it.hint == InternalHint.EMAIL_ADDRESS ||
-                            it.hint == InternalHint.PHONE_NUMBER
-                    usernameLike && it.accuracy.score > Accuracy.LOWEST.score
-                } &&
-                    list.any {
-                        val passwordLike =
-                            it.hint == InternalHint.PASSWORD ||
-                                it.hint == InternalHint.NEW_PASSWORD
-                        passwordLike && it.accuracy.score > Accuracy.LOWEST.score
-                    }
-            if (hasUsernameAndPassword) {
+            // 全 LOW 精度时，只要有密码框（即使账号框精度低/缺失）就保留所有字段，
+            // 登录场景的关键判定信号是密码框而非账号框。纯搜索框/备注等（无密码框）
+            // 仍返回空，不会误弹密码建议（如 QQ 搜索框）。
+            val hasPasswordLike = list.any {
+                val passwordLike =
+                    it.hint == InternalHint.PASSWORD ||
+                        it.hint == InternalHint.NEW_PASSWORD
+                passwordLike && it.accuracy.score > Accuracy.LOWEST.score
+            }
+            if (hasPasswordLike) {
                 list
             } else {
                 emptyList()
