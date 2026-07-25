@@ -17,6 +17,7 @@ import android.service.autofill.SaveRequest
 import android.view.View
 import android.view.autofill.AutofillId
 import android.text.InputType
+import android.util.Log
 import android.view.inputmethod.InlineSuggestionsRequest
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
