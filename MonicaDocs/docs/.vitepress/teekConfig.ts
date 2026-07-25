@@ -18,11 +18,15 @@ export const teekConfig = defineTeekConfig({
   codeBlock: {
     copiedDone: (TkMessage) => TkMessage.success("复制成功！"),
   },
+  toComment: { enabled: false },
   articleShare: { enabled: true },
   vitePlugins: {
     sidebarOption: {
       resolveRule: "rewrites",
       initItems: false,
+      ignoreList: ["@papes"],
+      // `rewrites` mode still inspects ignored top-level directories in sidebar-resolve.
+      ignoreWarn: true,
     },
   },
 });

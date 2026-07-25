@@ -4,7 +4,7 @@ date: 2025-05-01 23:00:00
 permalink: /vi/reference
 layout: page
 catalogue: true
-path: vi\02.Configuration
+path: vi/02.Configuration
 sidebar: false
 article: false
 ---

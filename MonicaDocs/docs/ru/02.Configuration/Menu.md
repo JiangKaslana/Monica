@@ -4,7 +4,7 @@ date: 2025-05-01 23:00:00
 permalink: /ru/reference
 layout: page
 catalogue: true
-path: ru\02.Configuration
+path: ru/02.Configuration
 sidebar: false
 article: false
 ---
