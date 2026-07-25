@@ -118,7 +118,7 @@ def render(sponsors: list[dict], month_total: Decimal) -> str:
         cards.append(f'<td align="center" width="120"><a href="https://afdian.com/a/JoyinJoester" title="{name}"><img src="{avatar}" alt="{name}" width="56" height="56" /></a><br /><sub>{name}<br />¥{total:.2f}</sub></td>')
     if cards:
         rows = ["<tr>" + "".join(cards[index:index + 6]) + "</tr>" for index in range(0, len(cards), 6)]
-        body = "<table>\n" + "\n".join(rows) + "\n</table>"
+        body = "<table>\n<tbody>\n" + "\n".join(rows) + "\n</tbody>\n</table>"
     else:
         body = "<div align=\"center\"><sub>名单将在收到首笔公开打赏后自动更新。</sub></div>"
     return f"{START}\n### 爱发电鸣谢\n\n感谢每一位支持 Monica 的朋友！\n\n**本月打赏金额：¥{month_total:.2f}**\n\n{body}\n{END}"
