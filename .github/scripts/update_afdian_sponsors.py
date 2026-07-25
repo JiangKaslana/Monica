@@ -88,6 +88,13 @@ def amount(value: object) -> Decimal:
         return Decimal("0")
 
 
+def display_name(value: object) -> str:
+    name = str(value or "爱发电支持者")
+    if len(name) == 11 and name.isdigit():
+        return f"{name[:3]}****{name[7:]}"
+    return name
+
+
 def current_month_total(orders: list[dict]) -> Decimal:
     now = shanghai_now()
     total = Decimal("0")
@@ -105,13 +112,13 @@ def render(sponsors: list[dict], month_total: Decimal) -> str:
     cards = []
     for sponsor in visible:
         user = sponsor.get("user") or {}
-        name = html.escape(str(user.get("name") or "爱发电支持者"), quote=True)
+        name = html.escape(display_name(user.get("name")), quote=True)
         avatar = html.escape(str(user.get("avatar") or "https://pic1.afdiancdn.com/default/avatar/avatar-purple.png?imageView2/1/"), quote=True)
         total = amount(sponsor.get("all_sum_amount"))
         cards.append(f'<td align="center" width="120"><a href="https://afdian.com/a/JoyinJoester" title="{name}"><img src="{avatar}" alt="{name}" width="56" height="56" /></a><br /><sub>{name}<br />¥{total:.2f}</sub></td>')
     if cards:
         rows = ["<tr>" + "".join(cards[index:index + 6]) + "</tr>" for index in range(0, len(cards), 6)]
-        body = "<table>\n" + "\n".join(rows) + "\n</table>"
+        body = "<table>\n<tbody>\n" + "\n".join(rows) + "\n</tbody>\n</table>"
     else:
         body = "<div align=\"center\"><sub>名单将在收到首笔公开打赏后自动更新。</sub></div>"
     return f"{START}\n### 爱发电鸣谢\n\n感谢每一位支持 Monica 的朋友！\n\n**本月打赏金额：¥{month_total:.2f}**\n\n{body}\n{END}"
