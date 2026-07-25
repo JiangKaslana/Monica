@@ -429,8 +429,9 @@ class NoteViewModel(
             // 记录更新操作 - 始终记录，即使没有检测到字段变更
             val changes = mutableListOf<FieldChange>()
             existingItem?.let { oldItem ->
-                if (oldItem.notes != content) {
-                    changes.add(FieldChange("内容", "<redacted>", "<redacted>"))
+                val oldContent = NoteContentCodec.decodeFromItem(oldItem).content
+                if (oldContent != content) {
+                    changes.add(FieldChange("内容", oldContent, content))
                 }
                 // 检测标题变化
                 if (oldItem.title != resolvedTitle) {
@@ -442,7 +443,33 @@ class NoteViewModel(
                 itemType = OperationLogItemType.NOTE,
                 itemId = id,
                 itemTitle = resolvedTitle,
-                changes = if (changes.isEmpty()) listOf(FieldChange("更新", "编辑于", java.text.SimpleDateFormat("HH:mm").format(Date()))) else changes
+                changes = if (changes.isEmpty()) {
+                    listOf(
+                        FieldChange(
+                            "更新",
+                            "编辑于",
+                            java.text.SimpleDateFormat("HH:mm").format(Date())
+                        )
+                    )
+                } else {
+                    changes
+                },
+                snapshotChanges = if (changes.isEmpty() || existingItem == null) {
+                    emptyList()
+                } else {
+                    changes + listOf(
+                        FieldChange(
+                            takagi.ru.monica.data.TIMELINE_SNAPSHOT_FIELD_ITEM_DATA,
+                            existingItem.itemData,
+                            item.itemData
+                        ),
+                        FieldChange(
+                            takagi.ru.monica.data.TIMELINE_SNAPSHOT_FIELD_NOTES,
+                            existingItem.notes,
+                            item.notes
+                        )
+                    )
+                }
             )
         }
     }

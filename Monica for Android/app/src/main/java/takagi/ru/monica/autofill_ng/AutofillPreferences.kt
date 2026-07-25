@@ -425,7 +425,7 @@ class AutofillPreferences(private val context: Context) {
             preferences[KEY_PASSWORD_SUGGESTION_ENABLED] = enabled
         }
     }
-    
+
     /**
      * 是否自动更新重复密码
      * 启用后，保存已存在的用户名时自动更新密码而不提示用户

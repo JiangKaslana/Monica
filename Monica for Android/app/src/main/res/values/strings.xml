@@ -71,6 +71,12 @@
     <string name="ime_unlock_open_app">Unlock</string>
     <string name="ime_unlock_open_app_error">Could not open the unlock screen.</string>
     <string name="ime_search_accounts">Search accounts</string>
+    <string name="ime_search_results_count">%1$d results</string>
+    <string name="ime_sort_alphabetical">Sort A to Z</string>
+    <string name="ime_sort_relevance">Use smart order</string>
+    <string name="ime_settings_title">Monica keyboard</string>
+    <string name="ime_manage_input_methods">Manage input methods</string>
+    <string name="ime_manage_input_methods_desc">Enable Monica Keyboard or change the current keyboard in system settings</string>
     <string name="ime_picker_title">Password picker</string>
     <string name="ime_picker_subtitle">Pick a database, then tap an item to fill the current field.</string>
     <string name="ime_quick_fill">Quick fill</string>
@@ -1345,7 +1351,7 @@
     <string name="all_navigation_items">All Navigation Items</string>
     <string name="category_all">All</string>
     <string name="hidden">Hidden</string>
-    <string name="settings_version_number">V1.0.296</string>
+    <string name="settings_version_number">V1.0.297</string>
     <string name="settings_support_author">Support Author</string>
     <string name="settings_support_author_description">Thank you for your support</string>
     <string name="settings_privacy_policy">Privacy Policy</string>
@@ -3036,6 +3042,7 @@
     <string name="timeline_date_this_week">This week</string>
     <string name="timeline_date_month_day">MM-dd</string>
     <string name="timeline_empty_hint">Your operation history will appear here</string>
+    <string name="timeline_search_hint">Search activity history</string>
     <string name="timeline_op_create">Create</string>
     <string name="timeline_op_update">Edit</string>
     <string name="timeline_op_delete">Delete</string>
@@ -3055,6 +3062,9 @@
     <string name="timeline_tap_expand_for_details">Tap to expand for details</string>
     <string name="timeline_log_meta_with_time">%1$s · %2$s · %3$s</string>
     <string name="timeline_change_details">Change details</string>
+    <string name="timeline_sensitive_change_not_stored">Sensitive content was not stored</string>
+    <string name="timeline_snapshot_loading">Loading encrypted version history…</string>
+    <string name="timeline_snapshot_unlock_required">Unlock Monica again to view this version</string>
     <string name="timeline_field_password">Password</string>
     <string name="timeline_field_batch_move">Batch move</string>
     <string name="timeline_field_batch_copy">Batch copy</string>
@@ -3082,7 +3092,7 @@
     <string name="timeline_restore_to_before_edit">Restore to pre-edit state</string>
     <string name="timeline_undo_operation">Undo action</string>
     <string name="timeline_restore_snapshot">Restore snapshot</string>
-    <string name="timeline_restore_failed">Restore failed</string>
+    <string name="timeline_restore_failed">Unable to restore. The item may have changed since this version was recorded.</string>
     <string name="timeline_restore_snapshot_result">Snapshot restored: %1$d passwords and %2$d items deleted; %3$d passwords and %4$d items restored</string>
     <string name="timeline_restore_snapshot_result_legacy">Snapshot restored (legacy mode): deleted %1$d passwords, %2$d secure items</string>
     <string name="timeline_redo_operation">Redo action</string>
@@ -4163,4 +4173,6 @@
     <string name="passkey_detail_transports">Transports</string>
     <string name="passkey_detail_user_verification">User verification</string>
     <string name="passkey_binding_description">Linking keeps the passkey and its related account together.</string>
+    <string name="timeline_show_sensitive_values">Show sensitive values</string>
+    <string name="timeline_hide_sensitive_values">Hide sensitive values</string>
 </resources>

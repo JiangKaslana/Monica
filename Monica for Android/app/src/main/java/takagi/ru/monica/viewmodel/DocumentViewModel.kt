@@ -376,25 +376,45 @@ class DocumentViewModel(
                     targetDatabaseId = keepassDatabaseId,
                     requestedGroupPath = keepassGroupPath
                 )
-                val oldDocData = parseDocumentData(existingItem.itemData)
+                val oldDocData = parseDocumentData(existingItem.itemData) ?: emptyDocumentData()
                 val changes = mutableListOf<FieldChange>()
-                
-                // 检测标题变化
-                if (existingItem.title != title) {
-                    changes.add(FieldChange("标题", existingItem.title, title))
+                fun addChange(fieldName: String, oldValue: Any?, newValue: Any?) {
+                    val oldText = oldValue?.toString().orEmpty()
+                    val newText = newValue?.toString().orEmpty()
+                    if (oldText != newText) {
+                        changes.add(FieldChange(fieldName, oldText, newText))
+                    }
                 }
-                // 检测备注变化
-                if (existingItem.notes != notes) {
-                    changes.add(FieldChange("备注", "<redacted>", "<redacted>"))
-                }
-                // 检测证件号变化
-                if (oldDocData?.documentNumber != documentData.documentNumber) {
-                    changes.add(FieldChange("证件号", "<redacted>", "<redacted>"))
-                }
-                // 检测姓名变化
-                if (oldDocData?.fullName != documentData.fullName) {
-                    changes.add(FieldChange("姓名", oldDocData?.fullName ?: "", documentData.fullName))
-                }
+
+                addChange("标题", existingItem.title, title)
+                addChange("备注", existingItem.notes, notes)
+                addChange("证件类型", oldDocData.documentType, documentData.documentType)
+                addChange("证件号", oldDocData.documentNumber, documentData.documentNumber)
+                addChange("姓名", oldDocData.fullName, documentData.fullName)
+                addChange("签发日期", oldDocData.issuedDate, documentData.issuedDate)
+                addChange("有效期", oldDocData.expiryDate, documentData.expiryDate)
+                addChange("签发机关", oldDocData.issuedBy, documentData.issuedBy)
+                addChange("国籍", oldDocData.nationality, documentData.nationality)
+                addChange("附加信息", oldDocData.additionalInfo, documentData.additionalInfo)
+                addChange("称谓", oldDocData.title, documentData.title)
+                addChange("名", oldDocData.firstName, documentData.firstName)
+                addChange("中间名", oldDocData.middleName, documentData.middleName)
+                addChange("姓", oldDocData.lastName, documentData.lastName)
+                addChange("地址 1", oldDocData.address1, documentData.address1)
+                addChange("地址 2", oldDocData.address2, documentData.address2)
+                addChange("地址 3", oldDocData.address3, documentData.address3)
+                addChange("城市", oldDocData.city, documentData.city)
+                addChange("省/州", oldDocData.stateProvince, documentData.stateProvince)
+                addChange("邮编", oldDocData.postalCode, documentData.postalCode)
+                addChange("国家", oldDocData.country, documentData.country)
+                addChange("公司", oldDocData.company, documentData.company)
+                addChange("邮箱", oldDocData.email, documentData.email)
+                addChange("电话", oldDocData.phone, documentData.phone)
+                addChange("社保号", oldDocData.ssn, documentData.ssn)
+                addChange("用户名", oldDocData.username, documentData.username)
+                addChange("护照号", oldDocData.passportNumber, documentData.passportNumber)
+                addChange("驾照号", oldDocData.licenseNumber, documentData.licenseNumber)
+                addChange("自定义字段", oldDocData.customFields, documentData.customFields)
                 
                 val updatedItem = existingItem.copy(
                     title = title,
@@ -458,7 +478,26 @@ class DocumentViewModel(
                     itemType = OperationLogItemType.DOCUMENT,
                     itemId = id,
                     itemTitle = title,
-                    changes = if (changes.isEmpty()) listOf(FieldChange("更新", "编辑于", java.text.SimpleDateFormat("HH:mm").format(java.util.Date()))) else changes
+                    changes = if (changes.isEmpty()) {
+                        listOf(
+                            FieldChange(
+                                "更新",
+                                "编辑于",
+                                java.text.SimpleDateFormat("HH:mm").format(java.util.Date())
+                            )
+                        )
+                    } else {
+                        changes
+                    },
+                    snapshotChanges = if (changes.isEmpty()) {
+                        emptyList()
+                    } else {
+                        changes + FieldChange(
+                            takagi.ru.monica.data.TIMELINE_SNAPSHOT_FIELD_ITEM_DATA,
+                            existingItem.itemData,
+                            finalUpdatedItem.itemData
+                        )
+                    }
                 )
             }
         }

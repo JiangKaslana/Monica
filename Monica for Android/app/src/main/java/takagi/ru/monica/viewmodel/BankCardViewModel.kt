@@ -394,29 +394,39 @@ class BankCardViewModel(
                     targetDatabaseId = keepassDatabaseId,
                     requestedGroupPath = keepassGroupPath
                 )
-                val oldCardData = parseCardData(existingItem.itemData)
+                val oldCardData = parseCardData(existingItem.itemData) ?: emptyBankCardData()
                 val changes = mutableListOf<FieldChange>()
-                
-                // 检测标题变化
-                if (existingItem.title != title) {
-                    changes.add(FieldChange("标题", existingItem.title, title))
+                fun addChange(fieldName: String, oldValue: Any?, newValue: Any?) {
+                    val oldText = oldValue?.toString().orEmpty()
+                    val newText = newValue?.toString().orEmpty()
+                    if (oldText != newText) {
+                        changes.add(FieldChange(fieldName, oldText, newText))
+                    }
                 }
-                // 检测备注变化
-                if (existingItem.notes != notes) {
-                    changes.add(FieldChange("备注", "<redacted>", "<redacted>"))
-                }
-                // 检测卡号变化
-                if (oldCardData?.cardNumber != cardData.cardNumber) {
-                    changes.add(FieldChange("卡号", "<redacted>", "<redacted>"))
-                }
-                // 检测持卡人变化
-                if (oldCardData?.cardholderName != cardData.cardholderName) {
-                    changes.add(FieldChange("持卡人", oldCardData?.cardholderName ?: "", cardData.cardholderName))
-                }
-                // 检测银行名称变化
-                if (oldCardData?.bankName != cardData.bankName) {
-                    changes.add(FieldChange("银行", oldCardData?.bankName ?: "", cardData.bankName))
-                }
+
+                addChange("标题", existingItem.title, title)
+                addChange("备注", existingItem.notes, notes)
+                addChange("卡号", oldCardData.cardNumber, cardData.cardNumber)
+                addChange("持卡人", oldCardData.cardholderName, cardData.cardholderName)
+                addChange("有效期月份", oldCardData.expiryMonth, cardData.expiryMonth)
+                addChange("有效期年份", oldCardData.expiryYear, cardData.expiryYear)
+                addChange("CVV", oldCardData.cvv, cardData.cvv)
+                addChange("银行", oldCardData.bankName, cardData.bankName)
+                addChange("卡类型", oldCardData.cardType, cardData.cardType)
+                addChange("账单地址", oldCardData.billingAddress, cardData.billingAddress)
+                addChange("卡组织", oldCardData.brand, cardData.brand)
+                addChange("卡片昵称", oldCardData.nickname, cardData.nickname)
+                addChange("起始月份", oldCardData.validFromMonth, cardData.validFromMonth)
+                addChange("起始年份", oldCardData.validFromYear, cardData.validFromYear)
+                addChange("PIN", oldCardData.pin, cardData.pin)
+                addChange("IBAN", oldCardData.iban, cardData.iban)
+                addChange("SWIFT/BIC", oldCardData.swiftBic, cardData.swiftBic)
+                addChange("路由号码", oldCardData.routingNumber, cardData.routingNumber)
+                addChange("账户号码", oldCardData.accountNumber, cardData.accountNumber)
+                addChange("分行代码", oldCardData.branchCode, cardData.branchCode)
+                addChange("币种", oldCardData.currency, cardData.currency)
+                addChange("客服电话", oldCardData.customerServicePhone, cardData.customerServicePhone)
+                addChange("自定义字段", oldCardData.customFields, cardData.customFields)
                 
                 val updatedItem = existingItem.copy(
                     title = title,
@@ -480,7 +490,26 @@ class BankCardViewModel(
                     itemType = OperationLogItemType.BANK_CARD,
                     itemId = id,
                     itemTitle = title,
-                    changes = if (changes.isEmpty()) listOf(FieldChange("更新", "编辑于", java.text.SimpleDateFormat("HH:mm").format(java.util.Date()))) else changes
+                    changes = if (changes.isEmpty()) {
+                        listOf(
+                            FieldChange(
+                                "更新",
+                                "编辑于",
+                                java.text.SimpleDateFormat("HH:mm").format(java.util.Date())
+                            )
+                        )
+                    } else {
+                        changes
+                    },
+                    snapshotChanges = if (changes.isEmpty()) {
+                        emptyList()
+                    } else {
+                        changes + FieldChange(
+                            takagi.ru.monica.data.TIMELINE_SNAPSHOT_FIELD_ITEM_DATA,
+                            existingItem.itemData,
+                            finalUpdatedItem.itemData
+                        )
+                    }
                 )
             }
         }

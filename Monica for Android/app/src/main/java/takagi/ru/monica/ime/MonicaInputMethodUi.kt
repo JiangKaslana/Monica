@@ -64,8 +64,12 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.SpaceBar
@@ -73,6 +77,7 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
@@ -185,6 +190,8 @@ internal data class MonicaImeUiState(
     val autoLockMinutes: Int = 5,
     val isAutofillPanelVisible: Boolean = false,
     val isAutofillLoading: Boolean = false,
+    val isSearchEditing: Boolean = false,
+    val passwordSortMode: MonicaImePasswordSortMode = MonicaImePasswordSortMode.ALPHABETICAL,
     val pendingClearedInput: String? = null
 )
 
@@ -192,6 +199,11 @@ internal enum class MonicaKeyboardMode {
     LETTERS,
     NUMBERS,
     SYMBOLS
+}
+
+internal enum class MonicaImePasswordSortMode {
+    RELEVANCE,
+    ALPHABETICAL
 }
 
 internal enum class MonicaImePanel {
@@ -246,7 +258,6 @@ private val MonicaImeContentAreaHeight = 240.dp
 internal fun MonicaImeContent(
     settings: AppSettings,
     uiState: MonicaImeUiState,
-    onQueryChanged: (String) -> Unit,
     onDatabaseScopeSelected: (MonicaImeDatabaseScope) -> Unit,
     onInsertPassword: (MonicaImePasswordEntry) -> Unit,
     onInsertUsername: (MonicaImePasswordEntry) -> Unit,
@@ -264,6 +275,10 @@ internal fun MonicaImeContent(
     onKeyboardModeChange: (MonicaKeyboardMode) -> Unit,
     onOpenUnlockApp: () -> Unit,
     onOpenAutofillSettings: () -> Unit,
+    onSearchEditRequested: () -> Unit,
+    onSearchEditFinished: () -> Unit,
+    onSearchCleared: () -> Unit,
+    onPasswordSortModeChanged: (MonicaImePasswordSortMode) -> Unit,
     onPanelSelected: (MonicaImePanel) -> Unit,
     onSwitchInputMethod: () -> Unit,
     onDismiss: () -> Unit
@@ -281,6 +296,7 @@ internal fun MonicaImeContent(
         MonicaImePanel.GENERATOR -> false
     }
     val showPanelContent = uiState.activePanel != MonicaImePanel.KEYBOARD &&
+        !uiState.isSearchEditing &&
         (!activePanelRequiresUnlock || uiState.unlocked)
     val showUnlockPanel = activePanelRequiresUnlock && !uiState.unlocked
 
@@ -313,6 +329,8 @@ internal fun MonicaImeContent(
                         onPanelSelected = onPanelSelected,
                         onUndoDeleteAll = onUndoDeleteAll,
                         onOpenAutofillSettings = onOpenAutofillSettings,
+                        onSearchEditFinished = onSearchEditFinished,
+                        onSearchCleared = onSearchCleared,
                         onDismiss = onDismiss
                     )
 
@@ -328,8 +346,9 @@ internal fun MonicaImeContent(
                                     UnlockedVaultPane(
                                         modifier = Modifier.fillMaxSize(),
                                         uiState = uiState,
-                                        onQueryChanged = onQueryChanged,
                                         onDatabaseScopeSelected = onDatabaseScopeSelected,
+                                        onSearchEditRequested = onSearchEditRequested,
+                                        onPasswordSortModeChanged = onPasswordSortModeChanged,
                                         onInsertPassword = onInsertPassword,
                                         onInsertUsername = onInsertUsername,
                                         onInsertTotp = { entry ->
@@ -408,8 +427,19 @@ private fun MonicaImeToolbar(
     onPanelSelected: (MonicaImePanel) -> Unit,
     onUndoDeleteAll: () -> Unit,
     onOpenAutofillSettings: () -> Unit,
+    onSearchEditFinished: () -> Unit,
+    onSearchCleared: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    if (uiState.isSearchEditing) {
+        ImeSearchToolbar(
+            query = uiState.query,
+            resultCount = uiState.entries.size,
+            onFinish = onSearchEditFinished,
+            onClear = onSearchCleared
+        )
+        return
+    }
     val selected = when (uiState.activePanel) {
         MonicaImePanel.KEYBOARD -> MonicaToolbarSelection.MONICA
         MonicaImePanel.PASSWORDS -> MonicaToolbarSelection.PASSWORDS
@@ -502,6 +532,280 @@ private fun MonicaImeToolbar(
     }
 }
 
+@Composable
+private fun ImeSearchToolbar(
+    query: String,
+    resultCount: Int,
+    onFinish: () -> Unit,
+    onClear: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ToolbarCircleButton(
+            selected = false,
+            onClick = onFinish,
+            contentDescription = stringResource(R.string.back)
+        ) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = null)
+        }
+
+        Surface(
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = query.ifBlank { stringResource(R.string.ime_search_accounts) },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (query.isBlank()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = resultCount.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (query.isNotBlank()) {
+            ToolbarCircleButton(
+                selected = false,
+                onClick = onClear,
+                contentDescription = stringResource(R.string.clear)
+            ) {
+                Icon(Icons.Default.Close, contentDescription = null)
+            }
+        }
+
+        ToolbarCircleButton(
+            selected = true,
+            onClick = onFinish,
+            contentDescription = stringResource(R.string.confirm)
+        ) {
+            Icon(Icons.Default.Check, contentDescription = null)
+        }
+    }
+}
+
+@Composable
+private fun ImePasswordControls(
+    uiState: MonicaImeUiState,
+    databaseMenuExpanded: Boolean,
+    onDatabaseMenuExpandedChange: (Boolean) -> Unit,
+    onSearchEditRequested: () -> Unit,
+    onPasswordSortModeChanged: (MonicaImePasswordSortMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 1.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (uiState.databaseOptions.isNotEmpty()) {
+            ImeDatabaseScopeSelector(
+                options = uiState.databaseOptions,
+                selectedScope = uiState.selectedDatabaseScope,
+                expanded = databaseMenuExpanded,
+                onExpandedChange = onDatabaseMenuExpandedChange
+            )
+        }
+
+        Surface(
+            onClick = onSearchEditRequested,
+            modifier = Modifier
+                .weight(1f)
+                .height(40.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = if (uiState.query.isBlank()) {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            }
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(19.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = uiState.query.ifBlank { stringResource(R.string.search) },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (uiState.query.isBlank()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (uiState.query.isNotBlank()) {
+                    Text(
+                        text = stringResource(
+                            R.string.ime_search_results_count,
+                            uiState.entries.size
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+
+    }
+}
+
+@Composable
+private fun ImeDatabaseScopeSelector(
+    options: List<MonicaImeDatabaseOption>,
+    selectedScope: MonicaImeDatabaseScope,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit
+) {
+    val selected = options.firstOrNull { it.scope == selectedScope } ?: options.first()
+
+    Surface(
+        onClick = { onExpandedChange(!expanded) },
+        modifier = Modifier
+            .widthIn(min = 86.dp, max = 116.dp)
+            .height(40.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = if (expanded) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = selected.scope.icon(),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = selected.label,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(16.dp)
+                    .graphicsLayer { rotationZ = if (expanded) 180f else 0f }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImeDatabaseScopeMenu(
+    options: List<MonicaImeDatabaseOption>,
+    selectedScope: MonicaImeDatabaseScope,
+    onDismiss: () -> Unit,
+    onSelected: (MonicaImeDatabaseScope) -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.24f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                )
+        )
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 10.dp, top = 58.dp, end = 42.dp, bottom = 10.dp)
+                .widthIn(min = 260.dp, max = 360.dp)
+                .fillMaxHeight()
+                .zIndex(1f),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 8.dp
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(options) { option ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = option.label,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = option.scope.icon(),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        trailingIcon = if (option.scope == selectedScope) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                        onClick = { onSelected(option.scope) }
+                    )
+                }
+            }
+        }
+    }
+}
+
 private enum class ConnectedToolbarPosition {
     LEADING,
     MIDDLE,
@@ -529,7 +833,7 @@ private fun RowScope.ConnectedToolbarButton(
         modifier = Modifier
             .zIndex(if (selected) 1f else 0f)
             .weight(animatedWeight)
-            .height(46.dp)
+            .height(48.dp)
             .sizeIn(minWidth = 42.dp)
             .semantics { role = Role.RadioButton },
         shapes = when (position) {
@@ -712,8 +1016,9 @@ private fun generateImePassword(length: Int): String {
 private fun UnlockedVaultPane(
     modifier: Modifier = Modifier,
     uiState: MonicaImeUiState,
-    onQueryChanged: (String) -> Unit,
     onDatabaseScopeSelected: (MonicaImeDatabaseScope) -> Unit,
+    onSearchEditRequested: () -> Unit,
+    onPasswordSortModeChanged: (MonicaImePasswordSortMode) -> Unit,
     onInsertPassword: (MonicaImePasswordEntry) -> Unit,
     onInsertUsername: (MonicaImePasswordEntry) -> Unit,
     onInsertTotp: (MonicaImePasswordEntry) -> Unit,
@@ -721,138 +1026,134 @@ private fun UnlockedVaultPane(
 ) {
     val showAutofillLoading = uiState.isAutofillLoading ||
         (uiState.unlocked && uiState.errorMessage == null && uiState.databaseOptions.isEmpty())
+    var databaseMenuExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.databaseOptions) {
+        if (uiState.databaseOptions.isEmpty()) {
+            databaseMenuExpanded = false
+        }
+    }
 
     ElevatedCard(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(30.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(26.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            uiState.errorMessage?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)
-                )
-            }
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                uiState.errorMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)
+                    )
+                }
 
-            if (uiState.entries.isEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = true)
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (uiState.databaseOptions.isNotEmpty()) {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp)
+                ImePasswordControls(
+                    uiState = uiState,
+                    databaseMenuExpanded = databaseMenuExpanded,
+                    onDatabaseMenuExpandedChange = { databaseMenuExpanded = it },
+                    onSearchEditRequested = onSearchEditRequested,
+                    onPasswordSortModeChanged = onPasswordSortModeChanged
+                )
+
+                if (uiState.entries.isEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = true)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = true),
+                            contentAlignment = Alignment.Center
                         ) {
-                            items(uiState.databaseOptions, key = { it.label }) { option ->
-                                MonicaExpressiveFilterChip(
-                                    selected = uiState.selectedDatabaseScope == option.scope,
-                                    onClick = { onDatabaseScopeSelected(option.scope) },
-                                    label = option.label,
-                                    leadingIcon = option.scope.icon()
-                                )
+                            if (showAutofillLoading) {
+                                AutofillLoadingState()
+                            } else {
+                                EmptyVaultState(query = uiState.query)
                             }
                         }
                     }
+                } else {
+                    val lazyListState = rememberLazyListState()
+                    val letterIndex: List<Pair<String, Int>> = remember(
+                        uiState.entries,
+                        uiState.passwordSortMode
+                    ) {
+                        buildImeLetterIndex(
+                            itemCount = uiState.entries.size
+                        ) { index ->
+                            val entry = uiState.entries[index]
+                            entry.title.ifBlank {
+                                entry.website.ifBlank { entry.username }
+                            }
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f, fill = true),
-                        contentAlignment = Alignment.Center
+                            .weight(1f, fill = true)
                     ) {
-                        if (showAutofillLoading) {
-                            AutofillLoadingState()
-                        } else {
-                            EmptyVaultState(query = uiState.query)
-                        }
-                    }
-                }
-            } else {
-                val lazyListState = rememberLazyListState()
-                // 计算字母索引：每个首字母对应的第一个条目在列表中的位置
-                // 注意：如果有 database_filters item，条目从 index 1 开始
-                val filterItemOffset = if (uiState.databaseOptions.isNotEmpty()) 1 else 0
-                val letterIndex: List<Pair<String, Int>> = remember(uiState.entries, filterItemOffset) {
-                    buildImeLetterIndex(
-                        itemCount = uiState.entries.size,
-                        itemOffset = filterItemOffset
-                    ) { index ->
-                        val entry = uiState.entries[index]
-                        entry.title.ifBlank {
-                            entry.website.ifBlank { entry.username }
-                        }
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = true)
-                ) {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        LazyColumn(
-                            state = lazyListState,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentPadding = PaddingValues(
-                                start = 14.dp,
-                                top = 8.dp,
-                                end = 6.dp,
-                                bottom = 10.dp
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            if (uiState.databaseOptions.isNotEmpty()) {
-                                item(key = "database_filters") {
-                                    LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 2.dp)
-                                    ) {
-                                        items(uiState.databaseOptions, key = { it.label }) { option ->
-                                            MonicaExpressiveFilterChip(
-                                                selected = uiState.selectedDatabaseScope == option.scope,
-                                                onClick = { onDatabaseScopeSelected(option.scope) },
-                                                label = option.label,
-                                                leadingIcon = option.scope.icon()
-                                            )
-                                        }
-                                    }
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                state = lazyListState,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                contentPadding = PaddingValues(
+                                    start = 10.dp,
+                                    top = 0.dp,
+                                    end = 4.dp,
+                                    bottom = 6.dp
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(uiState.entries, key = { it.id }) { entry ->
+                                    PasswordEntryCard(
+                                        entry = entry,
+                                        onSmartFill = { onSmartFillPassword(entry) },
+                                        onInsertPassword = { onInsertPassword(entry) },
+                                        onInsertUsername = { onInsertUsername(entry) },
+                                        onInsertTotp = { onInsertTotp(entry) }
+                                    )
                                 }
                             }
-                            items(uiState.entries, key = { it.id }) { entry ->
-                                PasswordEntryCard(
-                                    entry = entry,
-                                    onSmartFill = { onSmartFillPassword(entry) },
-                                    onInsertPassword = { onInsertPassword(entry) },
-                                    onInsertUsername = { onInsertUsername(entry) },
-                                    onInsertTotp = { onInsertTotp(entry) }
-                                )
-                            }
+                            VelocityScrollBar(
+                                lazyListState = lazyListState,
+                                letterIndex = letterIndex,
+                                modifier = Modifier
+                                    .width(32.dp)
+                                    .fillMaxHeight()
+                                    .padding(end = 2.dp)
+                            )
                         }
-                        VelocityScrollBar(
-                            lazyListState = lazyListState,
-                            letterIndex = letterIndex,
-                            modifier = Modifier
-                                .width(24.dp)
-                                .fillMaxHeight()
-                                .padding(end = 4.dp)
-                        )
                     }
                 }
+            }
+
+            if (databaseMenuExpanded && uiState.databaseOptions.isNotEmpty()) {
+                ImeDatabaseScopeMenu(
+                    options = uiState.databaseOptions,
+                    selectedScope = uiState.selectedDatabaseScope,
+                    onDismiss = { databaseMenuExpanded = false },
+                    onSelected = { scope ->
+                        databaseMenuExpanded = false
+                        onDatabaseScopeSelected(scope)
+                    }
+                )
             }
         }
     }
@@ -866,8 +1167,6 @@ private fun VelocityScrollBar(
 ) {
     val coroutineScope = rememberCoroutineScope()
     var isDragging by remember { mutableStateOf(false) }
-    var anchorY by remember { mutableFloatStateOf(0f) }
-    var currentDragDelta by remember { mutableFloatStateOf(0f) }
     // 当前手指在滚动条上的绝对 Y（用于字母跳转）
     var fingerY by remember { mutableFloatStateOf(0f) }
     var barHeightPx by remember { mutableFloatStateOf(1f) }
@@ -892,29 +1191,14 @@ private fun VelocityScrollBar(
         label = "scrollBarColor"
     )
 
-    // 速度滚动循环（仅在没有字母索引时或字母数量少时作为补充）
-    LaunchedEffect(isDragging) {
-        if (!isDragging) return@LaunchedEffect
-        while (isDragging) {
-            // 只有字母索引为空时才用速度模式
-            if (letterIndex.isEmpty()) {
-                val speed = currentDragDelta * 0.15f
-                lazyListState.scrollBy(speed)
-            }
-            delay(16L)
-        }
-    }
-
     Box(
         modifier = modifier
             .onSizeChanged { barHeightPx = it.height.toFloat().coerceAtLeast(1f) }
             .pointerInput(letterIndex) {
                 detectDragGestures(
                     onDragStart = { offset ->
-                        anchorY = offset.y
                         fingerY = offset.y
                         isDragging = true
-                        currentDragDelta = 0f
                         // 立即跳转到对应字母
                         val target = letterAtY(offset.y)
                         if (target != null) {
@@ -927,7 +1211,6 @@ private fun VelocityScrollBar(
                     onDrag = { change, _ ->
                         change.consume()
                         fingerY = change.position.y
-                        currentDragDelta = change.position.y - anchorY
                         val target = letterAtY(change.position.y)
                         if (target != null) {
                             if (target.first != currentLetter) {
@@ -942,23 +1225,42 @@ private fun VelocityScrollBar(
                     },
                     onDragEnd = {
                         isDragging = false
-                        currentDragDelta = 0f
                         currentLetter = ""
                     },
                     onDragCancel = {
                         isDragging = false
-                        currentDragDelta = 0f
                         currentLetter = ""
                     }
                 )
             },
         contentAlignment = Alignment.Center
     ) {
+        if (letterIndex.isNotEmpty()) {
+            Text(
+                text = letterIndex.first().first,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 3.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = letterIndex.last().first,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 3.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         // 轨道竖条
         Box(
             modifier = Modifier
                 .width(4.dp)
-                .fillMaxHeight(0.7f)
+                .fillMaxHeight(0.58f)
                 .clip(RoundedCornerShape(2.dp))
                 .background(trackColor)
         )
@@ -986,13 +1288,13 @@ private fun VelocityScrollBar(
     }
 }
 
-private fun buildImeLetterIndex(
+internal fun buildImeLetterIndex(
     itemCount: Int,
     itemOffset: Int = 0,
     titleAt: (Int) -> String
 ): List<Pair<String, Int>> {
     val result = mutableListOf<Pair<String, Int>>()
-    var lastLetter = ""
+    val seenLetters = mutableSetOf<String>()
 
     repeat(itemCount) { index ->
         val letter = titleAt(index)
@@ -1001,9 +1303,8 @@ private fun buildImeLetterIndex(
             ?.let { if (it.isLetter()) it.toString() else "#" }
             ?: "#"
 
-        if (letter != lastLetter) {
+        if (seenLetters.add(letter)) {
             result += letter to (index + itemOffset)
-            lastLetter = letter
         }
     }
 
@@ -1250,7 +1551,7 @@ private fun DatabaseScopeFilterRow(
     if (uiState.databaseOptions.isEmpty()) return
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 8.dp)
+        contentPadding = PaddingValues(start = 12.dp, top = 3.dp, end = 12.dp, bottom = 3.dp)
     ) {
         items(uiState.databaseOptions, key = { it.label }) { option ->
             MonicaExpressiveFilterChip(
@@ -1511,7 +1812,7 @@ private fun PasswordEntryCard(
     val appIcon = entry.packageName
         .takeIf { it.isNotBlank() }
         ?.let { rememberAppIcon(it) }
-    val cardShape = RoundedCornerShape(22.dp)
+    val cardShape = RoundedCornerShape(18.dp)
     val interactionSource = remember(entry.id) { MutableInteractionSource() }
 
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -1538,13 +1839,13 @@ private fun PasswordEntryCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
@@ -1553,7 +1854,7 @@ private fun PasswordEntryCard(
                             Image(
                                 bitmap = appIcon,
                                 contentDescription = null,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         } else {
                             Icon(
@@ -1576,7 +1877,7 @@ private fun PasswordEntryCard(
                         if (entry.username.isNotBlank()) {
                             Text(
                                 text = entry.username,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1588,7 +1889,7 @@ private fun PasswordEntryCard(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
                             .clickable { expanded = !expanded }
                             .padding(6.dp)
@@ -1601,7 +1902,7 @@ private fun PasswordEntryCard(
                     FlowRow(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -2071,7 +2372,7 @@ private fun ToolbarCircleButton(
     FilledIconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.height(40.dp),
+        modifier = Modifier.size(48.dp),
         shape = CircleShape
     ) {
         if (content != null) {

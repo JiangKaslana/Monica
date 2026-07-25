@@ -13,7 +13,7 @@ android {
 
     def previewVersionSuffix = project.findProperty('previewVersionSuffix')?.toString()?.trim()
     def appVersionCode = 10
-    def baseVersionName = previewVersionSuffix ? "1.0.296-${previewVersionSuffix}" : "1.0.296"
+    def baseVersionName = previewVersionSuffix ? "1.0.297-${previewVersionSuffix}" : "1.0.297"
     def normalizeTwoDigits = { raw ->
         def value = raw?.toString()?.trim()?.replaceAll('\\D', '')
         if (!value) {

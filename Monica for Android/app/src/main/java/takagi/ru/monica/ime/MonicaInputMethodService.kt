@@ -12,6 +12,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import java.util.Locale
 import androidx.compose.runtime.Recomposer
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.AndroidUiDispatcher
@@ -47,6 +48,7 @@ import takagi.ru.monica.data.model.DocumentData
 import takagi.ru.monica.data.model.OtpType
 import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.data.bitwarden.BitwardenVault
+import takagi.ru.monica.autofill_ng.AutofillPreferences
 import takagi.ru.monica.autofill_ng.AutofillSecretResolver
 import takagi.ru.monica.autofill_ng.AutofillPickerActivityV2
 import takagi.ru.monica.security.SecurityManager
@@ -69,6 +71,7 @@ class MonicaInputMethodService : InputMethodService() {
 
     private lateinit var securityManager: SecurityManager
     private lateinit var settingsManager: SettingsManager
+    private lateinit var autofillPreferences: AutofillPreferences
     private lateinit var database: PasswordDatabase
     private var composeView: ComposeView? = null
     private var recomposer: Recomposer? = null
@@ -125,6 +128,7 @@ class MonicaInputMethodService : InputMethodService() {
         lifecycleOwner.onCreate()
         securityManager = SecurityManager(applicationContext)
         settingsManager = SettingsManager(applicationContext)
+        autofillPreferences = AutofillPreferences(applicationContext)
         database = PasswordDatabase.getDatabase(applicationContext)
         val receiverFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Context.RECEIVER_NOT_EXPORTED
@@ -169,10 +173,6 @@ class MonicaInputMethodService : InputMethodService() {
                     MonicaImeContent(
                         settings = settings,
                         uiState = state,
-                        onQueryChanged = { query ->
-                            uiState.update { it.copy(query = query) }
-                            requestRefreshVaultEntries()
-                        },
                         onDatabaseScopeSelected = { scope ->
                             uiState.update { it.copy(selectedDatabaseScope = scope) }
                             requestRefreshVaultEntries(force = true)
@@ -197,6 +197,10 @@ class MonicaInputMethodService : InputMethodService() {
                         },
                         onOpenUnlockApp = ::openMonicaAppForUnlock,
                         onOpenAutofillSettings = ::openAutofillPickerPage,
+                        onSearchEditRequested = ::startImeSearchEditing,
+                        onSearchEditFinished = ::finishImeSearchEditing,
+                        onSearchCleared = ::clearImeSearchQuery,
+                        onPasswordSortModeChanged = ::changeImePasswordSortMode,
                         onSwitchInputMethod = ::switchToNextInputMethod,
                         onPanelSelected = ::handlePanelSelection,
                         onDismiss = { requestHideSelf(0) }
@@ -235,7 +239,13 @@ class MonicaInputMethodService : InputMethodService() {
                 isAutofillLoading = preserveAutofillPanel &&
                     previousState.activePanel == MonicaImePanel.PASSWORDS &&
                     shouldRefreshForCurrentView,
+                isSearchEditing = false,
                 query = if (preserveAutofillPanel) previousState.query else "",
+                passwordSortMode = if (preserveAutofillPanel) {
+                    previousState.passwordSortMode
+                } else {
+                    MonicaImePasswordSortMode.ALPHABETICAL
+                },
                 selectedDatabaseScope = if (preserveAutofillPanel) {
                     previousState.selectedDatabaseScope
                 } else {
@@ -307,7 +317,7 @@ class MonicaInputMethodService : InputMethodService() {
     private fun openAutofillPickerPage() {
         clearPendingDeleteUndo()
         val activePackageName = uiState.value.activePackageName.takeIf { it.isNotBlank() }
-        requestHideSelf(0)
+        uiState.update { it.copy(isSearchEditing = false) }
         runCatching {
             val pickerArgs = AutofillPickerActivityV2.Args(
                 applicationId = activePackageName,
@@ -325,14 +335,22 @@ class MonicaInputMethodService : InputMethodService() {
                     putExtra(AutofillPickerActivityV2.EXTRA_IME_MODE, true)
                 }
             )
+        }.onSuccess {
+            requestHideSelf(0)
         }.onFailure { error ->
             uiState.update {
-                it.copy(errorMessage = error.message ?: getString(takagi.ru.monica.R.string.ime_unlock_open_app_error))
+                it.copy(
+                    errorMessage = error.message
+                        ?: getString(takagi.ru.monica.R.string.ime_unlock_open_app_error)
+                )
             }
         }
     }
 
-    private fun requestRefreshVaultEntries(force: Boolean = false) {
+    private fun requestRefreshVaultEntries(
+        force: Boolean = false,
+        debounceMillis: Long = 0L
+    ) {
         refreshJob?.cancel()
         val currentState = uiState.value
         if (
@@ -344,6 +362,9 @@ class MonicaInputMethodService : InputMethodService() {
         }
         refreshJob = serviceScope.launch {
             try {
+                if (debounceMillis > 0L) {
+                    delay(debounceMillis)
+                }
                 refreshVaultEntries(force = force)
             } catch (e: CancellationException) {
                 throw e
@@ -414,7 +435,9 @@ class MonicaInputMethodService : InputMethodService() {
                     activePanel = MonicaImePanel.KEYBOARD,
                     isAutofillPanelVisible = false,
                     isAutofillLoading = false,
+                    isSearchEditing = false,
                     query = "",
+                    passwordSortMode = MonicaImePasswordSortMode.ALPHABETICAL,
                     selectedDatabaseScope = MonicaImeDatabaseScope.All,
                     errorMessage = null
                 )
@@ -428,7 +451,9 @@ class MonicaInputMethodService : InputMethodService() {
                     activePanel = MonicaImePanel.GENERATOR,
                     isAutofillPanelVisible = true,
                     isAutofillLoading = false,
+                    isSearchEditing = false,
                     query = "",
+                    passwordSortMode = MonicaImePasswordSortMode.ALPHABETICAL,
                     selectedDatabaseScope = MonicaImeDatabaseScope.All,
                     errorMessage = null
                 )
@@ -452,6 +477,9 @@ class MonicaInputMethodService : InputMethodService() {
                         cardWalletEntries = emptyList(),
                         databaseOptions = emptyList(),
                         isAutofillLoading = false,
+                        isSearchEditing = false,
+                        query = "",
+                        passwordSortMode = MonicaImePasswordSortMode.ALPHABETICAL,
                         selectedDatabaseScope = MonicaImeDatabaseScope.All,
                         errorMessage = getString(takagi.ru.monica.R.string.ime_unlock_required)
                     )
@@ -460,13 +488,21 @@ class MonicaInputMethodService : InputMethodService() {
                 return@launch
             }
 
+            val preservePasswordQuery =
+                panel == MonicaImePanel.PASSWORDS && uiState.value.activePanel == MonicaImePanel.PASSWORDS
             uiState.update {
                 it.copy(
                     activePanel = panel,
                     isAutofillPanelVisible = true,
                     isAutofillLoading = panel == MonicaImePanel.PASSWORDS,
+                    isSearchEditing = false,
                     errorMessage = null,
-                    query = if (panel == MonicaImePanel.PASSWORDS) "" else it.query,
+                    query = if (preservePasswordQuery) it.query else "",
+                    passwordSortMode = if (preservePasswordQuery) {
+                        it.passwordSortMode
+                    } else {
+                        MonicaImePasswordSortMode.ALPHABETICAL
+                    },
                     selectedDatabaseScope = it.selectedDatabaseScope
                 )
             }
@@ -493,11 +529,7 @@ class MonicaInputMethodService : InputMethodService() {
 
         val currentState = uiState.value
         val activePackage = currentState.activePackageName
-        val query = if (currentState.activePanel == MonicaImePanel.PASSWORDS) {
-            ""
-        } else {
-            currentState.query.trim()
-        }
+        val query = currentState.query.trim()
         val localLabel = getString(takagi.ru.monica.R.string.filter_monica)
         val keepassLabel = getString(takagi.ru.monica.R.string.filter_keepass)
         val mdbxLabel = "MDBX"
@@ -526,7 +558,7 @@ class MonicaInputMethodService : InputMethodService() {
 
             val passwordEntries = database.passwordEntryDao()
                 .getAllPasswordEntriesSync()
-            val results = passwordEntries
+            val filteredEntries = passwordEntries
                 .mapNotNull { entry ->
                     entry.toImeEntryOrNull(
                         keepassLookup = keepassLookup,
@@ -541,18 +573,14 @@ class MonicaInputMethodService : InputMethodService() {
                 .filter { result ->
                     val entry = result.value
                     entryMatchesScope(entry, selectedScope) &&
-                        queryMatches(entry, query)
+                        imePasswordEntryMatchesQuery(entry, query)
                 }
-                .sortedWith(
-                    compareByDescending<ImeRefreshResult> {
-                        it.value.let { entry -> entryMatchesPackage(entry, activePackage) }
-                    }.thenByDescending {
-                        it.value.isFavorite
-                    }.thenBy {
-                        it.value.title.lowercase()
-                    }
-                )
-                // 不限制条目数量，由 LazyColumn 自行处理懒加载渲染。
+                .map { it.value }
+            val results = sortImePasswordEntries(
+                entries = filteredEntries,
+                sortMode = currentState.passwordSortMode,
+                activePackageName = activePackage
+            ).map(::ImeRefreshResult)
 
             val authenticatorResults = buildAuthenticatorEntries(
                 secureItems = database.secureItemDao().getActiveItemsByTypeSync(ItemType.TOTP),
@@ -622,6 +650,8 @@ class MonicaInputMethodService : InputMethodService() {
                     cardWalletEntries = emptyList(),
                     databaseOptions = emptyList(),
                     isAutofillLoading = false,
+                    isSearchEditing = false,
+                    passwordSortMode = MonicaImePasswordSortMode.ALPHABETICAL,
                     selectedDatabaseScope = MonicaImeDatabaseScope.All,
                     errorMessage = if (panelStillVisible) {
                         getString(takagi.ru.monica.R.string.ime_unlock_required)
@@ -632,15 +662,6 @@ class MonicaInputMethodService : InputMethodService() {
             }
         }
         return unlocked
-    }
-
-    private fun entryMatchesPackage(entry: MonicaImePasswordEntry, activePackage: String): Boolean {
-        return imeEntryMatchesPackage(
-            entryPackageName = entry.packageName,
-            website = entry.website,
-            title = entry.title,
-            activePackageName = activePackage
-        )
     }
 
     private fun entryMatchesScope(
@@ -692,18 +713,6 @@ class MonicaInputMethodService : InputMethodService() {
             is MonicaImeDatabaseScope.Mdbx -> entry.mdbxDatabaseId == scope.databaseId
             is MonicaImeDatabaseScope.Bitwarden -> entry.bitwardenVaultId == scope.vaultId
         }
-    }
-
-    private fun queryMatches(entry: MonicaImePasswordEntry, query: String): Boolean {
-        if (query.isBlank()) return true
-        val haystack = listOf(
-            entry.title,
-            entry.username,
-            entry.website,
-            entry.packageName,
-            entry.sourceLabel
-        ).joinToString(" ").lowercase()
-        return haystack.contains(query.lowercase())
     }
 
     private fun queryMatches(entry: MonicaImeAuthenticatorEntry, query: String): Boolean {
@@ -1292,18 +1301,80 @@ class MonicaInputMethodService : InputMethodService() {
 
     private fun switchToNextInputMethod() {
         clearPendingDeleteUndo()
-        val switched = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            runCatching { switchToPreviousInputMethod() }.getOrDefault(false)
-        } else {
-            false
-        }
+        val switched = trySwitchToPreviousInputMethod()
         if (!switched) {
             val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
             imm.showInputMethodPicker()
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun trySwitchToPreviousInputMethod(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching { switchToPreviousInputMethod() }.getOrDefault(false)
+        } else {
+            val token = window?.window?.attributes?.token ?: return false
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            runCatching { imm.switchToLastInputMethod(token) }.getOrDefault(false)
+        }
+    }
+
+    private fun startImeSearchEditing() {
+        clearPendingDeleteUndo()
+        val currentState = uiState.value
+        if (
+            !currentState.unlocked ||
+            currentState.activePanel != MonicaImePanel.PASSWORDS
+        ) {
+            return
+        }
+        uiState.update {
+            it.copy(
+                isSearchEditing = true,
+                keyboardMode = MonicaKeyboardMode.LETTERS,
+                isUppercase = false
+            )
+        }
+    }
+
+    private fun finishImeSearchEditing() {
+        if (!uiState.value.isSearchEditing) return
+        uiState.update { it.copy(isSearchEditing = false) }
+        requestRefreshVaultEntries(force = true)
+    }
+
+    private fun clearImeSearchQuery() {
+        val currentState = uiState.value
+        if (currentState.query.isEmpty()) return
+        uiState.update { it.copy(query = "") }
+        requestRefreshVaultEntries(force = true)
+    }
+
+    private fun changeImePasswordSortMode(sortMode: MonicaImePasswordSortMode) {
+        val currentState = uiState.value
+        if (
+            currentState.activePanel != MonicaImePanel.PASSWORDS ||
+            currentState.passwordSortMode == sortMode
+        ) {
+            return
+        }
+        uiState.update { it.copy(passwordSortMode = sortMode) }
+        requestRefreshVaultEntries(force = true)
+    }
+
+    private fun updateImeSearchQuery(nextQuery: String) {
+        val currentState = uiState.value
+        if (!currentState.isSearchEditing || nextQuery == currentState.query) return
+        uiState.update { it.copy(query = nextQuery) }
+        requestRefreshVaultEntries(debounceMillis = ImeSearchRefreshDebounceMs)
+    }
+
     private fun handleKeyPress(text: String) {
+        val currentState = uiState.value
+        if (currentState.isSearchEditing) {
+            updateImeSearchQuery(appendImeSearchQuery(currentState.query, text))
+            return
+        }
         clearPendingDeleteUndo()
         commitExternalText(text)
     }
@@ -1368,11 +1439,20 @@ class MonicaInputMethodService : InputMethodService() {
     }
 
     private fun handleBackspace() {
+        val currentState = uiState.value
+        if (currentState.isSearchEditing) {
+            updateImeSearchQuery(removeLastImeSearchCharacter(currentState.query))
+            return
+        }
         clearPendingDeleteUndo()
         currentInputConnection?.deleteSurroundingText(1, 0)
     }
 
     private fun handleDeleteAll() {
+        if (uiState.value.isSearchEditing) {
+            clearImeSearchQuery()
+            return
+        }
         val connection = currentInputConnection ?: return
         val beforeCursor = connection.getTextBeforeCursor(MaxImeClearChars, 0)?.toString().orEmpty()
         val selectedText = connection.getSelectedText(0)?.toString().orEmpty()
@@ -1399,6 +1479,10 @@ class MonicaInputMethodService : InputMethodService() {
     }
 
     private fun handleEnter() {
+        if (uiState.value.isSearchEditing) {
+            finishImeSearchEditing()
+            return
+        }
         clearPendingDeleteUndo()
         val connection = currentInputConnection ?: return
         if (!connection.performEditorAction(EditorInfo.IME_ACTION_DONE)) {
@@ -1416,6 +1500,84 @@ class MonicaInputMethodService : InputMethodService() {
 private const val MaxImeClearChars = 10_000
 private const val ImeSequentialFillStepDelayMs = 90L
 private const val ImeSequentialFillFocusDelayMs = 140L
+private const val ImeSearchRefreshDebounceMs = 90L
+private const val MaxImeSearchCodePoints = 80
+private val ImeSearchWhitespaceRegex = Regex("\\s+")
+
+internal fun imePasswordEntryMatchesQuery(
+    entry: MonicaImePasswordEntry,
+    rawQuery: String
+): Boolean {
+    val terms = rawQuery
+        .trim()
+        .split(ImeSearchWhitespaceRegex)
+        .filter { it.isNotBlank() }
+    if (terms.isEmpty()) return true
+
+    val searchableFields = listOf(
+        entry.title,
+        entry.username,
+        entry.website,
+        entry.packageName,
+        entry.sourceLabel
+    )
+    return terms.all { term ->
+        searchableFields.any { field -> field.contains(term, ignoreCase = true) }
+    }
+}
+
+internal fun sortImePasswordEntries(
+    entries: List<MonicaImePasswordEntry>,
+    sortMode: MonicaImePasswordSortMode,
+    activePackageName: String
+): List<MonicaImePasswordEntry> {
+    return when (sortMode) {
+        MonicaImePasswordSortMode.RELEVANCE -> entries.sortedWith(
+            compareByDescending<MonicaImePasswordEntry> { entry ->
+                imeEntryMatchesPackage(
+                    entryPackageName = entry.packageName,
+                    website = entry.website,
+                    title = entry.title,
+                    activePackageName = activePackageName
+                )
+            }.thenByDescending { entry ->
+                entry.isFavorite
+            }.thenBy { entry ->
+                imePasswordAlphabeticalLabel(entry).lowercase(Locale.ROOT)
+            }.thenBy { entry ->
+                entry.id
+            }
+        )
+        MonicaImePasswordSortMode.ALPHABETICAL -> entries.sortedWith(
+            compareBy<MonicaImePasswordEntry> { entry ->
+                imePasswordAlphabeticalLabel(entry).lowercase(Locale.ROOT)
+            }.thenBy { entry ->
+                entry.id
+            }
+        )
+    }
+}
+
+internal fun imePasswordAlphabeticalLabel(entry: MonicaImePasswordEntry): String {
+    return entry.title.ifBlank {
+        entry.website.ifBlank { entry.username }
+    }
+}
+
+internal fun appendImeSearchQuery(currentQuery: String, text: String): String {
+    if (text.isEmpty()) return currentQuery
+    val combined = currentQuery + text
+    val codePointCount = combined.codePointCount(0, combined.length)
+    if (codePointCount <= MaxImeSearchCodePoints) return combined
+    val endIndex = combined.offsetByCodePoints(0, MaxImeSearchCodePoints)
+    return combined.substring(0, endIndex)
+}
+
+internal fun removeLastImeSearchCharacter(currentQuery: String): String {
+    if (currentQuery.isEmpty()) return currentQuery
+    val endIndex = currentQuery.offsetByCodePoints(currentQuery.length, -1)
+    return currentQuery.substring(0, endIndex)
+}
 
 private data class ImeRefreshResult(
     val value: MonicaImePasswordEntry

@@ -52,6 +52,18 @@ data class TrashCategory(
     val items: List<TrashItem>
 )
 
+internal val TRASH_SECURE_ITEM_TYPES = listOf(
+    ItemType.TOTP,
+    ItemType.BANK_CARD,
+    ItemType.DOCUMENT,
+    ItemType.NOTE,
+    ItemType.BILLING_ADDRESS,
+    ItemType.PAYMENT_ACCOUNT
+)
+
+internal fun TrashSettings.shouldAutoCleanup(): Boolean =
+    enabled && autoDeleteDays > 0
+
 /**
  * 回收站 ViewModel
  */
@@ -102,11 +114,15 @@ class TrashViewModel(application: Application) : AndroidViewModel(application) {
     )
     
     init {
-        // 应用启动时自动清理过期的回收站条目
         viewModelScope.launch {
-            // 等待设置加载完成
-            trashSettings.first { it.autoDeleteDays >= 0 }
-            cleanupExpiredItems()
+            // 直接读取 DataStore，避免使用 stateIn 的默认值抢先执行永久删除。
+            val settings = settingsManager.settingsFlow.first()
+            cleanupExpiredItemsNow(
+                TrashSettings(
+                    enabled = settings.trashEnabled,
+                    autoDeleteDays = settings.trashAutoDeleteDays
+                )
+            )
         }
     }
     
@@ -152,108 +168,43 @@ class TrashViewModel(application: Application) : AndroidViewModel(application) {
             ))
         }
         
-        // 按 SecureItem 类型分组
-        val groupedSecureItems = secureItems.groupBy { it.itemType }
-        
-        // 验证器类别
-        groupedSecureItems[ItemType.TOTP]?.let { totpItems ->
-            val items = totpItems.map { item ->
-                val daysRemaining = if (settings.autoDeleteDays > 0 && item.deletedAt != null) {
-                    val daysSinceDelete = TimeUnit.MILLISECONDS.toDays(now.time - item.deletedAt.time).toInt()
-                    maxOf(0, settings.autoDeleteDays - daysSinceDelete)
-                } else -1
-                
-                TrashItem(
-                    id = item.id,
-                    title = item.title,
-                    itemType = ItemType.TOTP,
-                    deletedAt = item.deletedAt ?: now,
-                    daysRemaining = daysRemaining,
-                    originalData = item
+        // 所有 SecureItem 类型统一进入回收站，避免新增类型遗漏。
+        val secureTypeLabels = mapOf(
+            ItemType.TOTP to "验证器",
+            ItemType.BANK_CARD to "银行卡",
+            ItemType.DOCUMENT to "证件",
+            ItemType.NOTE to "笔记",
+            ItemType.BILLING_ADDRESS to "账单地址",
+            ItemType.PAYMENT_ACCOUNT to "支付账户"
+        )
+        secureItems
+            .groupBy { it.itemType }
+            .toSortedMap(compareBy { TRASH_SECURE_ITEM_TYPES.indexOf(it).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE })
+            .forEach { (itemType, typedItems) ->
+                val displayName = secureTypeLabels[itemType] ?: return@forEach
+                val items = typedItems.map { item ->
+                    val daysRemaining = if (settings.autoDeleteDays > 0 && item.deletedAt != null) {
+                        val daysSinceDelete = TimeUnit.MILLISECONDS.toDays(now.time - item.deletedAt.time).toInt()
+                        maxOf(0, settings.autoDeleteDays - daysSinceDelete)
+                    } else -1
+                    TrashItem(
+                        id = item.id,
+                        title = item.title,
+                        itemType = itemType,
+                        deletedAt = item.deletedAt ?: now,
+                        daysRemaining = daysRemaining,
+                        originalData = item
+                    )
+                }
+                categories.add(
+                    TrashCategory(
+                        type = itemType,
+                        displayName = displayName,
+                        count = items.size,
+                        items = items
+                    )
                 )
             }
-            categories.add(TrashCategory(
-                type = ItemType.TOTP,
-                displayName = "验证器",
-                count = items.size,
-                items = items
-            ))
-        }
-        
-        // 银行卡类别
-        groupedSecureItems[ItemType.BANK_CARD]?.let { cardItems ->
-            val items = cardItems.map { item ->
-                val daysRemaining = if (settings.autoDeleteDays > 0 && item.deletedAt != null) {
-                    val daysSinceDelete = TimeUnit.MILLISECONDS.toDays(now.time - item.deletedAt.time).toInt()
-                    maxOf(0, settings.autoDeleteDays - daysSinceDelete)
-                } else -1
-                
-                TrashItem(
-                    id = item.id,
-                    title = item.title,
-                    itemType = ItemType.BANK_CARD,
-                    deletedAt = item.deletedAt ?: now,
-                    daysRemaining = daysRemaining,
-                    originalData = item
-                )
-            }
-            categories.add(TrashCategory(
-                type = ItemType.BANK_CARD,
-                displayName = "银行卡",
-                count = items.size,
-                items = items
-            ))
-        }
-        
-        // 证件类别
-        groupedSecureItems[ItemType.DOCUMENT]?.let { docItems ->
-            val items = docItems.map { item ->
-                val daysRemaining = if (settings.autoDeleteDays > 0 && item.deletedAt != null) {
-                    val daysSinceDelete = TimeUnit.MILLISECONDS.toDays(now.time - item.deletedAt.time).toInt()
-                    maxOf(0, settings.autoDeleteDays - daysSinceDelete)
-                } else -1
-                
-                TrashItem(
-                    id = item.id,
-                    title = item.title,
-                    itemType = ItemType.DOCUMENT,
-                    deletedAt = item.deletedAt ?: now,
-                    daysRemaining = daysRemaining,
-                    originalData = item
-                )
-            }
-            categories.add(TrashCategory(
-                type = ItemType.DOCUMENT,
-                displayName = "证件",
-                count = items.size,
-                items = items
-            ))
-        }
-        
-        // 笔记类别
-        groupedSecureItems[ItemType.NOTE]?.let { noteItems ->
-            val items = noteItems.map { item ->
-                val daysRemaining = if (settings.autoDeleteDays > 0 && item.deletedAt != null) {
-                    val daysSinceDelete = TimeUnit.MILLISECONDS.toDays(now.time - item.deletedAt.time).toInt()
-                    maxOf(0, settings.autoDeleteDays - daysSinceDelete)
-                } else -1
-                
-                TrashItem(
-                    id = item.id,
-                    title = item.title,
-                    itemType = ItemType.NOTE,
-                    deletedAt = item.deletedAt ?: now,
-                    daysRemaining = daysRemaining,
-                    originalData = item
-                )
-            }
-            categories.add(TrashCategory(
-                type = ItemType.NOTE,
-                displayName = "笔记",
-                count = items.size,
-                items = items
-            ))
-        }
         
         categories
     }.stateIn(
@@ -276,42 +227,32 @@ class TrashViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun restoreItem(item: TrashItem, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
-            var restoreOutcome = BitwardenRestoreQueueOutcome.NO_REMOTE_ACTION
             try {
-                restoreOutcome = queueRemoteRestoreIfNeeded(item.originalData).getOrElse {
+                val restoreOutcome = queueRemoteRestoreIfNeeded(item.originalData).getOrElse {
                     android.util.Log.e("TrashViewModel", "Queue remote restore failed for item id=${item.id}", it)
                     onResult(false)
                     return@launch
                 }
+                val restoreTarget = if (needsKeepassRestore(item.originalData)) {
+                    restoreKeepassIfNeeded(item.originalData).getOrElse {
+                        android.util.Log.e("TrashViewModel", "KeePass restore failed for item id=${item.id}", it)
+                        onResult(false)
+                        return@launch
+                    }
+                } else {
+                    null
+                }
                 applyLocalRestore(
                     item.originalData,
+                    restoreTarget = restoreTarget,
                     restoreOutcome = restoreOutcome
                 )
+                logTrashRestore(item)
                 onResult(true)
-
-                if (!needsKeepassRestore(item.originalData)) {
-                    logTrashRestore(item)
-                    return@launch
-                }
             } catch (e: Exception) {
                 android.util.Log.e("TrashViewModel", "Failed to restore item", e)
                 onResult(false)
                 return@launch
-            }
-
-            viewModelScope.launch keepassRestoreSync@{
-                val keepassRestoreTarget = restoreKeepassIfNeeded(item.originalData).getOrElse {
-                    android.util.Log.e("TrashViewModel", "KeePass restore failed for item id=${item.id}, rolling back local restore", it)
-                    rollbackLocalRestore(item.originalData)
-                    return@keepassRestoreSync
-                }
-                applyLocalRestore(
-                    item.originalData,
-                    restoreTarget = keepassRestoreTarget,
-                    restoreOutcome = restoreOutcome
-                )
-                logTrashRestore(item)
-                android.util.Log.i("TrashViewModel", "KeePass restore synced: id=${item.id}, type=${item.itemType}")
             }
         }
     }
@@ -503,9 +444,13 @@ class TrashViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun cleanupExpiredItems() {
         viewModelScope.launch {
-            val settings = trashSettings.value
-            if (settings.autoDeleteDays <= 0) return@launch
-            
+            cleanupExpiredItemsNow(trashSettings.value)
+        }
+    }
+
+    private suspend fun cleanupExpiredItemsNow(settings: TrashSettings) {
+            if (!settings.shouldAutoCleanup()) return
+
             val cutoffDate = Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(settings.autoDeleteDays.toLong()))
             
             try {
@@ -540,7 +485,6 @@ class TrashViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 android.util.Log.e("TrashViewModel", "Failed to cleanup expired items", e)
             }
-        }
     }
 
     private fun buildRestoredPasswordEntry(

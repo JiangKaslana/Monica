@@ -43,7 +43,14 @@ sealed interface TimelineEvent {
         val itemType: String = "",
         val operationType: String = "",
         val isReverted: Boolean = false,
-        val changes: List<DiffChange> = emptyList()
+        val changes: List<DiffChange> = emptyList(),
+        /** 仅在底层保存了可验证、可解析的恢复载荷时为 true。 */
+        val canRevert: Boolean = false,
+        /** 普通脱敏日志不具备创建旧版本副本的能力。 */
+        val canSaveOldAsNew: Boolean = false,
+        val hasRedactedChanges: Boolean = false,
+        val snapshotId: Long? = null,
+        val hasEncryptedSnapshot: Boolean = false
     ) : TimelineEvent
     
     /**

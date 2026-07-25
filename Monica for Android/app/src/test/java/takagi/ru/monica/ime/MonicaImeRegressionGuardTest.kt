@@ -137,6 +137,37 @@ class MonicaImeRegressionGuardTest {
     }
 
     @Test
+    fun imePasswordSearchUsesMonicaKeyboardWithoutWritingIntoTargetField() {
+        val serviceSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ime/MonicaInputMethodService.kt"
+        ).readText()
+        val uiSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ime/MonicaInputMethodUi.kt"
+        ).readText()
+
+        assertTrue(
+            "IME search needs an explicit editing state so Monica keyboard keys can target the query.",
+            uiSource.contains("val isSearchEditing: Boolean = false")
+        )
+        assertTrue(
+            "IME search keys must update the internal query before external text commit is considered.",
+            serviceSource.indexOf("if (currentState.isSearchEditing)") in 0 until
+                serviceSource.indexOf("commitExternalText(text)")
+        )
+        assertTrue(
+            "Password panel needs a visible search control and a dedicated editing toolbar.",
+            uiSource.contains("ImePasswordControls(") &&
+                uiSource.contains("ImeSearchToolbar(")
+        )
+        assertFalse(
+            "Password refresh must not force its query back to an empty string.",
+            serviceSource.contains(
+                "if (currentState.activePanel == MonicaImePanel.PASSWORDS) {\n            \"\""
+            )
+        )
+    }
+
+    @Test
     fun imeSecondaryVaultListsUseTheSameNavigationBarAsPasswords() {
         val uiSource = projectFile(
             "app/src/main/java/takagi/ru/monica/ime/MonicaInputMethodUi.kt"
@@ -159,6 +190,64 @@ class MonicaImeRegressionGuardTest {
             cardWalletPane.contains("val lazyListState = rememberLazyListState()") &&
                 cardWalletPane.contains("buildImeLetterIndex(itemCount = uiState.cardWalletEntries.size)") &&
                 cardWalletPane.contains("VelocityScrollBar(")
+        )
+    }
+
+    @Test
+    fun imePickerDoesNotDependOnExternalKeyboardSwitcher() {
+        val serviceSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ime/MonicaInputMethodService.kt"
+        ).readText()
+        val pickerSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/autofill_ng/AutofillPickerActivityV2.kt"
+        ).readText()
+        val preferencesSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/autofill_ng/AutofillPreferences.kt"
+        ).readText()
+        val settingsSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/AutofillSettingsV2Screen.kt"
+        ).readText()
+        val manifestSource = projectFile("app/src/main/AndroidManifest.xml").readText()
+        val pickerLaunchSource = serviceSource
+            .substringAfter("private fun openAutofillPickerPage()")
+            .substringBefore("private fun requestRefreshVaultEntries(")
+
+        assertTrue(
+            "The full picker must still open directly from Monica Keyboard.",
+            pickerLaunchSource.contains("startActivity(") &&
+                pickerLaunchSource.contains("EXTRA_IME_MODE")
+        )
+        assertFalse(
+            "The picker must not require an external app, ADB-granted permission, or a return session.",
+            pickerLaunchSource.contains("KeyboardSwitcherCompat") ||
+                pickerLaunchSource.contains("EXTRA_RETURN_TO_MONICA_IME") ||
+                pickerSource.contains("KeyboardSwitcherCompat") ||
+                preferencesSource.contains("KEY_IME_KEYBOARD_SWITCHER") ||
+                settingsSource.contains("keyboardSwitcher") ||
+                manifestSource.contains("com.kunzisoft.keyboard.switcher") ||
+                pickerLaunchSource.contains("trySwitchToPreviousInputMethod()") ||
+                pickerLaunchSource.contains("delay(120L)")
+        )
+    }
+
+    @Test
+    fun imeDatabaseSelectorStaysInsideTheKeyboardSurface() {
+        val uiSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ime/MonicaInputMethodUi.kt"
+        ).readText()
+        val selectorSource = uiSource
+            .substringAfter("private fun ImeDatabaseScopeSelector(")
+            .substringBefore("private enum class ConnectedToolbarPosition")
+
+        assertFalse(
+            "The database selector must not use a popup that can escape the IME window.",
+            selectorSource.contains("DropdownMenu(")
+        )
+        assertTrue(
+            "The database choices must be rendered as a scrollable layer inside UnlockedVaultPane.",
+            uiSource.contains("private fun ImeDatabaseScopeMenu(") &&
+                uiSource.contains("databaseMenuExpanded") &&
+                uiSource.contains("LazyColumn(")
         )
     }
 

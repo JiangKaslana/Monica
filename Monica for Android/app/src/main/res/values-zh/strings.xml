@@ -104,6 +104,12 @@
     <string name="ime_unlock_open_app">解锁</string>
     <string name="ime_unlock_open_app_error">无法打开解锁页面。</string>
     <string name="ime_search_accounts">搜索账号</string>
+    <string name="ime_search_results_count">%1$d 项</string>
+    <string name="ime_sort_alphabetical">按字母排序</string>
+    <string name="ime_sort_relevance">恢复智能排序</string>
+    <string name="ime_settings_title">Monica 键盘</string>
+    <string name="ime_manage_input_methods">管理输入法</string>
+    <string name="ime_manage_input_methods_desc">在系统设置中启用 Monica 键盘或切换当前输入法</string>
     <string name="ime_picker_title">密码选择器</string>
     <string name="ime_picker_subtitle">先选择数据库，再点条目即可直接填入当前表单。</string>
     <string name="ime_quick_fill">立即填充</string>
@@ -1310,7 +1316,7 @@
     <string name="custom_icon_load_more">加载更多图标（剩余 %1$d 个）</string>
     <string name="custom_icon_upload_success">图标上传成功</string>
     <string name="custom_icon_upload_failed">上传失败：%1$s</string>
-    <string name="settings_version_number">V1.0.296</string>
+    <string name="settings_version_number">V1.0.297</string>
     <string name="settings_support_author">支持作者</string>
     <string name="settings_support_author_description">感谢您的支持</string>
     <string name="settings_privacy_policy">隐私政策</string>
@@ -2869,6 +2875,7 @@
     <string name="timeline_date_this_week">本周</string>
     <string name="timeline_date_month_day">MM月dd日</string>
     <string name="timeline_empty_hint">您的操作记录将会显示在这里</string>
+    <string name="timeline_search_hint">搜索操作记录</string>
     <string name="timeline_op_create">新建</string>
     <string name="timeline_op_update">编辑</string>
     <string name="timeline_op_delete">删除</string>
@@ -2888,6 +2895,9 @@
     <string name="timeline_tap_expand_for_details">点击展开查看详情</string>
     <string name="timeline_log_meta_with_time">%1$s · %2$s · %3$s</string>
     <string name="timeline_change_details">变更详情</string>
+    <string name="timeline_sensitive_change_not_stored">敏感内容未记录</string>
+    <string name="timeline_snapshot_loading">正在加载加密版本历史…</string>
+    <string name="timeline_snapshot_unlock_required">请重新解锁 Monica 后查看此版本</string>
     <string name="timeline_field_password">密码</string>
     <string name="timeline_field_batch_move">批量移动</string>
     <string name="timeline_field_batch_copy">批量复制</string>
@@ -3999,4 +4009,7 @@
     <string name="passkey_detail_transports">传输方式</string>
     <string name="passkey_detail_user_verification">用户验证</string>
     <string name="passkey_binding_description">绑定后可将通行密钥与对应账号放在一起管理。</string>
+    <string name="timeline_show_sensitive_values">显示敏感内容</string>
+    <string name="timeline_hide_sensitive_values">隐藏敏感内容</string>
+    <string name="timeline_restore_failed">无法恢复，条目可能在此版本之后又发生了修改。</string>
 </resources>

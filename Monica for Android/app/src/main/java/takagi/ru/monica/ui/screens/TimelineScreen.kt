@@ -61,6 +61,8 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,11 +88,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
 import takagi.ru.monica.data.LocalKeePassDatabase
+import takagi.ru.monica.data.LocalMdbxDatabase
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.SecureItem
+import takagi.ru.monica.data.areTimelineSnapshotFieldsReversible
 import takagi.ru.monica.data.bitwarden.BitwardenVault
 import takagi.ru.monica.data.model.TimelineBranch
+import takagi.ru.monica.data.model.DiffChange
 import takagi.ru.monica.data.model.TimelineEvent
 import takagi.ru.monica.ui.components.DiffComparisonSheet
 import takagi.ru.monica.ui.components.ExpressiveTopBar
@@ -530,17 +535,35 @@ private fun TimelineContent(
     val database = remember(context) { PasswordDatabase.getDatabase(context.applicationContext) }
     val bitwardenVaults by database.bitwardenVaultDao().getAllVaultsFlow().collectAsState(initial = emptyList())
     val keepassDatabases by database.localKeePassDatabaseDao().getAllDatabases().collectAsState(initial = emptyList())
+    val mdbxDatabases by database.localMdbxDatabaseDao().getAllDatabases().collectAsState(initial = emptyList())
     val activePasswordEntries by database.passwordEntryDao().getAllPasswordEntries().collectAsState(initial = emptyList())
     val deletedPasswordEntries by database.passwordEntryDao().getDeletedEntries().collectAsState(initial = emptyList())
     val activeSecureItems by database.secureItemDao().getAllItems().collectAsState(initial = emptyList())
     val deletedSecureItems by database.secureItemDao().getDeletedItems().collectAsState(initial = emptyList())
+    val passkeys by database.passkeyDao().getAllPasskeys().collectAsState(initial = emptyList())
 
+    val allLabel = stringResource(R.string.filter_all)
     val localLabel = stringResource(R.string.filter_monica)
     val bitwardenLabel = stringResource(R.string.filter_bitwarden)
     val keepassLabel = stringResource(R.string.filter_keepass)
 
-    val scopeOptions = remember(localLabel, bitwardenLabel, keepassLabel, bitwardenVaults, keepassDatabases) {
+    val scopeOptions = remember(
+        allLabel,
+        localLabel,
+        bitwardenLabel,
+        keepassLabel,
+        bitwardenVaults,
+        keepassDatabases,
+        mdbxDatabases
+    ) {
         buildList {
+            add(
+                TrashScopeFilterOption(
+                    key = TrashScopeFilter.All.key,
+                    label = allLabel,
+                    scope = TrashScopeFilter.All
+                )
+            )
             add(
                 TrashScopeFilterOption(
                     key = TrashScopeFilter.Local.key,
@@ -567,58 +590,187 @@ private fun TimelineContent(
                     )
                 )
             }
+            mdbxDatabases.forEach { mdbx ->
+                add(
+                    TrashScopeFilterOption(
+                        key = TrashScopeFilter.MdbxDatabaseScope(mdbx.id).key,
+                        label = "MDBX · ${mdbx.name}",
+                        scope = TrashScopeFilter.MdbxDatabaseScope(mdbx.id)
+                    )
+                )
+            }
         }
     }
 
-    var selectedScopeKey by rememberSaveable { mutableStateOf(TrashScopeFilter.Local.key) }
+    var selectedScopeKey by rememberSaveable { mutableStateOf(TrashScopeFilter.All.key) }
     var showScopeSelectionSheet by remember { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
 
-    val selectedScope = scopeOptions.firstOrNull { it.key == selectedScopeKey }?.scope ?: TrashScopeFilter.Local
+    val selectedScope = scopeOptions.firstOrNull { it.key == selectedScopeKey }?.scope ?: TrashScopeFilter.All
 
     LaunchedEffect(scopeOptions) {
         if (scopeOptions.none { it.key == selectedScopeKey }) {
-            selectedScopeKey = scopeOptions.firstOrNull()?.key ?: TrashScopeFilter.Local.key
+            selectedScopeKey = scopeOptions.firstOrNull()?.key ?: TrashScopeFilter.All.key
         }
     }
 
     val passwordScopeById = remember(activePasswordEntries, deletedPasswordEntries) {
         buildMap<Long, TrashScopeFilter> {
             (activePasswordEntries + deletedPasswordEntries).forEach { entry ->
-                put(entry.id, resolveScopeFilter(entry.bitwardenVaultId, entry.keepassDatabaseId))
+                put(
+                    entry.id,
+                    resolveScopeFilter(
+                        bitwardenVaultId = entry.bitwardenVaultId,
+                        keepassDatabaseId = entry.keepassDatabaseId,
+                        mdbxDatabaseId = entry.mdbxDatabaseId
+                    )
+                )
             }
         }
     }
     val secureItemScopeById = remember(activeSecureItems, deletedSecureItems) {
         buildMap<Long, TrashScopeFilter> {
             (activeSecureItems + deletedSecureItems).forEach { item ->
-                put(item.id, resolveScopeFilter(item.bitwardenVaultId, item.keepassDatabaseId))
+                put(
+                    item.id,
+                    resolveScopeFilter(
+                        bitwardenVaultId = item.bitwardenVaultId,
+                        keepassDatabaseId = item.keepassDatabaseId,
+                        mdbxDatabaseId = item.mdbxDatabaseId
+                    )
+                )
             }
         }
     }
+    val passkeyScopeById = remember(passkeys) {
+        passkeys.associate { passkey ->
+            passkey.id to resolveScopeFilter(
+                bitwardenVaultId = passkey.bitwardenVaultId,
+                keepassDatabaseId = passkey.keepassDatabaseId,
+                mdbxDatabaseId = passkey.mdbxDatabaseId
+            )
+        }
+    }
+    val passwordTitleById = remember(activePasswordEntries, deletedPasswordEntries) {
+        (activePasswordEntries + deletedPasswordEntries).associate { it.id to it.title }
+    }
+    val secureItemTitleById = remember(activeSecureItems, deletedSecureItems) {
+        (activeSecureItems + deletedSecureItems).associate { it.id to it.title }
+    }
+    val passwordSnapshotRestoreAllowedById = remember(activePasswordEntries, deletedPasswordEntries) {
+        (activePasswordEntries + deletedPasswordEntries).associate {
+            it.id to (it.keepassDatabaseId == null)
+        }
+    }
+    val secureSnapshotRestoreAllowedById = remember(activeSecureItems, deletedSecureItems) {
+        (activeSecureItems + deletedSecureItems).associate {
+            it.id to (it.keepassDatabaseId == null)
+        }
+    }
+    val passkeyTitleById = remember(passkeys) {
+        passkeys.associate { it.id to it.displayTitle() }
+    }
+
+    val itemTypeLabels = mapOf(
+        "PASSWORD" to stringResource(R.string.timeline_item_password),
+        "TOTP" to stringResource(R.string.timeline_item_authenticator),
+        "PASSKEY" to stringResource(R.string.passkey_title),
+        "BANK_CARD" to stringResource(R.string.timeline_item_card),
+        "NOTE" to stringResource(R.string.timeline_item_note),
+        "DOCUMENT" to stringResource(R.string.timeline_item_document),
+        "BILLING_ADDRESS" to stringResource(R.string.billing_address),
+        "PAYMENT_ACCOUNT" to stringResource(R.string.payment_account),
+        "CATEGORY" to stringResource(R.string.category),
+        "KEEPASS_DATABASE" to stringResource(R.string.database_source_keepass),
+        "KEEPASS_GROUP" to stringResource(R.string.v2_keepass_groups),
+        "BITWARDEN_SEND" to stringResource(R.string.send_screen_title),
+        "BITWARDEN_SYNC" to stringResource(R.string.sync_backup_bitwarden_sync_title),
+        "BITWARDEN_CONFLICT" to stringResource(R.string.sync_conflict),
+        "WEBDAV_UPLOAD" to stringResource(R.string.timeline_item_cloud_backup),
+        "WEBDAV_DOWNLOAD" to stringResource(R.string.timeline_item_cloud_restore)
+    )
 
     var selectedBranch by remember { mutableStateOf<TimelineBranch?>(null) }
     var selectedLog by remember { mutableStateOf<TimelineEvent.StandardLog?>(null) }
+    var selectedSnapshotChanges by remember { mutableStateOf<List<DiffChange>?>(null) }
+    var selectedSnapshotLoaded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedLog?.id) {
+        selectedSnapshotChanges = null
+        selectedSnapshotLoaded = false
+        val log = selectedLog
+        if (log?.hasEncryptedSnapshot == true) {
+            selectedSnapshotChanges = viewModel.readEncryptedSnapshot(log.id)
+            selectedSnapshotLoaded = true
+        }
+    }
 
     val colorScheme = MaterialTheme.colorScheme
 
-    val scopedTimelineEvents = remember(timelineEvents, selectedScope, passwordScopeById, secureItemScopeById) {
+    val scopedTimelineEvents = remember(
+        timelineEvents,
+        selectedScope,
+        passwordScopeById,
+        secureItemScopeById,
+        passkeyScopeById
+    ) {
         timelineEvents.filter { event ->
             matchesTimelineScope(
                 event = event,
                 selectedScope = selectedScope,
                 passwordScopeById = passwordScopeById,
-                secureItemScopeById = secureItemScopeById
+                secureItemScopeById = secureItemScopeById,
+                passkeyScopeById = passkeyScopeById
             )
         }
     }
-    val visibleTimelineEvents = remember(scopedTimelineEvents, searchQuery) {
+    val displayTimelineEvents = remember(
+        scopedTimelineEvents,
+        passwordTitleById,
+        secureItemTitleById,
+        passkeyTitleById,
+        passwordSnapshotRestoreAllowedById,
+        secureSnapshotRestoreAllowedById,
+        itemTypeLabels
+    ) {
+        scopedTimelineEvents.map { event ->
+            when (event) {
+                is TimelineEvent.StandardLog -> {
+                    val currentTitle = when (event.itemType) {
+                        "PASSWORD" -> passwordTitleById[event.itemId]
+                        "TOTP", "BANK_CARD", "NOTE", "DOCUMENT", "BILLING_ADDRESS", "PAYMENT_ACCOUNT" ->
+                            secureItemTitleById[event.itemId]
+                        "PASSKEY" -> passkeyTitleById[event.itemId]
+                        else -> null
+                    }
+                    val providerRestoreAllowed = when (event.itemType) {
+                        "PASSWORD" -> passwordSnapshotRestoreAllowedById[event.itemId] == true
+                        "TOTP", "BANK_CARD", "NOTE", "DOCUMENT", "BILLING_ADDRESS", "PAYMENT_ACCOUNT" ->
+                            secureSnapshotRestoreAllowedById[event.itemId] == true
+                        else -> false
+                    }
+                    event.copy(
+                        summary = resolveTimelineDisplaySummary(
+                            log = event,
+                            currentTitle = currentTitle,
+                            genericTypeLabel = itemTypeLabels[event.itemType]
+                                ?: itemTypeLabels.getValue("DOCUMENT")
+                        ),
+                        canRevert = event.canRevert && providerRestoreAllowed,
+                        canSaveOldAsNew = event.canSaveOldAsNew && providerRestoreAllowed
+                    )
+                }
+                is TimelineEvent.ConflictBranch -> event
+            }
+        }
+    }
+    val visibleTimelineEvents = remember(displayTimelineEvents, searchQuery) {
         val keyword = searchQuery.trim()
         if (keyword.isBlank()) {
-            scopedTimelineEvents
+            displayTimelineEvents
         } else {
-            scopedTimelineEvents.filter { event -> matchesTimelineSearch(event, keyword) }
+            displayTimelineEvents.filter { event -> matchesTimelineSearch(event, keyword) }
         }
     }
     val groups = groupAndAggregateEvents(visibleTimelineEvents)
@@ -649,14 +801,14 @@ private fun TimelineContent(
                 },
                 onOpenScopeSheet = { showScopeSelectionSheet = true },
                 onNavigateToPasswordPage = onNavigateToPasswordPage,
-                onRefreshClick = { viewModel.refresh() },
                 scopeMenu = {
                     TrashScopeFilterChipMenu(
                         expanded = showScopeSelectionSheet,
                         onDismissRequest = { showScopeSelectionSheet = false },
                         selectedScope = selectedScope,
-                        fallbackScope = TrashScopeFilter.Local,
+                        fallbackScope = TrashScopeFilter.All,
                         keepassDatabases = keepassDatabases,
+                        mdbxDatabases = mdbxDatabases,
                         bitwardenVaults = bitwardenVaults,
                         database = database,
                         onSelectedScopeKeyChange = { selectedScopeKey = it }
@@ -760,6 +912,8 @@ private fun TimelineContent(
     selectedLog?.let { log ->
         StandardLogDetailSheet(
             log = log,
+            snapshotChanges = selectedSnapshotChanges,
+            snapshotLoaded = selectedSnapshotLoaded,
             onDismiss = { selectedLog = null },
             onRevert = { 
                 viewModel.revertEdit(log) { success ->
@@ -793,18 +947,15 @@ private fun TimelineHeaderBar(
     onSearchExpandedChange: (Boolean) -> Unit,
     onOpenScopeSheet: () -> Unit,
     onNavigateToPasswordPage: (() -> Unit)?,
-    onRefreshClick: () -> Unit,
     scopeMenu: @Composable () -> Unit = {}
 ) {
-    var topActionsMenuExpanded by remember { mutableStateOf(false) }
-
     ExpressiveTopBar(
         title = stringResource(R.string.timeline_title),
         searchQuery = searchQuery,
         onSearchQueryChange = onSearchQueryChange,
         isSearchExpanded = isSearchExpanded,
         onSearchExpandedChange = onSearchExpandedChange,
-        searchHint = stringResource(R.string.search_passwords_hint),
+        searchHint = stringResource(R.string.timeline_search_hint),
         actions = {
             if (onNavigateToPasswordPage != null) {
                 IconButton(onClick = onNavigateToPasswordPage) {
@@ -831,46 +982,6 @@ private fun TimelineHeaderBar(
                     contentDescription = stringResource(R.string.search),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-            Box {
-                IconButton(onClick = { topActionsMenuExpanded = true }) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = stringResource(R.string.more_options),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                MaterialTheme(
-                    shapes = MaterialTheme.shapes.copy(
-                        extraSmall = RoundedCornerShape(20.dp),
-                        small = RoundedCornerShape(20.dp)
-                    )
-                ) {
-                    DropdownMenu(
-                        expanded = topActionsMenuExpanded,
-                        onDismissRequest = { topActionsMenuExpanded = false },
-                        offset = DpOffset(x = 48.dp, y = 6.dp),
-                        modifier = Modifier
-                            .widthIn(min = 220.dp, max = 260.dp)
-                            .shadow(10.dp, RoundedCornerShape(20.dp))
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.refresh)) },
-                            leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
-                            onClick = {
-                                topActionsMenuExpanded = false
-                                onRefreshClick()
-                            }
-                        )
-                    }
-                }
             }
         }
     )
@@ -986,6 +1097,8 @@ private fun getItemTypeIcon(itemType: String): ImageVector {
         "BANK_CARD" -> Icons.Default.CreditCard
         "NOTE" -> Icons.Default.Note
         "DOCUMENT" -> Icons.Default.Description
+        "BILLING_ADDRESS" -> Icons.Default.Home
+        "PAYMENT_ACCOUNT" -> Icons.Default.AccountBalanceWallet
         "CATEGORY" -> Icons.Default.Folder
         "KEEPASS_DATABASE" -> Icons.Default.Storage
         "KEEPASS_GROUP" -> Icons.Default.AccountTree
@@ -1023,6 +1136,8 @@ private fun getItemTypeLabel(itemType: String): String {
         "BANK_CARD" -> stringResource(R.string.timeline_item_card)
         "NOTE" -> stringResource(R.string.timeline_item_note)
         "DOCUMENT" -> stringResource(R.string.timeline_item_document)
+        "BILLING_ADDRESS" -> stringResource(R.string.billing_address)
+        "PAYMENT_ACCOUNT" -> stringResource(R.string.payment_account)
         "CATEGORY" -> stringResource(R.string.category)
         "KEEPASS_DATABASE" -> stringResource(R.string.database_source_keepass)
         "KEEPASS_GROUP" -> stringResource(R.string.v2_keepass_groups)
@@ -1388,22 +1503,32 @@ private fun SafeAnimatedVisibility(
 @Composable
 private fun StandardLogDetailSheet(
     log: TimelineEvent.StandardLog,
+    snapshotChanges: List<DiffChange>? = null,
+    snapshotLoaded: Boolean = false,
     onDismiss: () -> Unit,
     onRevert: () -> Unit = {},
     onSaveOldAsNew: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val colorScheme = MaterialTheme.colorScheme
+    var sensitiveValuesVisible by remember(log.id) { mutableStateOf(false) }
     
-    var passwordVisible by remember { mutableStateOf(false) }
-    
-    val isUpdateOperation = log.operationType == "UPDATE"
-    val hasOldValues = log.changes.any { it.oldValue.isNotBlank() }
-    val isBatchOperation = log.changes.any {
+    val displayedChanges = (snapshotChanges ?: log.changes).filterNot { change ->
+        takagi.ru.monica.data.isTimelineSnapshotInternalField(change.fieldName)
+    }
+    val isSnapshotAvailable = log.hasEncryptedSnapshot && snapshotLoaded && snapshotChanges != null
+    val isSnapshotReversible = isSnapshotAvailable && areTimelineSnapshotFieldsReversible(
+        itemType = log.itemType,
+        fieldNames = snapshotChanges.orEmpty().map(DiffChange::fieldName)
+    )
+    val hasMaskedSnapshotValues = isSnapshotAvailable && displayedChanges.any { change ->
+        shouldMaskTimelineSnapshotField(log.itemType, change.fieldName)
+    }
+    val isBatchOperation = displayedChanges.any {
         it.fieldName == stringResource(R.string.timeline_field_batch_move) ||
             it.fieldName == stringResource(R.string.timeline_field_batch_copy)
     }
-    val isMaintenanceSnapshotOperation = log.changes.any {
+    val isMaintenanceSnapshotOperation = displayedChanges.any {
         it.fieldName == stringResource(R.string.timeline_field_maintenance_snapshot)
     }
     val hasRestorablePayload = isBatchOperation || isMaintenanceSnapshotOperation
@@ -1420,6 +1545,7 @@ private fun StandardLogDetailSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -1493,7 +1619,18 @@ private fun StandardLogDetailSheet(
             HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.5f))
             
             // 变更详情
-            if (log.changes.isEmpty()) {
+            if (log.hasEncryptedSnapshot && !isSnapshotAvailable) {
+                Text(
+                    text = if (!snapshotLoaded) {
+                        stringResource(R.string.timeline_snapshot_loading)
+                    } else {
+                        stringResource(R.string.timeline_snapshot_unlock_required)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant
+                )
+            }
+            if (displayedChanges.isEmpty()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -1518,109 +1655,103 @@ private fun StandardLogDetailSheet(
                     }
                 }
             } else {
-                // 变更列表
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.timeline_change_details),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium,
-                        color = colorScheme.onSurface
-                    )
-                    
-                    log.changes.forEach { change ->
-                        val isRealPasswordField = (change.fieldName == stringResource(R.string.timeline_field_password) || change.fieldName == stringResource(R.string.password)) &&
-                            !change.newValue.endsWith(stringResource(R.string.timeline_count_suffix_items))
-                        
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.timeline_change_details),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (hasMaskedSnapshotValues) {
+                            IconButton(
+                                onClick = { sensitiveValuesVisible = !sensitiveValuesVisible }
+                            ) {
+                                Icon(
+                                    imageVector = if (sensitiveValuesVisible) {
+                                        Icons.Default.VisibilityOff
+                                    } else {
+                                        Icons.Default.Visibility
+                                    },
+                                    contentDescription = stringResource(
+                                        if (sensitiveValuesVisible) {
+                                            R.string.timeline_hide_sensitive_values
+                                        } else {
+                                            R.string.timeline_show_sensitive_values
+                                        }
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    displayedChanges.forEach { change ->
+                        val isUnrecoverableSensitiveChange =
+                            !isSnapshotAvailable && change.isTimelineSensitiveChange()
+                        val isMaskedSnapshotChange = isSnapshotAvailable &&
+                            shouldMaskTimelineSnapshotField(log.itemType, change.fieldName) &&
+                            !sensitiveValuesVisible
+
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             color = colorScheme.surfaceContainerLow
                         ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = change.fieldName,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = colorScheme.primary,
-                                        fontWeight = FontWeight.Medium
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = change.fieldName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                when {
+                                    isUnrecoverableSensitiveChange -> Text(
+                                        text = stringResource(R.string.timeline_sensitive_change_not_stored),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colorScheme.onSurfaceVariant
                                     )
-                                    
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    
-                                    if (isRealPasswordField) {
-                                        val displayValue = if (passwordVisible) {
-                                            if (change.oldValue.isNotBlank()) {
-                                                "${change.oldValue} → ${change.newValue}"
-                                            } else {
-                                                change.newValue
-                                            }
-                                        } else {
-                                            if (change.oldValue.isNotBlank()) {
-                                                "●●●●●● → ●●●●●●"
-                                            } else {
-                                                "●●●●●●"
-                                            }
-                                        }
-                                        Text(
-                                            text = displayValue,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = colorScheme.onSurface
-                                        )
-                                    } else {
-                                        if (change.oldValue.isNotBlank()) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                Text(
-                                                    text = change.oldValue,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.weight(1f, fill = false),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = "→",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = colorScheme.primary
-                                                )
-                                                Text(
-                                                    text = change.newValue,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = colorScheme.onSurface,
-                                                    modifier = Modifier.weight(1f, fill = false),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        } else {
-                                            Text(
-                                                text = change.newValue,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = colorScheme.onSurface
-                                            )
-                                        }
-                                    }
-                                }
-                                
-                                if (isRealPasswordField) {
-                                    IconButton(
-                                        onClick = { passwordVisible = !passwordVisible },
-                                        modifier = Modifier.size(36.dp)
+                                    isMaskedSnapshotChange -> Text(
+                                        text = "●●●●●● → ●●●●●●",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colorScheme.onSurface
+                                    )
+                                    change.oldValue.isNotBlank() -> Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                            contentDescription = if (passwordVisible) stringResource(R.string.hide_password) else stringResource(R.string.show_password),
-                                            tint = colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
+                                        Text(
+                                            text = change.oldValue,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "→",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colorScheme.primary
+                                        )
+                                        Text(
+                                            text = change.newValue,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
+                                    else -> Text(
+                                        text = change.newValue,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colorScheme.onSurface
+                                    )
                                 }
                             }
                         }
@@ -1629,7 +1760,8 @@ private fun StandardLogDetailSheet(
             }
             
             // 操作按钮
-            if (isUpdateOperation && (hasOldValues || hasRestorablePayload) && (!hasRestorablePayload || !log.isReverted)) {
+            val canUseSnapshotActions = !log.hasEncryptedSnapshot || isSnapshotReversible
+            if (log.canRevert && canUseSnapshotActions && (!hasRestorablePayload || !log.isReverted)) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -1659,7 +1791,7 @@ private fun StandardLogDetailSheet(
                         )
                     }
                     
-                    if (!log.isReverted && !hasRestorablePayload) {
+                    if (log.canSaveOldAsNew && canUseSnapshotActions && !log.isReverted && !hasRestorablePayload) {
                         OutlinedButton(
                             onClick = onSaveOldAsNew,
                             modifier = Modifier.fillMaxWidth(),
@@ -1973,6 +2105,7 @@ private sealed interface TrashScopeFilter {
     object Local : TrashScopeFilter
     data class BitwardenVaultScope(val vaultId: Long) : TrashScopeFilter
     data class KeePassDatabaseScope(val databaseId: Long) : TrashScopeFilter
+    data class MdbxDatabaseScope(val databaseId: Long) : TrashScopeFilter
 }
 
 private data class TrashScopeFilterOption(
@@ -1987,6 +2120,7 @@ private val TrashScopeFilter.key: String
         TrashScopeFilter.Local -> "local"
         is TrashScopeFilter.BitwardenVaultScope -> "bitwarden_${this.vaultId}"
         is TrashScopeFilter.KeePassDatabaseScope -> "keepass_${this.databaseId}"
+        is TrashScopeFilter.MdbxDatabaseScope -> "mdbx_${this.databaseId}"
     }
 
 private fun TrashScopeFilter.toUnifiedCategoryFilterSelection(): UnifiedCategoryFilterSelection {
@@ -1997,6 +2131,8 @@ private fun TrashScopeFilter.toUnifiedCategoryFilterSelection(): UnifiedCategory
             UnifiedCategoryFilterSelection.BitwardenVaultFilter(vaultId)
         is TrashScopeFilter.KeePassDatabaseScope ->
             UnifiedCategoryFilterSelection.KeePassDatabaseFilter(databaseId)
+        is TrashScopeFilter.MdbxDatabaseScope ->
+            UnifiedCategoryFilterSelection.MdbxDatabaseFilter(databaseId)
     }
 }
 
@@ -2024,6 +2160,10 @@ private fun UnifiedCategoryFilterSelection.toTrashScopeFilter(
             TrashScopeFilter.KeePassDatabaseScope(databaseId)
         is UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter ->
             TrashScopeFilter.KeePassDatabaseScope(databaseId)
+        is UnifiedCategoryFilterSelection.MdbxDatabaseFilter ->
+            TrashScopeFilter.MdbxDatabaseScope(databaseId)
+        is UnifiedCategoryFilterSelection.MdbxFolderFilter ->
+            TrashScopeFilter.MdbxDatabaseScope(databaseId)
         else -> fallbackScope
     }
 }
@@ -2035,6 +2175,7 @@ private fun TrashScopeFilterChipMenu(
     selectedScope: TrashScopeFilter,
     fallbackScope: TrashScopeFilter,
     keepassDatabases: List<LocalKeePassDatabase>,
+    mdbxDatabases: List<LocalMdbxDatabase>,
     bitwardenVaults: List<BitwardenVault>,
     database: PasswordDatabase,
     onSelectedScopeKeyChange: (String) -> Unit
@@ -2057,6 +2198,7 @@ private fun TrashScopeFilterChipMenu(
             },
             categories = emptyList(),
             keepassDatabases = keepassDatabases,
+            mdbxDatabases = mdbxDatabases,
             bitwardenVaults = bitwardenVaults,
             getBitwardenFolders = { vaultId ->
                 database.bitwardenFolderDao().getFoldersByVaultFlow(vaultId)
@@ -2068,11 +2210,13 @@ private fun TrashScopeFilterChipMenu(
 
 private fun resolveScopeFilter(
     bitwardenVaultId: Long?,
-    keepassDatabaseId: Long?
+    keepassDatabaseId: Long?,
+    mdbxDatabaseId: Long? = null
 ): TrashScopeFilter {
     return when {
         bitwardenVaultId != null -> TrashScopeFilter.BitwardenVaultScope(bitwardenVaultId)
         keepassDatabaseId != null -> TrashScopeFilter.KeePassDatabaseScope(keepassDatabaseId)
+        mdbxDatabaseId != null -> TrashScopeFilter.MdbxDatabaseScope(mdbxDatabaseId)
         else -> TrashScopeFilter.Local
     }
 }
@@ -2088,10 +2232,16 @@ private fun resolveTrashScope(item: takagi.ru.monica.viewmodel.TrashItem): Trash
         is SecureItem -> data.keepassDatabaseId
         else -> null
     }
+    val mdbxDatabaseId = when (val data = item.originalData) {
+        is PasswordEntry -> data.mdbxDatabaseId
+        is SecureItem -> data.mdbxDatabaseId
+        else -> null
+    }
 
     return resolveScopeFilter(
         bitwardenVaultId = bitwardenVaultId,
-        keepassDatabaseId = keepassDatabaseId
+        keepassDatabaseId = keepassDatabaseId,
+        mdbxDatabaseId = mdbxDatabaseId
     )
 }
 
@@ -2106,16 +2256,17 @@ private fun matchesTimelineScope(
     event: TimelineEvent,
     selectedScope: TrashScopeFilter,
     passwordScopeById: Map<Long, TrashScopeFilter>,
-    secureItemScopeById: Map<Long, TrashScopeFilter>
+    secureItemScopeById: Map<Long, TrashScopeFilter>,
+    passkeyScopeById: Map<Long, TrashScopeFilter>
 ): Boolean {
-    if (selectedScope == TrashScopeFilter.Local) {
+    if (selectedScope == TrashScopeFilter.All) {
         return true
     }
     val scope = when (event) {
         is TimelineEvent.StandardLog ->
-            resolveTimelineScope(event, passwordScopeById, secureItemScopeById)
+            resolveTimelineScope(event, passwordScopeById, secureItemScopeById, passkeyScopeById)
         is TimelineEvent.ConflictBranch ->
-            resolveTimelineScope(event.ancestor, passwordScopeById, secureItemScopeById)
+            resolveTimelineScope(event.ancestor, passwordScopeById, secureItemScopeById, passkeyScopeById)
     }
     return scope == selectedScope
 }
@@ -2123,12 +2274,14 @@ private fun matchesTimelineScope(
 private fun resolveTimelineScope(
     log: TimelineEvent.StandardLog,
     passwordScopeById: Map<Long, TrashScopeFilter>,
-    secureItemScopeById: Map<Long, TrashScopeFilter>
+    secureItemScopeById: Map<Long, TrashScopeFilter>,
+    passkeyScopeById: Map<Long, TrashScopeFilter>
 ): TrashScopeFilter {
     return when (log.itemType) {
         "PASSWORD" -> passwordScopeById[log.itemId] ?: TrashScopeFilter.Local
-        "TOTP", "BANK_CARD", "NOTE", "DOCUMENT" ->
+        "TOTP", "BANK_CARD", "NOTE", "DOCUMENT", "BILLING_ADDRESS", "PAYMENT_ACCOUNT" ->
             secureItemScopeById[log.itemId] ?: TrashScopeFilter.Local
+        "PASSKEY" -> passkeyScopeById[log.itemId] ?: TrashScopeFilter.Local
         else -> TrashScopeFilter.Local
     }
 }
@@ -2177,6 +2330,7 @@ private fun TrashContent(
     val database = remember(context) { PasswordDatabase.getDatabase(context.applicationContext) }
     val bitwardenVaults by database.bitwardenVaultDao().getAllVaultsFlow().collectAsState(initial = emptyList())
     val keepassDatabases by database.localKeePassDatabaseDao().getAllDatabases().collectAsState(initial = emptyList())
+    val mdbxDatabases by database.localMdbxDatabaseDao().getAllDatabases().collectAsState(initial = emptyList())
 
     val trashCategories by viewModel.trashCategories.collectAsState()
     val trashSettings by viewModel.trashSettings.collectAsState()
@@ -2185,7 +2339,15 @@ private fun TrashContent(
     val bitwardenLabel = stringResource(R.string.filter_bitwarden)
     val keepassLabel = stringResource(R.string.filter_keepass)
 
-    val scopeOptions = remember(allLabel, localLabel, bitwardenLabel, keepassLabel, bitwardenVaults, keepassDatabases) {
+    val scopeOptions = remember(
+        allLabel,
+        localLabel,
+        bitwardenLabel,
+        keepassLabel,
+        bitwardenVaults,
+        keepassDatabases,
+        mdbxDatabases
+    ) {
         buildList {
             add(
                 TrashScopeFilterOption(
@@ -2217,6 +2379,15 @@ private fun TrashContent(
                         key = TrashScopeFilter.KeePassDatabaseScope(keepass.id).key,
                         label = "$keepassLabel · ${keepass.name}",
                         scope = TrashScopeFilter.KeePassDatabaseScope(keepass.id)
+                    )
+                )
+            }
+            mdbxDatabases.forEach { mdbx ->
+                add(
+                    TrashScopeFilterOption(
+                        key = TrashScopeFilter.MdbxDatabaseScope(mdbx.id).key,
+                        label = "MDBX · ${mdbx.name}",
+                        scope = TrashScopeFilter.MdbxDatabaseScope(mdbx.id)
                     )
                 )
             }
@@ -2372,6 +2543,7 @@ private fun TrashContent(
                             selectedScope = selectedScope,
                             fallbackScope = TrashScopeFilter.All,
                             keepassDatabases = keepassDatabases,
+                            mdbxDatabases = mdbxDatabases,
                             bitwardenVaults = bitwardenVaults,
                             database = database,
                             onSelectedScopeKeyChange = { selectedScopeKey = it }
@@ -2955,6 +3127,7 @@ private fun TrashItemActionSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {

@@ -3,6 +3,7 @@ package takagi.ru.monica.utils
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
+import androidx.room.withTransaction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -13,6 +14,9 @@ import takagi.ru.monica.data.OperationLog
 import takagi.ru.monica.data.OperationLogItemType
 import takagi.ru.monica.data.OperationType
 import takagi.ru.monica.data.PasswordDatabase
+import takagi.ru.monica.data.TimelineVersionSnapshot
+import takagi.ru.monica.data.timelineSnapshotCutoff
+import takagi.ru.monica.security.SecurityManager
 
 /**
  * 操作日志记录工具类
@@ -23,6 +27,9 @@ object OperationLogger {
     private var database: PasswordDatabase? = null
     private var deviceId: String = ""
     private var deviceName: String = ""
+    private var securityManager: SecurityManager? = null
+    @Volatile
+    private var lastSnapshotCleanupAt: Long = 0L
     private val scope = CoroutineScope(Dispatchers.IO)
     
     private val json = Json { 
@@ -35,6 +42,7 @@ object OperationLogger {
      */
     fun init(context: Context) {
         database = PasswordDatabase.getDatabase(context)
+        securityManager = SecurityManager(context.applicationContext)
         deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
         deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
     }
@@ -65,7 +73,8 @@ object OperationLogger {
         itemType: OperationLogItemType,
         itemId: Long,
         itemTitle: String,
-        changes: List<FieldChange>
+        changes: List<FieldChange>,
+        snapshotChanges: List<FieldChange> = changes
     ) {
         if (changes.isEmpty()) return // 没有实际变更则不记录
         
@@ -74,7 +83,8 @@ object OperationLogger {
             itemId = itemId,
             itemTitle = itemTitle,
             operationType = OperationType.UPDATE,
-            changes = changes
+            changes = changes,
+            snapshotChanges = snapshotChanges
         )
     }
     
@@ -162,7 +172,8 @@ object OperationLogger {
         itemId: Long,
         itemTitle: String,
         operationType: OperationType,
-        changes: List<FieldChange>
+        changes: List<FieldChange>,
+        snapshotChanges: List<FieldChange> = changes
     ) {
         val db = database
         if (db == null) {
@@ -191,15 +202,94 @@ object OperationLogger {
             timestamp = System.currentTimeMillis()
         )
         
+        val immutableSnapshotChanges = snapshotChanges.toList()
         scope.launch {
             try {
-                db.operationLogDao().insert(operationLog)
+                db.withTransaction {
+                    val operationLogId = db.operationLogDao().insert(operationLog)
+                    persistEncryptedVersionSnapshot(
+                        database = db,
+                        operationLog = operationLog,
+                        operationLogId = operationLogId,
+                        changes = immutableSnapshotChanges
+                    )
+                }
                 android.util.Log.d("OperationLogger", "Successfully logged operation")
             } catch (e: Exception) {
                 android.util.Log.e("OperationLogger", "Failed to log operation", e)
             }
         }
     }
+
+    private suspend fun persistEncryptedVersionSnapshot(
+        database: PasswordDatabase,
+        operationLog: OperationLog,
+        operationLogId: Long,
+        changes: List<FieldChange>
+    ) {
+        if (operationLog.operationType != OperationType.UPDATE.name) return
+        if (operationLog.itemType !in REVERSIBLE_ITEM_TYPES) return
+
+        val snapshotChanges = changes.filter { change ->
+            !change.fieldName.startsWith("__") ||
+                takagi.ru.monica.data.isTimelineSnapshotInternalField(change.fieldName)
+        }
+        if (snapshotChanges.isEmpty()) return
+        if (snapshotChanges.any { change ->
+                change.oldValue.trim().equals("<redacted>", ignoreCase = true) ||
+                    change.newValue.trim().equals("<redacted>", ignoreCase = true)
+            }
+        ) {
+            android.util.Log.w("OperationLogger", "Skipped incomplete encrypted timeline snapshot")
+            return
+        }
+        if (!takagi.ru.monica.data.areTimelineSnapshotFieldsReversible(
+                operationLog.itemType,
+                snapshotChanges.map(FieldChange::fieldName)
+            )
+        ) {
+            android.util.Log.d("OperationLogger", "Skipped non-reversible timeline snapshot")
+            return
+        }
+
+        val manager = securityManager ?: return
+        val encrypted = runCatching {
+            manager.encryptTimelineSnapshot(json.encodeToString(snapshotChanges))
+        }.getOrElse {
+            android.util.Log.w("OperationLogger", "Skipped encrypted timeline snapshot", it)
+            return
+        }
+
+        runCatching {
+            database.timelineVersionSnapshotDao().insert(
+                TimelineVersionSnapshot(
+                    operationLogId = operationLogId,
+                    itemType = operationLog.itemType,
+                    itemId = operationLog.itemId,
+                    operationType = operationLog.operationType,
+                    encryptedChangesJson = encrypted,
+                    createdAt = operationLog.timestamp
+                )
+            )
+            val now = System.currentTimeMillis()
+            if (now - lastSnapshotCleanupAt >= SNAPSHOT_CLEANUP_INTERVAL_MILLIS) {
+                database.timelineVersionSnapshotDao().deleteOlderThan(timelineSnapshotCutoff(now))
+                lastSnapshotCleanupAt = now
+            }
+        }.onFailure {
+            android.util.Log.w("OperationLogger", "Failed to persist encrypted timeline snapshot", it)
+        }
+    }
+
+    private val REVERSIBLE_ITEM_TYPES = setOf(
+        OperationLogItemType.PASSWORD.name,
+        OperationLogItemType.TOTP.name,
+        OperationLogItemType.BANK_CARD.name,
+        OperationLogItemType.DOCUMENT.name,
+        OperationLogItemType.BILLING_ADDRESS.name,
+        OperationLogItemType.NOTE.name
+    )
+    private const val SNAPSHOT_CLEANUP_INTERVAL_MILLIS = 24L * 60L * 60L * 1000L
 
     private fun sanitizeItemTitle(
         itemType: OperationLogItemType,

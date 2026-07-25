@@ -20,6 +20,7 @@ import takagi.ru.monica.keepass.KeePassPendingChangeDao
         SecureItem::class,
         Category::class,
         OperationLog::class,
+        TimelineVersionSnapshot::class,
         LocalKeePassDatabase::class,
         KeepassRemoteSource::class,
         KeepassRemoteSyncState::class,
@@ -44,7 +45,7 @@ import takagi.ru.monica.keepass.KeePassPendingChangeDao
         // KeePass entry-level pending changes
         KeePassPendingChange::class
     ],
-    version = 72,
+    version = 73,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -54,6 +55,7 @@ abstract class PasswordDatabase : RoomDatabase() {
     abstract fun secureItemDao(): SecureItemDao
     abstract fun categoryDao(): CategoryDao
     abstract fun operationLogDao(): OperationLogDao
+    abstract fun timelineVersionSnapshotDao(): TimelineVersionSnapshotDao
     abstract fun localKeePassDatabaseDao(): LocalKeePassDatabaseDao
     abstract fun keepassRemoteSourceDao(): KeepassRemoteSourceDao
     abstract fun keepassRemoteSyncStateDao(): KeepassRemoteSyncStateDao
@@ -2172,6 +2174,33 @@ abstract class PasswordDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_72_73 = object : androidx.room.migration.Migration(72, 73) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS timeline_version_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        operation_log_id INTEGER NOT NULL,
+                        item_type TEXT NOT NULL,
+                        item_id INTEGER NOT NULL,
+                        operation_type TEXT NOT NULL,
+                        encrypted_changes_json TEXT NOT NULL,
+                        created_at INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_timeline_version_snapshots_operation_log_id ON timeline_version_snapshots(operation_log_id)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_timeline_version_snapshots_created_at ON timeline_version_snapshots(created_at)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_timeline_version_snapshots_item_type_item_id ON timeline_version_snapshots(item_type, item_id)"
+                )
+            }
+        }
+
         private fun addColumnIfMissing(
             database: androidx.sqlite.db.SupportSQLiteDatabase,
             tableName: String,
@@ -2272,7 +2301,8 @@ abstract class PasswordDatabase : RoomDatabase() {
                         MIGRATION_68_69,   // Redact sensitive operation log history
                         MIGRATION_69_70,   // KeePass entry-level pending changes
                         MIGRATION_70_71,   // KeePass pending base snapshots
-                        MIGRATION_71_72    // KeePass sync state updated timestamp
+                        MIGRATION_71_72,   // KeePass sync state updated timestamp
+                        MIGRATION_72_73    // Encrypted timeline version snapshots
                     )
                     // 启用多进程失效通知：IME 跑在 :ime 独立进程，主进程需要
                     // 感知 IME 进程对数据库的修改（例如最近填充时间戳等）。

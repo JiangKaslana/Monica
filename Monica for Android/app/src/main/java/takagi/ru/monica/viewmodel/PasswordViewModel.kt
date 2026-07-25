@@ -2630,6 +2630,7 @@ class PasswordViewModel(
             pendingEntry = entryToUpdate,
             incomingPassword = entryToUpdate.password
         )
+        val newPassword = decryptForDisplay(resolvedPassword)
         val persistedEntry = entryToUpdate.copy(
             password = resolvedPassword,
             authenticatorKey = encodeAuthenticatorKeyForStorage(entryToUpdate.authenticatorKey),
@@ -2656,7 +2657,7 @@ class PasswordViewModel(
             return false
         }
 
-        if (oldEntry != null && oldPassword.isNotBlank() && oldPassword != entryToUpdate.password) {
+        if (oldEntry != null && oldPassword.isNotBlank() && oldPassword != newPassword) {
             savePasswordHistorySnapshot(entryToUpdate.id, oldPassword)
         }
 
@@ -2669,20 +2670,21 @@ class PasswordViewModel(
             old = oldEntry,
             new = entryToUpdate,
             fields = listOf(
+                "标题" to { it.title },
                 "用户名" to { it.username },
                 "网站" to { it.website },
                 "备注" to { it.notes }
             )
         )
 
-        // 捕获密码变化，仅记录脱敏占位，避免明文进入日志负载。
-        if (oldEntry != null && oldPassword != entryToUpdate.password) {
+        // 原始值只交给加密版本快照；OperationLogger 写入审计日志前仍会脱敏。
+        if (oldEntry != null && oldPassword != newPassword) {
             val updatedChanges = changes.toMutableList()
             updatedChanges.add(
                 takagi.ru.monica.utils.FieldChange(
                     fieldName = "密码",
-                    oldValue = "<redacted>",
-                    newValue = "<redacted>"
+                    oldValue = oldPassword,
+                    newValue = newPassword
                 )
             )
             takagi.ru.monica.utils.OperationLogger.logUpdate(

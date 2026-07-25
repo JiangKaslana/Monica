@@ -113,43 +113,59 @@ class BillingAddressViewModel(
             val existingItem = repository.getItemById(id) ?: return@launch
             val oldData = parseAddressData(existingItem.itemData)
             val changes = buildList {
-                if (existingItem.title != title) add(redactedChange("标题"))
-                if (existingItem.notes != notes) add(redactedChange("备注"))
+                if (existingItem.title != title) {
+                    add(FieldChange("标题", existingItem.title, title))
+                }
+                if (existingItem.notes != notes) {
+                    add(FieldChange("备注", existingItem.notes, notes))
+                }
                 if (oldData?.fullName != addressData.fullName) {
-                    add(redactedChange("姓名"))
+                    add(FieldChange("姓名", oldData?.fullName.orEmpty(), addressData.fullName))
                 }
                 if (oldData?.company != addressData.company) {
-                    add(redactedChange("公司"))
+                    add(FieldChange("公司", oldData?.company.orEmpty(), addressData.company))
                 }
                 if (oldData?.streetAddress != addressData.streetAddress) {
-                    add(redactedChange("街道地址"))
+                    add(FieldChange("街道地址", oldData?.streetAddress.orEmpty(), addressData.streetAddress))
                 }
                 if (oldData?.apartment != addressData.apartment) {
-                    add(redactedChange("公寓/单元"))
+                    add(FieldChange("公寓/单元", oldData?.apartment.orEmpty(), addressData.apartment))
                 }
                 if (oldData?.city != addressData.city) {
-                    add(redactedChange("城市"))
+                    add(FieldChange("城市", oldData?.city.orEmpty(), addressData.city))
                 }
                 if (oldData?.stateProvince != addressData.stateProvince) {
-                    add(redactedChange("省/州"))
+                    add(FieldChange("省/州", oldData?.stateProvince.orEmpty(), addressData.stateProvince))
                 }
                 if (oldData?.postalCode != addressData.postalCode) {
-                    add(redactedChange("邮编"))
+                    add(FieldChange("邮编", oldData?.postalCode.orEmpty(), addressData.postalCode))
                 }
                 if (oldData?.country != addressData.country) {
-                    add(redactedChange("国家"))
+                    add(FieldChange("国家", oldData?.country.orEmpty(), addressData.country))
                 }
                 if (oldData?.email != addressData.email) {
-                    add(redactedChange("邮箱"))
+                    add(FieldChange("邮箱", oldData?.email.orEmpty(), addressData.email))
                 }
                 if (oldData?.phone != addressData.phone) {
-                    add(redactedChange("电话"))
+                    add(FieldChange("电话", oldData?.phone.orEmpty(), addressData.phone))
                 }
                 if (oldData?.isDefault != addressData.isDefault) {
-                    add(redactedChange("默认状态"))
+                    add(
+                        FieldChange(
+                            "默认状态",
+                            oldData?.isDefault?.toString().orEmpty(),
+                            addressData.isDefault.toString()
+                        )
+                    )
                 }
                 if (oldData?.customFields != addressData.customFields) {
-                    add(redactedChange("自定义字段"))
+                    add(
+                        FieldChange(
+                            "自定义字段",
+                            oldData?.customFields?.toString().orEmpty(),
+                            addressData.customFields.toString()
+                        )
+                    )
                 }
             }
 
@@ -181,7 +197,18 @@ class BillingAddressViewModel(
                 itemType = OperationLogItemType.BILLING_ADDRESS,
                 itemId = id,
                 itemTitle = safeLogTitle,
-                changes = changes.ifEmpty { listOf(redactedChange("更新")) }
+                changes = changes.ifEmpty {
+                    listOf(FieldChange("更新", "编辑前", "已保存"))
+                },
+                snapshotChanges = if (changes.isEmpty()) {
+                    emptyList()
+                } else {
+                    changes + FieldChange(
+                        takagi.ru.monica.data.TIMELINE_SNAPSHOT_FIELD_ITEM_DATA,
+                        existingItem.itemData,
+                        updatedItem.itemData
+                    )
+                }
             )
         }
     }
@@ -317,6 +344,4 @@ class BillingAddressViewModel(
         return securityManager?.encryptDataLegacyCompat(plainValue) ?: plainValue
     }
 
-    private fun redactedChange(fieldName: String): FieldChange =
-        FieldChange(fieldName, "", "已更新")
 }
