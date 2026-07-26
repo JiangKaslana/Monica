@@ -1,16 +1,12 @@
 {
   "repo": "Monica-Pass/Monica",
   "repoUrl": "https://github.com/Monica-Pass/Monica",
-  "generatedAt": "2026-07-25T21:08:23.268Z",
+  "generatedAt": "2026-07-26T21:11:16.637Z",
   "range": {
-    "from": "2025-07-26",
-    "to": "2026-07-25"
+    "from": "2025-07-27",
+    "to": "2026-07-26"
   },
   "activity": [
-    {
-      "date": "2025-07-26",
-      "count": 0
-    },
     {
       "date": "2025-07-27",
       "count": 0
@@ -1465,99 +1461,103 @@
     },
     {
       "date": "2026-07-25",
-      "count": 5
+      "count": 15
+    },
+    {
+      "date": "2026-07-26",
+      "count": 11
     }
   ],
   "latest": [
     {
-      "sha": "b4a18aaa67a63274e7937c973568cbc876a746d4",
-      "shortSha": "b4a18aa",
-      "message": "Merge pull request #78 from Mrmiaomrzh/main",
+      "sha": "06529d1a52bd6b1b17b76e86b454369037679f66",
+      "shortSha": "06529d1",
+      "message": "Merge pull request #80 from Chaniug/pr/search-box-exclusion",
       "authorName": "JoyinJoester",
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-25T16:30:20Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/b4a18aaa67a63274e7937c973568cbc876a746d4"
+      "date": "2026-07-26T17:30:04Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/06529d1a52bd6b1b17b76e86b454369037679f66"
     },
     {
-      "sha": "7185e3e7f4b6d352e46bfac1305763f0378c20a6",
-      "shortSha": "7185e3e",
-      "message": "fix: 修复赞助者表格的 HTML 结构，添加 tbody 标签，添加爱发电默认用户名保护",
-      "authorName": "Mrmiaomrzh",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
-      "date": "2026-07-25T16:16:40Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/7185e3e7f4b6d352e46bfac1305763f0378c20a6"
+      "sha": "bff24388f6032aecc6bc3e66b32b32221c5c53d5",
+      "shortSha": "bff2438",
+      "message": "fix(autofill): 排除搜索框误弹密码条目（Edge/GitHub 等网页搜索框被当作登录字段）",
+      "authorName": "Chaniug",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
+      "date": "2026-07-26T15:18:46Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/bff24388f6032aecc6bc3e66b32b32221c5c53d5"
     },
     {
-      "sha": "8450baa1e2da543789b0eccbd70bf7201f84b18e",
-      "shortSha": "8450baa",
-      "message": "feat: 添加赞助者列表",
-      "authorName": "Mrmiaomrzh",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
-      "date": "2026-07-25T16:10:02Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/8450baa1e2da543789b0eccbd70bf7201f84b18e"
-    },
-    {
-      "sha": "b94139d19af725d670345058cc16cbb80a2cf4c1",
-      "shortSha": "b94139d",
-      "message": "Merge branch 'main' of https://github.com/Mrmiaomrzh/Monica",
-      "authorName": "Mrmiaomrzh",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
-      "date": "2026-07-25T15:57:00Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/b94139d19af725d670345058cc16cbb80a2cf4c1"
-    },
-    {
-      "sha": "37314f51d556b723e80c23e318678840ae6a5f0a",
-      "shortSha": "37314f5",
-      "message": "fix: 修正文档路径项，并更新依赖项版本",
-      "authorName": "Mrmiaomrzh",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
-      "date": "2026-07-25T15:56:50Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/37314f51d556b723e80c23e318678840ae6a5f0a"
-    },
-    {
-      "sha": "2613d0be426dea53d5606b1e8168730a366c8652",
-      "shortSha": "2613d0b",
-      "message": "docs: update Afdian sponsor list",
-      "authorName": "github-actions[bot]",
-      "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
-      "date": "2026-07-24T05:31:10Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/2613d0be426dea53d5606b1e8168730a366c8652"
-    },
-    {
-      "sha": "df919a59043ce7f79938b6bc42f230c5a8e65aa2",
-      "shortSha": "df919a5",
-      "message": "Merge pull request #77 from Mrmiaomrzh/main",
+      "sha": "9930d8d8d3a7c2a025370ef9631670cb4be50196",
+      "shortSha": "9930d8d",
+      "message": "chore: restore contributor attribution for PR #57",
       "authorName": "JoyinJoester",
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-24T01:32:26Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/df919a59043ce7f79938b6bc42f230c5a8e65aa2"
+      "date": "2026-07-26T05:59:55Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/9930d8d8d3a7c2a025370ef9631670cb4be50196"
     },
     {
-      "sha": "f22c068c3086cbc95013e9ea019518806dd81c63",
-      "shortSha": "f22c068",
-      "message": "feat(android): improve timeline history and Monica keyboard",
+      "sha": "347458956a9eade61a205ac1319c0d417cf1f4fd",
+      "shortSha": "3474589",
+      "message": "Merge pull request #79 from Chaniug/autofill-upstream-fix",
       "authorName": "JoyinJoester",
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-24T01:04:04Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/f22c068c3086cbc95013e9ea019518806dd81c63"
+      "date": "2026-07-26T05:30:04Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/347458956a9eade61a205ac1319c0d417cf1f4fd"
     },
     {
-      "sha": "63c87455a9094f0abdcca98cdf00616c5cbefb81",
-      "shortSha": "63c8745",
-      "message": "fix: Fixing document index errors for some content",
-      "authorName": "Mrmiaomrzh",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
-      "date": "2026-07-23T17:03:17Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/63c87455a9094f0abdcca98cdf00616c5cbefb81"
-    },
-    {
-      "sha": "307b6add0b741af7f7ace73123921339fd54cae1",
-      "shortSha": "307b6ad",
-      "message": "feat(android): improve password quick access sheet",
+      "sha": "10cac9e3e12a237324bfaec17acc804288977aba",
+      "shortSha": "10cac9e",
+      "message": "fix(autofill): harden compatibility fallback",
       "authorName": "JoyinJoester",
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-23T05:04:18Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/307b6add0b741af7f7ace73123921339fd54cae1"
+      "date": "2026-07-26T04:52:05Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/10cac9e3e12a237324bfaec17acc804288977aba"
+    },
+    {
+      "sha": "8a6beeb0d6935d490d08b813ac3046309e057618",
+      "shortSha": "8a6beeb",
+      "message": "fix(autofill): forceAutofillOff 保留同组非 OFF 候选，修复电影猎手有密码框却不弹",
+      "authorName": "Chaniug",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
+      "date": "2026-07-26T02:15:51Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/8a6beeb0d6935d490d08b813ac3046309e057618"
+    },
+    {
+      "sha": "f8f987c82ebe5b7517386263fbaf359b81b8d66c",
+      "shortSha": "f8f987c",
+      "message": "fix(autofill): 收紧 TYPE_TEXT_VARIATION_NORMAL fallback，修复 QQ 搜索框误弹",
+      "authorName": "Chaniug",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
+      "date": "2026-07-26T01:56:07Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/f8f987c82ebe5b7517386263fbaf359b81b8d66c"
+    },
+    {
+      "sha": "3db6aaf2073a8c504d7d53d81ba6e0e9702bff6e",
+      "shortSha": "3db6aaf",
+      "message": "fix(autofill): 弱目标模式放行条件改为「有 Login 类型字段就弹」+ 节点信号诊断",
+      "authorName": "Chaniug",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
+      "date": "2026-07-26T01:34:22Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/3db6aaf2073a8c504d7d53d81ba6e0e9702bff6e"
+    },
+    {
+      "sha": "582d7e69f9606452df1a20db1d6f8ca99506c55e",
+      "shortSha": "582d7e6",
+      "message": "fix: 修复 htmlInfo.attributes forEach 解构歧义导致的编译失败",
+      "authorName": "Chaniug",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
+      "date": "2026-07-26T00:48:21Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/582d7e69f9606452df1a20db1d6f8ca99506c55e"
+    },
+    {
+      "sha": "2633eb20b361e6473bd54ca00992fb359b5a421c",
+      "shortSha": "2633eb2",
+      "message": "fix: 删除弱重解析回退处重复的代码块，修复编译失败",
+      "authorName": "Chaniug",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
+      "date": "2026-07-26T00:43:37Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/2633eb20b361e6473bd54ca00992fb359b5a421c"
     }
   ]
 }
