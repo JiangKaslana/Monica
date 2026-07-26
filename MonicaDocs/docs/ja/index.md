@@ -11,14 +11,11 @@ hero:
     alt: Monica アプリのアイコン
   actions:
     - theme: brand
-      text: Android版をダウンロード
-      link: https://github.com/JoyinJoester/Monica/releases
+      text: Monica-cloud へ移動
+      link: /login
     - theme: alt
-      text: ブラウザ拡張機能
-      link: https://github.com/JoyinJoester/Monica/tree/main/Monica%20for%20Browser
-    - theme: alt
-      text: ドキュメント
-      link: /ja/reference/catalogue
+      text: Monica エコシステムを見る
+      link: /ja/ecosystem.html
 
 features:
   - title: パスワード管理

@@ -31,11 +31,12 @@ export default defineConfig({
           { text: "Список статей", link: "/ru/articleOverview" },
         ],
       },
+      { text: "Monica-cloud", link: "/login" },
       { text: "✨ Донат", link: "/ru/personal/" },
     ],
     editLink: {
       text: "Редактировать эту страницу на GitHub",
-      pattern: "https://github.com/JoyinJoester/Monica/edit/master/docs/:path",
+      pattern: "https://github.com/Monica-Pass/Monica/edit/main/MonicaDocs/docs/:path",
     },
   },
 });

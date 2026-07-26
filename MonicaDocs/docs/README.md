@@ -1,22 +1,7 @@
-# MonicaDocs 文档站构建说明
+# MonicaDocs 文档站
 
-本文档说明如何在本地启动、构建和预览 `MonicaDocs` 的 VitePress 文档站。
-
-## 项目位置
-
-文档源码目录：
-
-```text
-E:\Project\Monica\MonicaDocs\docs
-```
-
-项目根目录：
-
-```text
-E:\Project\Monica\MonicaDocs
-```
-
-请在项目根目录执行下面的 `npm` 命令。
+`MonicaDocs/docs` 是 Monica 的独立主站与文档源码。站点基于 VitePress 和
+`vitepress-theme-teek` 构建，包含简体中文、英文、日文、俄文和越南文内容。
 
 ## 环境要求
 
@@ -36,7 +21,7 @@ npm install
 npm run docs:dev
 ```
 
-默认访问地址：
+开发服务默认运行在：
 
 ```text
 http://localhost:5173/Monica/
@@ -46,16 +31,16 @@ http://localhost:5173/Monica/
 
 ## 生产构建
 
-执行生产构建：
+在 `MonicaDocs` 目录执行：
 
 ```bash
 npm run docs:build
 ```
 
-构建产物输出到：
+最终部署目录为：
 
 ```text
-docs\.vitepress\dist
+MonicaDocs/docs/.vitepress/dist
 ```
 
 构建完成后可以用于 GitHub Pages、静态服务器或其他静态托管平台。
@@ -70,64 +55,31 @@ npm run docs:preview
 
 预览服务会读取 `docs\.vitepress\dist` 中的静态产物。
 
-## 常用目录说明
+## 目录结构
 
 ```text
 docs
-├─ .vitepress        VitePress 配置、主题和构建缓存
-├─ public            静态资源目录
-├─ 01.指南           简体中文指南内容
-├─ 02.配置           简体中文文档/参考内容
-├─ 03.生态           简体中文生态页面
-├─ en                英文内容
-├─ ja                日文内容
-├─ ru                俄文内容
-└─ vi                越南文内容
+├─ .vitepress
+│  ├─ config.mts                 VitePress 配置
+│  ├─ locales                    多语言导航与编辑链接
+│  └─ theme                      主题、组件与样式
+├─ 01.指南                       简体中文指南
+├─ 02.配置                       简体中文配置与参考文档
+├─ 03.生态                       简体中文生态内容
+├─ en                            英文内容
+├─ ja                            日文内容
+├─ ru                            俄文内容
+├─ vi                            越南文内容
+├─ index.md                      简体中文首页
+├─ public                        静态资源
+└─ CLAUDE.md                     Claude 协作说明
 ```
 
-多语言配置位于：
+## 文档维护
 
-```text
-docs\.vitepress\locales
-```
-
-主题组件位于：
-
-```text
-docs\.vitepress\theme\components
-```
-
-## 路由与 base
-
-站点配置中的 `base` 为：
-
-```text
-/Monica/
-```
-
-因此本地开发和部署后的页面路径都会带有 `/Monica/` 前缀。例如：
-
-```text
-http://localhost:5173/Monica/
-http://localhost:5173/Monica/ecosystem
-http://localhost:5173/Monica/en/guide/intro
-```
-
-## 已知构建排障
-
-不要在源码 Markdown 中直接写带 `base` 的资源路径：
-
-```md
-![afdian](/Monica/image/afdian.svg)
-```
-
-`/Monica/` 是部署 base，构建阶段资源解析可能不会按静态资源路径处理它。
-
-## 推荐工作流
-
-1. 在项目根目录执行 `npm run docs:dev`。
-2. 打开 `http://localhost:5173/Monica/` 检查页面效果。
-3. 修改 `docs` 下的 Markdown、主题组件或 `.vitepress` 配置。
-4. 修改完成后执行 `npm run docs:build`。
-5. 构建成功后执行 `npm run docs:preview` 做最终静态预览。
-
+- 新增中文内容时，优先放入 `01.指南`、`02.配置` 或 `03.生态` 对应目录。
+- 多语言页面应保持与中文页面一致的路由和内容层级。
+- 顶栏导航及“在 GitHub 上编辑此页”链接位于 `.vitepress/locales`。
+- 生态页展示组件位于 `.vitepress/theme/components/EcosystemLanding.vue`。
+- 首页的 `hero.actions` 位于各语言目录的 `index.md`。
+- 不要手动编辑 `.vitepress/dist` 或 `.vitepress/cache`，它们由 VitePress 生成。

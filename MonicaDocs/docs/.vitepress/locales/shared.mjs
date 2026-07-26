@@ -18,7 +18,7 @@ export default defineConfig({
     },
   },
   head: [
-    ["link", { rel: "icon", type: "image/png", href: "/themepng.png" }],
+    ["link", { rel: "icon", type: "image/png", href: "monica-logo.png" }],
     ["meta", { property: "og:type", content: "website" }],
   ],
   markdown: {
@@ -27,7 +27,7 @@ export default defineConfig({
   },
   themeConfig: {
     logo: "/themepng.png",
-    socialLinks: [{ icon: "github", link: "https://github.com/JoyinJoester/Monica" }],
+    socialLinks: [{ icon: "github", link: "https://github.com/Monica-Pass/Monica" }],
     search: { provider: "local" },
   },
   vite: {

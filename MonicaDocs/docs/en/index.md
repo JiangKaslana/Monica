@@ -11,14 +11,11 @@ hero:
     alt: Monica App Icon
   actions:
     - theme: brand
-      text: Download for Android
-      link: https://github.com/Monica-Pass/Monica/releases
+      text: Go to Monica-cloud
+      link: /login
     - theme: alt
-      text: Browser Extension
-      link: https://github.com/Monica-Pass/Monica/tree/main/Monica%20for%20Browser
-    - theme: alt
-      text: Documentation
-      link: /en/reference/catalogue
+      text: Explore the Monica ecosystem
+      link: /en/ecosystem.html
 
 features:
   - title: Password Manager

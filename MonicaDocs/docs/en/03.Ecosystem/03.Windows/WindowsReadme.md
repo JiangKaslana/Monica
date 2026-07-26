@@ -4,7 +4,7 @@ date: 2026-06-06 21:30:00
 permalink: /ecosystem/WindowsReadme
 ---
 
-# Monica for Windows
+# Monica by Avalonia
 
 > Monica by Avalonia: a local-first cross-platform password vault built with Avalonia, .NET, and MDBX.  
 > Windows / macOS / Linux · Local Vault · MDBX-1 · KeePass · TOTP · WebDAV / OneDrive
@@ -35,16 +35,16 @@ permalink: /ecosystem/WindowsReadme
 :::
 
 ::: note Abstract
-Monica for Windows is the desktop implementation of the Monica password vault, focused on local-first password management and MDBX vault compatibility. This document follows a README-style structure and provides a feature overview, tech stack, architecture view, and development notes.
+Monica by Avalonia is the desktop implementation of the Monica password vault, focused on local-first password management and MDBX vault compatibility. This document follows a README-style structure and provides a feature overview, tech stack, architecture view, and development notes.
 :::
 
-Monica for Windows aims to carry Monica’s local-first and security-first direction onto desktop platforms, offering management for passwords, TOTP, private notes, bank cards, and identity documents, along with local encryption, import/export, backup, and MDBX vault compatibility.
+Monica by Avalonia aims to carry Monica’s local-first and security-first direction onto desktop platforms, offering management for passwords, TOTP, private notes, bank cards, and identity documents, along with local encryption, import/export, backup, and MDBX vault compatibility.
 
 ---
 
 ## Project Positioning
 
-Monica for Windows is a local-first password vault client for desktop users. Built on Avalonia’s cross-platform desktop UI together with .NET 10 and the MDBX local vault, it is designed to deliver a desktop password management experience that is both modern and extensible.
+Monica by Avalonia is a local-first password vault client for desktop users. Built on Avalonia’s cross-platform desktop UI together with .NET 10 and the MDBX local vault, it is designed to deliver a desktop password management experience that is both modern and extensible.
 
 Core goals of the project:
 
@@ -92,7 +92,7 @@ Core goals of the project:
 ## Architecture Overview
 
 ::: tip Architecture Preview
-The architecture of Monica for Windows can be understood as a “desktop password vault thought tree,” centered on:
+The architecture of Monica by Avalonia can be understood as a “desktop password vault thought tree,” centered on:
 
 - The UI layer for interaction and presentation
 - The Core layer for business logic and cryptography
@@ -116,7 +116,7 @@ In this architecture, <mark>MDBX is not an ordinary database table</mark>. Commi
 
 ```mermaid
 mindmap
-  root((Monica for Windows))
+  root((Monica by Avalonia))
     App["Monica.App\nAvalonia UI / ViewModels / Dialog Services"]
       UI[UI / Interaction]
       Dialogs[Dialogs / Desktop Services]
@@ -155,7 +155,7 @@ mindmap
 
 ## MDBX-1 Integration
 
-Monica for Windows supports the MDBX-1 local-first vault. It is not an ordinary SQLite password table, but a local database format with version history, conflict handling, snapshot recovery, and security boundaries.
+Monica by Avalonia supports the MDBX-1 local-first vault. It is not an ordinary SQLite password table, but a local database format with version history, conflict handling, snapshot recovery, and security boundaries.
 
 The Avalonia side currently includes two MDBX integration paths:
 
@@ -216,13 +216,13 @@ dotnet publish "src\Monica.App\Monica.App.csproj" -c Release -r win-x64 --self-c
 
 - Monica: provides the product vision, local-first direction, and password management UX reference
 - MDBX: provides the local-first vault format and long-term maintainable data structures
-- Monica for Windows: merges both into a desktop implementation for Windows
+- Monica by Avalonia: merges both into a desktop implementation for Windows
 
 ---
 
 ## Acknowledgements
 
-Monica for Windows references and draws inspiration from the following projects:
+Monica by Avalonia references and draws inspiration from the following projects:
 
 - [Avalonia](https://avaloniaui.net/): cross-platform desktop UI
 - [FluentAvalonia](https://github.com/amwx/FluentAvalonia): Fluent-style controls
