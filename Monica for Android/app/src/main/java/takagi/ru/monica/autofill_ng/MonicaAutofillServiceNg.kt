@@ -287,9 +287,6 @@ class MonicaAutofillServiceNg : AutofillService() {
                 parsed = weakParsed
                 usedWeakReparse = true
             }
-                parsed = weakParsed
-                usedWeakReparse = true
-            }
         }
         // 兼容回退（Bitwarden 式）：仅当屏幕已进入登录上下文（已识别到账号类字段
         // 或密码字段）时，才把当前聚焦的字段纳入可填充目标，用于补全被漏识别的
