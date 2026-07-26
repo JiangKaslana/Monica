@@ -17,7 +17,6 @@ import android.service.autofill.SaveRequest
 import android.view.View
 import android.view.autofill.AutofillId
 import android.text.InputType
-import android.util.Log
 import android.view.inputmethod.InlineSuggestionsRequest
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -274,6 +273,7 @@ class MonicaAutofillServiceNg : AutofillService() {
                     structure = structure,
                     respectAutofillOff = respectAutofillOff,
                     allowWeakTargets = true,
+                    requireExplicitWeakLoginSignal = true,
                 )
                 AutofillLogger.d(
                     "AF",
@@ -320,7 +320,7 @@ class MonicaAutofillServiceNg : AutofillService() {
         synchronized(passwordMemoryByPackage) {
             if (currentPasswordItems.isNotEmpty()) {
                 passwordMemoryByPackage[pkgKey] = parsed.items.filter { isLoginHint(it.hint) }
-            } else if (currentHasLoginContext || passwordMemoryByPackage.containsKey(pkgKey)) {
+            } else if (currentHasLoginContext) {
                 val cached = passwordMemoryByPackage[pkgKey]
                 if (cached != null && cached.isNotEmpty() &&
                     cached.all { structureContainsAutofillId(structure, it.id) }
@@ -394,12 +394,11 @@ class MonicaAutofillServiceNg : AutofillService() {
             return null
         }
 
-        // 兼容回退路径（usedWeakReparse）：首轮保守解析零字段、二次弱解析才找回的字段，
-        // 在选择期也放宽账号字段的精度/密码门槛（作用同 manualRequest 的 shouldKeepTarget 宽松分支），
-        // 但非登录类字段仍被 isSupportedFillableHint 挡掉，不会误弹搜索框/昵称。
+        // 自动兼容重解析仍使用自动请求的选择门槛。解析器只会把带明确登录术语的
+        // 弱账号字段提升到 MEDIUM，不能借用手动请求的全放行权限。
         val fillableTargets = selectFillableTargets(
             items = parsed.items,
-            manualRequest = isManualRequest || usedWeakReparse,
+            manualRequest = isManualRequest,
         )
         AutofillLogger.d(
             "AF",
@@ -1361,8 +1360,9 @@ class MonicaAutofillServiceNg : AutofillService() {
                 InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
                 -> return FieldHint.EMAIL_ADDRESS
 
-                InputType.TYPE_TEXT_VARIATION_PHONETIC -> return FieldHint.PHONE_NUMBER
             }
+        } else if (classBits == InputType.TYPE_CLASS_PHONE) {
+            return FieldHint.PHONE_NUMBER
         } else if (classBits == InputType.TYPE_CLASS_NUMBER) {
             if ((inputType and InputType.TYPE_MASK_VARIATION) ==
                 InputType.TYPE_NUMBER_VARIATION_PASSWORD

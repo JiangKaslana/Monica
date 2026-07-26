@@ -2,6 +2,7 @@ package takagi.ru.monica.autofill_ng
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import takagi.ru.monica.autofill_ng.EnhancedAutofillStructureParserV2.Accuracy
@@ -18,6 +19,30 @@ class AutofillDetectionPolicyTest {
                 accuracy = Accuracy.LOW,
                 hasPasswordTarget = false,
                 manualRequest = false,
+            )
+        )
+        assertNull(
+            AutofillDetectionPolicy.automaticWeakAccountAccuracy(
+                accuracy = Accuracy.LOW,
+                hasLoginTerm = false,
+            )
+        )
+    }
+
+    @Test
+    fun automaticWeakReparseOnlyPromotesExplicitLoginFields() {
+        assertEquals(
+            Accuracy.MEDIUM,
+            AutofillDetectionPolicy.automaticWeakAccountAccuracy(
+                accuracy = Accuracy.LOWEST,
+                hasLoginTerm = true,
+            )
+        )
+        assertEquals(
+            Accuracy.MEDIUM,
+            AutofillDetectionPolicy.automaticWeakAccountAccuracy(
+                accuracy = Accuracy.MEDIUM,
+                hasLoginTerm = false,
             )
         )
     }
@@ -66,6 +91,37 @@ class AutofillDetectionPolicyTest {
             AutofillDetectionPolicy.shouldIncludeHiddenCredential(
                 hint = FieldHint.PASSWORD,
                 accuracy = Accuracy.HIGH,
+            )
+        )
+        assertTrue(
+            AutofillDetectionPolicy.shouldIncludeHiddenCredential(
+                hint = FieldHint.PASSWORD,
+                accuracy = Accuracy.LOW,
+            )
+        )
+    }
+
+    @Test
+    fun autofillOffPreferenceControlsImportantForAutofillButNeverUrlBars() {
+        assertTrue(
+            AutofillDetectionPolicy.shouldSkipAutofillOffGroup(
+                respectAutofillOff = true,
+                hasForcedOffSignal = true,
+                isAlwaysExcluded = false,
+            )
+        )
+        assertFalse(
+            AutofillDetectionPolicy.shouldSkipAutofillOffGroup(
+                respectAutofillOff = false,
+                hasForcedOffSignal = true,
+                isAlwaysExcluded = false,
+            )
+        )
+        assertTrue(
+            AutofillDetectionPolicy.shouldSkipAutofillOffGroup(
+                respectAutofillOff = false,
+                hasForcedOffSignal = true,
+                isAlwaysExcluded = true,
             )
         )
     }

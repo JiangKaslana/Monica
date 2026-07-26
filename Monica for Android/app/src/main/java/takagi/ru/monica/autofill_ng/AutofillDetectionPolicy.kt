@@ -22,6 +22,31 @@ internal object AutofillDetectionPolicy {
 
     fun genericNumberFallbackAccuracy(): Accuracy = Accuracy.LOW
 
+    /**
+     * Admission policy used only by the automatic compatibility reparse.
+     * A weak account-like field must carry an explicit login term before it can
+     * be promoted to normal automatic-fill confidence. Manual requests keep
+     * their separate permissive path in [shouldKeepTarget].
+     */
+    fun automaticWeakAccountAccuracy(
+        accuracy: Accuracy,
+        hasLoginTerm: Boolean,
+    ): Accuracy? = when {
+        accuracy.score >= Accuracy.MEDIUM.score -> accuracy
+        hasLoginTerm -> Accuracy.MEDIUM
+        else -> null
+    }
+
+    /**
+     * URL bars are always excluded. Other forced-off signals are controlled by
+     * the user's existing "respect autofill-off" preference.
+     */
+    fun shouldSkipAutofillOffGroup(
+        respectAutofillOff: Boolean,
+        hasForcedOffSignal: Boolean,
+        isAlwaysExcluded: Boolean,
+    ): Boolean = isAlwaysExcluded || (respectAutofillOff && hasForcedOffSignal)
+
     fun shouldKeepTarget(
         hint: FieldHint,
         accuracy: Accuracy,

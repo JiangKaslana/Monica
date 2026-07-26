@@ -51,13 +51,10 @@ class FilledDataBuilderNg(
         requireAuthentication: Boolean = true,
     ): FilledData {
         val autoLockMinutes = resolveAutoLockTimeoutForAutofill()
-        // 用户设置“永不过期/不锁定”(autoLockMinutes == -1)时，只要密钥材料当前可读即视为已解锁，
-        // 避免自动填充独立进程因会话状态不可见而每次填充都强制二次解锁。
-        val isVaultLocked = if (autoLockMinutes == -1) {
-            !securityManager.canAccessVaultMaterialNow()
-        } else {
-            !securityManager.canAccessVaultNowStrict(context, autoLockMinutes)
-        }
+        // “永不过期”允许会话跨进程生命周期恢复，但显式锁定仍必须立即生效。
+        // 因此始终同时检查会话状态和可用密钥材料，不能仅凭 Keystore 材料可读
+        // 就绕过 SessionManager。
+        val isVaultLocked = !securityManager.canAccessVaultNowStrict(context, autoLockMinutes)
         val maxCipherInlineSuggestionsCount = (request.maxInlineSuggestionsCount - 1)
             .coerceAtMost(MAX_INLINE_SUGGESTION_COUNT)
 

@@ -8,86 +8,128 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+private const val MILLIS_PER_MINUTE = 60_000L
+
 /**
- * 会话管理器 - 统一管理应用解锁状态
+ * Returns the conservative age of a persisted session, or `null` when either
+ * clock moved backwards or the persisted timestamps are incomplete.
  *
- * 职责：
- * - 维护解锁标志、时间戳、进程标识
- * - 暴露 canSkipVerification() 统一判断免验证条件
- * - 负责与 AutoLock 逻辑联动，超时自动清理会话
+ * `elapsedRealtime` detects device reboot while wall time lets the session
+ * survive a normal app-process restart. Using the larger delta fails closed if
+ * the wall clock jumps forward.
+ */
+internal fun persistedSessionAgeMillisOrNull(
+    unlockElapsedRealtime: Long,
+    nowElapsedRealtime: Long,
+    unlockWallTime: Long,
+    nowWallTime: Long,
+): Long? {
+    if (unlockElapsedRealtime <= 0L || unlockWallTime <= 0L) return null
+    val elapsedDelta = nowElapsedRealtime - unlockElapsedRealtime
+    val wallDelta = nowWallTime - unlockWallTime
+    if (elapsedDelta < 0L || wallDelta < 0L) return null
+    return maxOf(elapsedDelta, wallDelta)
+}
+
+internal fun isPersistedSessionWithinTimeout(
+    autoLockMinutes: Int,
+    unlockElapsedRealtime: Long,
+    nowElapsedRealtime: Long,
+    unlockWallTime: Long,
+    nowWallTime: Long,
+): Boolean {
+    val ageMillis = persistedSessionAgeMillisOrNull(
+        unlockElapsedRealtime = unlockElapsedRealtime,
+        nowElapsedRealtime = nowElapsedRealtime,
+        unlockWallTime = unlockWallTime,
+        nowWallTime = nowWallTime,
+    ) ?: return false
+    // Product semantics: "never expire" survives an app-process restart in
+    // the same boot, but a device reboot or invalid clock continuity fails closed.
+    if (autoLockMinutes == -1) return true
+    if (autoLockMinutes <= 0) return false
+    return ageMillis < autoLockMinutes.toLong() * MILLIS_PER_MINUTE
+}
+
+/**
+ * 会话管理器 - 统一管理应用解锁状态。
  *
- * 安全窗规则：
- * - 仅在解锁后 N 分钟内允许免验证
- * - 屏幕锁定时必须重新验证
- * - 进程重启后必须重新验证
- *
- * 跨进程说明（重要）：
- * 自动填充服务（MonicaAutofillServiceNg）运行在独立进程。原实现将解锁状态仅保存在
- * 本对象的内存字段中，导致自动填充进程永远读不到主进程记录的“已解锁”状态，从而在
- * 每次填充时都误判为锁定、强制二次解锁（即使主进程已设置“永不过期/不锁定”）。
- * 现将解锁状态持久化到跨进程可见的 SharedPreferences，使自动填充进程与主进程共享
- * 同一份解锁会话；unlockTimestamp 基于 SystemClock.elapsedRealtime（开机时长，跨进程一致）。
+ * “永不过期”会话允许在同一次开机期间的应用进程重启后恢复，直到用户主动锁定
+ * Monica；设备重启、时钟回拨或时间戳损坏时均按过期处理。
  */
 object SessionManager {
-    
     private const val TAG = "SessionManager"
     private const val PREFS_NAME = "monica_session_state"
     private const val KEY_UNLOCKED = "unlocked"
-    private const val KEY_UNLOCK_TS = "unlock_timestamp"
+    private const val KEY_UNLOCK_ELAPSED_TS = "unlock_timestamp"
+    private const val KEY_UNLOCK_WALL_TS = "unlock_wall_timestamp"
     private const val KEY_AUTO_LOCK = "auto_lock_minutes"
-    
-    // 解锁状态
+
     private val _isUnlocked = MutableStateFlow(false)
     val isUnlocked: StateFlow<Boolean> = _isUnlocked.asStateFlow()
-    
-    // 解锁时间戳（基于 SystemClock.elapsedRealtime，不受系统时间修改影响）
-    private var unlockTimestamp: Long = 0L
-    
-    // 自动锁定超时（分钟），从 SettingsManager 同步；-1 表示永不过期/不锁定
+
+    private var unlockElapsedTimestamp: Long = 0L
+    private var unlockWallTimestamp: Long = 0L
     private var autoLockMinutes: Int = 5
-    
-    // 进程标识（用于检测进程重启）
     private val processId: Int = android.os.Process.myPid()
-    
-    // 跨进程共享：自动填充服务运行在独立进程，需读取主进程写入的解锁状态
+
     private var appContext: Context? = null
     private val prefs: SharedPreferences?
         get() = appContext?.applicationContext
-            ?.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS)
-    
-    /**
-     * 注入应用上下文，用于跨进程持久化解锁状态。
-     * 在 [MonicaApplication.onCreate] 中调用一次即可（各进程独立 Application 实例，
-     * 但应用内部存储在本 UID 下跨进程共享）。
-     */
+            ?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /** Inject the application context so the session can survive process restart. */
     fun attachAppContext(context: Context) {
         appContext = context.applicationContext
     }
-    
+
     private fun persistAll() {
-        prefs?.edit()?.apply {
+        val committed = prefs?.edit()?.apply {
             putBoolean(KEY_UNLOCKED, _isUnlocked.value)
-            putLong(KEY_UNLOCK_TS, unlockTimestamp)
+            putLong(KEY_UNLOCK_ELAPSED_TS, unlockElapsedTimestamp)
+            putLong(KEY_UNLOCK_WALL_TS, unlockWallTimestamp)
             putInt(KEY_AUTO_LOCK, autoLockMinutes)
-        }?.apply()
+        }?.commit()
+        if (committed == false) {
+            android.util.Log.w(TAG, "Failed to persist session state")
+        }
     }
-    
-    /**
-     * 标记应用已解锁
-     */
+
+    private fun restorePersistedState() {
+        prefs?.let { stored ->
+            val persistedUnlocked = stored.getBoolean(KEY_UNLOCKED, false)
+            _isUnlocked.value = persistedUnlocked
+            unlockElapsedTimestamp = if (persistedUnlocked) {
+                stored.getLong(KEY_UNLOCK_ELAPSED_TS, 0L)
+            } else {
+                0L
+            }
+            unlockWallTimestamp = if (persistedUnlocked) {
+                stored.getLong(KEY_UNLOCK_WALL_TS, 0L)
+            } else {
+                0L
+            }
+            autoLockMinutes = stored.getInt(KEY_AUTO_LOCK, autoLockMinutes)
+        }
+    }
+
     fun markUnlocked() {
         _isUnlocked.value = true
-        unlockTimestamp = SystemClock.elapsedRealtime()
+        unlockElapsedTimestamp = SystemClock.elapsedRealtime()
+        unlockWallTimestamp = System.currentTimeMillis()
         persistAll()
-        android.util.Log.d(TAG, "Session unlocked at $unlockTimestamp, PID=$processId")
+        android.util.Log.d(
+            TAG,
+            "Session unlocked at elapsed=$unlockElapsedTimestamp, PID=$processId",
+        )
     }
-    
-    /**
-     * 标记应用已锁定
-     */
+
     fun markLocked(clearSecondarySession: Boolean = true) {
         _isUnlocked.value = false
-        unlockTimestamp = 0L
+        unlockElapsedTimestamp = 0L
+        unlockWallTimestamp = 0L
+        // Persist synchronously before clearing in-memory key material so an
+        // immediate process death cannot resurrect an explicitly locked session.
         persistAll()
         SecurityManager.clearRuntimeUnlockCache()
         if (clearSecondarySession) {
@@ -95,99 +137,78 @@ object SessionManager {
         }
         android.util.Log.d(TAG, "Session locked, PID=$processId")
     }
-    
-    /**
-     * 更新自动锁定超时配置。
-     * 注意：仅持久化 autoLockMinutes，不触碰 unlocked/timestamp，避免覆盖其他进程写入的解锁状态。
-     */
+
     fun updateAutoLockTimeout(minutes: Int) {
         autoLockMinutes = minutes
-        prefs?.edit()?.putInt(KEY_AUTO_LOCK, minutes)?.apply()
+        prefs?.edit()?.putInt(KEY_AUTO_LOCK, minutes)?.commit()
         android.util.Log.d(TAG, "Auto-lock timeout updated to $minutes minutes")
     }
-    
-    /**
-     * 检查是否可以跳过验证
-     *
-     * 安全窗规则：
-     * 1. 必须已解锁
-     * 2. 未超过自动锁定时间
-     * 3. 屏幕未锁定
-     *
-     * 跨进程：自动填充进程在此读取主进程持久化的解锁状态，使“已解锁/永不过期”在
-     * 自动填充场景真正生效，避免每次填充强制二次解锁。
-     *
-     * @param context 上下文，用于检查屏幕锁定状态并访问跨进程 SharedPreferences
-     * @return true 如果可以跳过验证
-     */
+
     fun canSkipVerification(context: Context): Boolean {
         appContext = context.applicationContext
-        // 跨进程同步：以持久化的解锁状态为准（自动填充服务独立进程）
-        prefs?.let { p ->
-            val persistedUnlocked = p.getBoolean(KEY_UNLOCKED, false)
-            val persistedTs = p.getLong(KEY_UNLOCK_TS, 0L)
-            val persistedAutoLock = p.getInt(KEY_AUTO_LOCK, autoLockMinutes)
-            _isUnlocked.value = persistedUnlocked
-            if (persistedUnlocked && persistedTs != 0L) {
-                unlockTimestamp = persistedTs
-            } else if (!persistedUnlocked) {
-                unlockTimestamp = 0L
-            }
-            autoLockMinutes = persistedAutoLock
-        }
-        
-        // 检查是否已解锁
+        restorePersistedState()
+
         if (!_isUnlocked.value) {
             android.util.Log.d(TAG, "canSkipVerification: false (not unlocked)")
             return false
         }
-        
-        // 检查是否超时
-        val elapsedMinutes = (SystemClock.elapsedRealtime() - unlockTimestamp) / 60000
-        if (autoLockMinutes != -1 && elapsedMinutes >= autoLockMinutes) {
-            android.util.Log.d(TAG, "canSkipVerification: false (session expired, elapsed=$elapsedMinutes min)")
+
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val nowWall = System.currentTimeMillis()
+        if (!isPersistedSessionWithinTimeout(
+                autoLockMinutes = autoLockMinutes,
+                unlockElapsedRealtime = unlockElapsedTimestamp,
+                nowElapsedRealtime = nowElapsed,
+                unlockWallTime = unlockWallTimestamp,
+                nowWallTime = nowWall,
+            )
+        ) {
+            android.util.Log.d(TAG, "canSkipVerification: false (session expired or clock reset)")
             markLocked(clearSecondarySession = false)
             return false
         }
-        
-        // 检查屏幕是否锁定（仅返回 false，不主动清除会话，避免切后台时误锁）
+
+        // Do not clear the session merely because the screen is temporarily locked.
         val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
         if (keyguardManager?.isKeyguardLocked == true) {
             android.util.Log.d(TAG, "canSkipVerification: false (device locked)")
             return false
         }
-        
-        android.util.Log.d(TAG, "canSkipVerification: true (unlocked, within timeout, screen unlocked)")
+
+        android.util.Log.d(TAG, "canSkipVerification: true (active session, screen unlocked)")
         return true
     }
-    
-    /**
-     * 刷新会话时间戳（用户活动时调用）
-     */
+
     fun refreshSession() {
         if (_isUnlocked.value) {
-            unlockTimestamp = SystemClock.elapsedRealtime()
+            unlockElapsedTimestamp = SystemClock.elapsedRealtime()
+            unlockWallTimestamp = System.currentTimeMillis()
             persistAll()
-            android.util.Log.d(TAG, "Session refreshed at $unlockTimestamp")
+            android.util.Log.d(TAG, "Session refreshed at elapsed=$unlockElapsedTimestamp")
         }
     }
-    
-    /**
-     * 检查会话是否过期（不自动锁定，仅检查）
-     */
+
     fun isSessionExpired(): Boolean {
         if (!_isUnlocked.value) return true
-        val elapsedMinutes = (SystemClock.elapsedRealtime() - unlockTimestamp) / 60000
-        return autoLockMinutes != -1 && elapsedMinutes >= autoLockMinutes
+        return !isPersistedSessionWithinTimeout(
+            autoLockMinutes = autoLockMinutes,
+            unlockElapsedRealtime = unlockElapsedTimestamp,
+            nowElapsedRealtime = SystemClock.elapsedRealtime(),
+            unlockWallTime = unlockWallTimestamp,
+            nowWallTime = System.currentTimeMillis(),
+        )
     }
-    
-    /**
-     * 获取剩余有效时间（分钟）
-     */
+
     fun getRemainingMinutes(): Int {
         if (!_isUnlocked.value) return 0
         if (autoLockMinutes == -1) return -1
-        val elapsedMinutes = (SystemClock.elapsedRealtime() - unlockTimestamp) / 60000
+        val ageMillis = persistedSessionAgeMillisOrNull(
+            unlockElapsedRealtime = unlockElapsedTimestamp,
+            nowElapsedRealtime = SystemClock.elapsedRealtime(),
+            unlockWallTime = unlockWallTimestamp,
+            nowWallTime = System.currentTimeMillis(),
+        ) ?: return 0
+        val elapsedMinutes = ageMillis / MILLIS_PER_MINUTE
         return maxOf(0, autoLockMinutes - elapsedMinutes.toInt())
     }
 }

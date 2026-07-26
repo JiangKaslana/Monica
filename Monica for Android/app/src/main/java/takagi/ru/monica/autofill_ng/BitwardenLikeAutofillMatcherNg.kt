@@ -215,8 +215,7 @@ class BitwardenLikeAutofillMatcherNg {
                     it == Reason.EXACT_DOMAIN ||
                     it == Reason.SUBDOMAIN ||
                     it == Reason.BASE_DOMAIN ||
-                    it == Reason.EXACT_APP_TITLE ||
-                    it == Reason.PACKAGE_TOKEN_TITLE
+                    it == Reason.EXACT_APP_TITLE
             }
             if (!hasStrongReason) return null
         }

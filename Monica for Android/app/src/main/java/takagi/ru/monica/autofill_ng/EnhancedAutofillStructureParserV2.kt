@@ -179,7 +179,7 @@ class EnhancedAutofillStructureParserV2 {
         "账号",
         "帳號",
         "账户",
-        "账户",
+        "賬戶",
         "登录",
         "登錄",
         "логин",
@@ -187,10 +187,6 @@ class EnhancedAutofillStructureParserV2 {
         "identifiant",
         "utilisateur",
         "kullanıcı",
-        "用户",
-        "密码",
-        "密碼",
-        "password",
     )
 
     private val autofillLabel2faTranslations = listOf(
@@ -524,6 +520,7 @@ class EnhancedAutofillStructureParserV2 {
         structure: AssistStructure,
         respectAutofillOff: Boolean = true,
         allowWeakTargets: Boolean = false,
+        requireExplicitWeakLoginSignal: Boolean = false,
     ): ParsedStructure {
         var applicationId: String? = structure.activityComponent?.packageName
         var rawStructure: RawParsedStructure? = null
@@ -587,20 +584,19 @@ class EnhancedAutofillStructureParserV2 {
             }
         }
 
-        // 弱目标模式（allowWeakTargets=true，对齐 bitwarden「有 Login 字段就 Fillable」门槛）：
-        // 1. 先用 promotePasswordTermCandidates 尝试从候选里按 password 术语提升出密码字段；
-        //    提升成功则 hasPasswordInItems=true，低精度账号字段自然保留并弹窗。
-        // 2. 提升后仍无密码框时，若候选中存在任意已被识别为 Login 类型的字段
-        //    （USERNAME/EMAIL/PHONE，不论精度），放行低精度账号字段，弹账号面板。
-        //    这对齐 bitwarden 的「有 Login.Username 就 Fillable」逻辑——bitwarden 不在
-        //    弹窗决策层做「无密码框时过滤低精度账号」的二次保险，而是靠前置的字段识别
-        //    阶段把搜索框等判为 Unused。Monica 的 TYPE_TEXT_VARIATION_NORMAL fallback
-        //    比 bitwarden 宽松（会把纯 text 判为 USERNAME:LOWEST），但电影猎手等真登录
-        //    场景的确定 bug优先于假设性的搜索框误弹（后者可用黑名单兜底）。
+        // 弱目标模式分为两种：
+        // - 手动请求：维持原有宽松行为，允许用户主动选择任意弱字段。
+        // - 自动兼容重解析：密码术语可以提升密码字段；孤立的弱账号字段只有在自身携带
+        //   明确 login/account/账号等术语时才提升到 MEDIUM。普通数量、金额和搜索字段
+        //   不会因为首轮无结果而获得与手动请求相同的放行权限。
         val effectiveItems = if (allowWeakTargets) {
             promotePasswordTermCandidates(confidenceFilteredItems)
         } else {
             confidenceFilteredItems
+        }
+        val promotedPasswordCount = effectiveItems.zip(confidenceFilteredItems).count { (after, before) ->
+            (after.hint == InternalHint.PASSWORD || after.hint == InternalHint.NEW_PASSWORD) &&
+                after.hint != before.hint
         }
         val hasPasswordInItems = effectiveItems.any {
             it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
@@ -610,10 +606,31 @@ class EnhancedAutofillStructureParserV2 {
                 it.hint == InternalHint.EMAIL_ADDRESS ||
                 it.hint == InternalHint.PHONE_NUMBER
         }
-        val weakLoginContext = allowWeakTargets && !hasPasswordInItems && hasLoginTypeField
+        val automaticWeakReparse = allowWeakTargets && requireExplicitWeakLoginSignal
+        val weakLoginContext = automaticWeakReparse && !hasPasswordInItems && effectiveItems.any {
+            (it.hint == InternalHint.USERNAME ||
+                it.hint == InternalHint.EMAIL_ADDRESS ||
+                it.hint == InternalHint.PHONE_NUMBER) &&
+                it.hasLoginTerm
+        }
         val loginFilteredItems = when {
             hasPasswordInItems -> effectiveItems
-            weakLoginContext -> effectiveItems
+            allowWeakTargets && !automaticWeakReparse -> effectiveItems
+            automaticWeakReparse -> effectiveItems.mapNotNull { item ->
+                val accountLike = item.hint == InternalHint.USERNAME ||
+                    item.hint == InternalHint.EMAIL_ADDRESS ||
+                    item.hint == InternalHint.PHONE_NUMBER
+                if (!accountLike) {
+                    item
+                } else {
+                    AutofillDetectionPolicy.automaticWeakAccountAccuracy(
+                        accuracy = item.accuracy,
+                        hasLoginTerm = item.hasLoginTerm,
+                    )?.let { admittedAccuracy ->
+                        item.copy(accuracy = admittedAccuracy)
+                    }
+                }
+            }
             else -> effectiveItems.filterNot {
                 (it.hint == InternalHint.USERNAME ||
                     it.hint == InternalHint.EMAIL_ADDRESS ||
@@ -632,7 +649,8 @@ class EnhancedAutofillStructureParserV2 {
                 "loginFilteredCount" to loginFilteredItems.size,
                 "candidates" to candidateItems.joinToString { "${it.hint}:${it.accuracy.name}" },
                 "allowWeakTargets" to allowWeakTargets,
-                "promotedPasswordCount" to (effectiveItems.size - confidenceFilteredItems.size).coerceAtLeast(0),
+                "requireExplicitWeakLoginSignal" to requireExplicitWeakLoginSignal,
+                "promotedPasswordCount" to promotedPasswordCount,
                 "hasPasswordInItems" to hasPasswordInItems,
                 "hasLoginTypeField" to hasLoginTypeField,
                 "weakLoginContext" to weakLoginContext,
@@ -641,15 +659,23 @@ class EnhancedAutofillStructureParserV2 {
         loginFilteredItems
             .groupBy { it.id }
             .forEach { groupedById ->
-                val groupHints = groupedById.value.joinToString { "${it.hint}:${it.accuracy.name}" }
                 val forceAutofillOff = groupedById.value.any {
                     it.hint == InternalHint.OFF && it.accuracy == Accuracy.HIGHEST
                 }
+                val isAlwaysExcluded = groupedById.value.any {
+                    it.hint == InternalHint.OFF && it.reason == "url-bar"
+                }
+                if (AutofillDetectionPolicy.shouldSkipAutofillOffGroup(
+                        respectAutofillOff = respectAutofillOff,
+                        hasForcedOffSignal = forceAutofillOff,
+                        isAlwaysExcluded = isAlwaysExcluded,
+                    )
+                ) {
+                    return@forEach
+                }
                 var structureItems = if (forceAutofillOff) {
-                    // importantForAutofill=NO 的节点（OFF:HIGHEST）应跳过，
-                    // 但若同 id 组有来自其它信号（autofillHints/html）的非 OFF 候选
-                    // （如 EMAIL/PHONE/PASSWORD），应保留这些非 OFF 候选而非整组跳过。
-                    // 否则电影猎手等 App 的重要ForAutofill=NO 节点会连带丢弃同组的有效字段。
+                    // 用户关闭“遵循 autofill-off”后，允许同组的明确字段信号覆盖
+                    // importantForAutofill=NO；URL 栏仍由 isAlwaysExcluded 永久排除。
                     val nonOff = groupedById.value.filter { it.hint != InternalHint.OFF }
                     if (nonOff.isNotEmpty()) nonOff else return@forEach
                 } else if (respectAutofillOff) {
@@ -922,8 +948,10 @@ class EnhancedAutofillStructureParserV2 {
                             "hasPasswordTerm" to nodeHasPasswordTerm,
                             "hasLoginTerm" to nodeHasLoginTerm,
                             "htmlTag" to (node.htmlInfo?.tag ?: "none"),
-                            "htmlAttrs" to (node.htmlInfo?.attributes
-                                ?.joinToString(",") { "${it.first}=${it.second}" } ?: "none"),
+                            "htmlAttrNames" to (node.htmlInfo?.attributes
+                                ?.map { it.first }
+                                ?.distinct()
+                                ?.joinToString(",") ?: "none"),
                             "isVisible" to (node.visibility == View.VISIBLE),
                             "isFocused" to node.isFocused,
                         ),
@@ -1451,6 +1479,7 @@ class EnhancedAutofillStructureParserV2 {
                 out += ParsedItemBuilder(
                     accuracy = Accuracy.HIGHEST,
                     hint = InternalHint.OFF,
+                    reason = "url-bar",
                 )
                 return out
             }
@@ -1465,6 +1494,7 @@ class EnhancedAutofillStructureParserV2 {
             out += ParsedItemBuilder(
                 accuracy = Accuracy.HIGHEST,
                 hint = InternalHint.OFF,
+                reason = "important-for-autofill-no",
             )
             return out
         }
