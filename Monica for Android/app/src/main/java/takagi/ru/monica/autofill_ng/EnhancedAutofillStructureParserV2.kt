@@ -641,11 +641,17 @@ class EnhancedAutofillStructureParserV2 {
         loginFilteredItems
             .groupBy { it.id }
             .forEach { groupedById ->
+                val groupHints = groupedById.value.joinToString { "${it.hint}:${it.accuracy.name}" }
                 val forceAutofillOff = groupedById.value.any {
                     it.hint == InternalHint.OFF && it.accuracy == Accuracy.HIGHEST
                 }
                 var structureItems = if (forceAutofillOff) {
-                    return@forEach
+                    // importantForAutofill=NO 的节点（OFF:HIGHEST）应跳过，
+                    // 但若同 id 组有来自其它信号（autofillHints/html）的非 OFF 候选
+                    // （如 EMAIL/PHONE/PASSWORD），应保留这些非 OFF 候选而非整组跳过。
+                    // 否则电影猎手等 App 的重要ForAutofill=NO 节点会连带丢弃同组的有效字段。
+                    val nonOff = groupedById.value.filter { it.hint != InternalHint.OFF }
+                    if (nonOff.isNotEmpty()) nonOff else return@forEach
                 } else if (respectAutofillOff) {
                     if (groupedById.value.any { it.hint == InternalHint.OFF }) {
                         return@forEach
@@ -749,6 +755,28 @@ class EnhancedAutofillStructureParserV2 {
                     traversalIndex = selectedItem.traversalIndex,
                 )
             }
+
+        // 诊断：记录 groupBy 后每组被跳过的原因，排查 loginFilteredCount>0 但 parsedItems=0
+        if (loginFilteredItems.isNotEmpty() && items.isEmpty()) {
+            val groupDiagnostics = loginFilteredItems
+                .groupBy { it.id }
+                .map { (id, group) ->
+                    val hints = group.joinToString { "${it.hint}:${it.accuracy.name}" }
+                    val hasOff = group.any { it.hint == InternalHint.OFF }
+                    val mappedHints = group.mapNotNull { mapHint(it.hint) }
+                    "id=$id hints=[$hints] hasOff=$hasOff mappedCount=${mappedHints.size}"
+                }
+            AutofillLogger.w(
+                "PARSING",
+                "All groups skipped after groupBy despite non-empty loginFilteredItems",
+                metadata = mapOf(
+                    "loginFilteredCount" to loginFilteredItems.size,
+                    "groupCount" to groupDiagnostics.size,
+                    "respectAutofillOff" to respectAutofillOff,
+                    "groups" to groupDiagnostics.joinToString(" | "),
+                ),
+            )
+        }
 
         val isInSelfHostedServer = kotlin.run {
             val webDomain = rawStructure?.webDomain
