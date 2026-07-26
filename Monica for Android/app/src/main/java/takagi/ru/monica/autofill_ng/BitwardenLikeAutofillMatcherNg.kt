@@ -36,6 +36,15 @@ class BitwardenLikeAutofillMatcherNg {
         val reasons: Set<Reason>,
     )
 
+    companion object {
+        private val PACKAGE_TOKEN_STOPWORDS = setOf(
+            "com", "android", "app", "net", "org", "io",
+            "mobile", "client", "common", "ui", "view", "service",
+            "lib", "utils", "core", "main", "v2", "prod", "dev",
+            "test", "debug",
+        )
+    }
+
     fun match(
         entries: List<PasswordEntry>,
         packageName: String,
@@ -46,9 +55,12 @@ class BitwardenLikeAutofillMatcherNg {
         if (entries.isEmpty()) return emptyList()
 
         val targetPackage = normalizePackageName(packageName)
-        val targetPackageToken = targetPackage
-            ?.substringAfterLast('.')
-            ?.takeIf { it.length >= 2 }
+        val targetPackageTokens = targetPackage
+            ?.split('.')
+            ?.filter { it.length >= 3 }
+            ?.filter { it !in PACKAGE_TOKEN_STOPWORDS }
+            ?.distinct()
+            ?: emptyList()
         val targetHost = normalizeHost(webDomain)
         val preferDomainSignals = !targetHost.isNullOrBlank()
         val targetRoot = targetHost?.let(::extractBaseDomain)
@@ -58,7 +70,7 @@ class BitwardenLikeAutofillMatcherNg {
             scoreEntry(
                 entry = entry,
                 targetPackage = targetPackage,
-                targetPackageToken = targetPackageToken,
+                targetPackageTokens = targetPackageTokens,
                 targetHost = targetHost,
                 preferDomainSignals = preferDomainSignals,
                 targetRoot = targetRoot,
@@ -91,7 +103,7 @@ class BitwardenLikeAutofillMatcherNg {
     private fun scoreEntry(
         entry: PasswordEntry,
         targetPackage: String?,
-        targetPackageToken: String?,
+        targetPackageTokens: List<String>,
         targetHost: String?,
         preferDomainSignals: Boolean,
         targetRoot: String?,
@@ -133,9 +145,10 @@ class BitwardenLikeAutofillMatcherNg {
             reasons += Reason.EXACT_APP_TITLE
         }
 
-        if (!preferDomainSignals && config.allowPackageMatch && !targetPackageToken.isNullOrBlank()) {
-            val token = targetPackageToken.lowercase(Locale.ROOT)
-            val tokenMatched = entryTitle.contains(token) || entryAppName.contains(token)
+        if (!preferDomainSignals && config.allowPackageMatch && targetPackageTokens.isNotEmpty()) {
+            val tokenMatched = targetPackageTokens.any { token ->
+                entryTitle.contains(token) || entryAppName.contains(token)
+            }
             if (tokenMatched) {
                 score += 70
                 reasons += Reason.PACKAGE_TOKEN_TITLE

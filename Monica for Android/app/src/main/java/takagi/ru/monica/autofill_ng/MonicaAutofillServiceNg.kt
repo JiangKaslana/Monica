@@ -16,6 +16,7 @@ import android.service.autofill.SaveCallback
 import android.service.autofill.SaveRequest
 import android.view.View
 import android.view.autofill.AutofillId
+import android.text.InputType
 import android.view.inputmethod.InlineSuggestionsRequest
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +65,15 @@ class MonicaAutofillServiceNg : AutofillService() {
         private const val RESPONSE_STABILITY_WINDOW_MS = 2_000L
         private val fillRequestSequence = AtomicLong(0L)
     }
+
+    /**
+     * 跨请求登录字段记忆：缓存各包最近一次识别到的登录字段列表（账号 + 密码）。
+     * 用于应对电影猎手等 App 的密码框在部分 FillRequest 中因布局/动画时序而不可见、
+     * 被解析器丢弃，连带账号也被低精度过滤清掉，导致登录目标「时有时无」。
+     * 仅当缓存的所有登录字段 AutofillId 仍存在于当前 AssistStructure 时才整体回补，
+     * 避免注入失效 id。
+     */
+    private val passwordMemoryByPackage = mutableMapOf<String, List<ParsedItem>>()
 
     private data class RecentFillSuggestions(
         val key: String,
@@ -235,11 +245,113 @@ class MonicaAutofillServiceNg : AutofillService() {
 
         val respectAutofillOff = autofillPreferences.isV2RespectAutofillOffEnabled.first()
         val isManualRequest = request.flags and FillRequest.FLAG_MANUAL_REQUEST != 0
-        val parsed = parser.parse(
+        var parsed = parser.parse(
             structure = structure,
             respectAutofillOff = respectAutofillOff,
             allowWeakTargets = isManualRequest,
         )
+        // 兼容回退（Bitwarden 式）：部分 App（如影视类自定义登录框）的登录字段没有标准
+        // autofill hint，首轮保守解析会丢弃全部字段导致不弹面板。此时二次解析开启弱目标，
+        // 再由 selectFillableTargets / shouldKeepTarget / isSupportedFillableHint 过滤掉
+        // 搜索框、昵称等非登录误报。仅自动模式触发，手动模式本就开启弱目标。
+        var usedWeakReparse = false
+        if (!isManualRequest) {
+            val firstPassTargets = selectFillableTargets(parsed.items, isManualRequest)
+            AutofillLogger.d(
+                "AF",
+                "DIAG firstPassTargets",
+                metadata = mapOf(
+                    "requestId" to requestId,
+                    "firstPassTargets" to firstPassTargets.size,
+                    "hints" to firstPassTargets.joinToString { it.hint.name },
+                    "parsedItems" to parsed.items.size,
+                    "parsedHints" to parsed.items.joinToString { "${it.hint}:${it.accuracy.name}" },
+                )
+            )
+            if (firstPassTargets.isEmpty()) {
+                val weakParsed = parser.parse(
+                    structure = structure,
+                    respectAutofillOff = respectAutofillOff,
+                    allowWeakTargets = true,
+                    requireExplicitWeakLoginSignal = true,
+                )
+                AutofillLogger.d(
+                    "AF",
+                    "Weak-target compatibility reparse triggered",
+                    metadata = mapOf(
+                        "requestId" to requestId,
+                        "firstPassItemCount" to parsed.items.size,
+                        "weakItemCount" to weakParsed.items.size,
+                    )
+                )
+                parsed = weakParsed
+                usedWeakReparse = true
+            }
+        }
+        // 兼容回退（Bitwarden 式）：仅当屏幕已进入登录上下文（已识别到账号类字段
+        // 或密码字段）时，才把当前聚焦的字段纳入可填充目标，用于补全被漏识别的
+        // 登录字段（如影视类 App 的账号框/使用 VISIBLE_PASSWORD 变体的密码框）。
+        // 非登录屏幕（搜索框/备注/昵称等，且无密码框）不会触发此逻辑，避免误弹密码建议。
+        val hasAccountTarget = parsed.items.any {
+            it.hint == FieldHint.USERNAME ||
+                it.hint == FieldHint.EMAIL_ADDRESS ||
+                it.hint == FieldHint.PHONE_NUMBER
+        }
+        val hasPasswordTarget = parsed.items.any {
+            it.hint == FieldHint.PASSWORD || it.hint == FieldHint.NEW_PASSWORD
+        }
+        val focusedSyntheticItems = if (hasAccountTarget || hasPasswordTarget) {
+            buildFocusedSyntheticItems(structure, parsed.items, hasPasswordTarget)
+        } else {
+            emptyList()
+        }
+        if (focusedSyntheticItems.isNotEmpty()) {
+            parsed = parsed.copy(items = parsed.items + focusedSyntheticItems)
+        }
+        // 跨请求登录字段记忆与回补：电影猎手等 App 的密码框在部分 FillRequest 中因
+        // 布局/动画时序而不可见、被解析器连同账号一起丢弃，导致登录目标「时有时无」。
+        // 识别到登录字段时缓存（账号+密码）；后续同包请求若缺失密码、且缓存的所有登录
+        // 字段 id 仍存在于当前结构（可见或不可见均可）时，整体回补，保证面板稳定出现。
+        val pkgKey = parsed.applicationId ?: fallbackPackage
+        val currentPasswordItems = parsed.items.filter {
+            it.hint == FieldHint.PASSWORD || it.hint == FieldHint.NEW_PASSWORD
+        }
+        val currentHasLoginContext = parsed.items.any { isLoginHint(it.hint) }
+        synchronized(passwordMemoryByPackage) {
+            if (currentPasswordItems.isNotEmpty()) {
+                passwordMemoryByPackage[pkgKey] = parsed.items.filter { isLoginHint(it.hint) }
+            } else if (currentHasLoginContext) {
+                val cached = passwordMemoryByPackage[pkgKey]
+                if (cached != null && cached.isNotEmpty() &&
+                    cached.all { structureContainsAutofillId(structure, it.id) }
+                ) {
+                    val baseIndex = parsed.items.maxOfOrNull { it.traversalIndex } ?: 0
+                    val recovered = cached
+                        .filter { c -> parsed.items.none { it.id == c.id } }
+                        .mapIndexed { index, c ->
+                            c.copy(
+                                isVisible = findNodeVisibility(structure, c.id) ?: c.isVisible,
+                                isFocused = false,
+                                accuracy = EnhancedAutofillStructureParserV2.Accuracy.MEDIUM,
+                                traversalIndex = baseIndex + index + 1,
+                            )
+                        }
+                    if (recovered.isNotEmpty()) {
+                        parsed = parsed.copy(items = parsed.items + recovered)
+                        AutofillLogger.d(
+                            "AF",
+                            "Login targets recovered from memory",
+                            metadata = mapOf(
+                                "requestId" to requestId,
+                                "packageName" to pkgKey,
+                                "recoveredCount" to recovered.size,
+                                "recoveredHints" to recovered.joinToString { it.hint.name },
+                            )
+                        )
+                    }
+                }
+            }
+        }
         val packageName = resolveEffectivePackageName(
             parsedApplicationId = parsed.applicationId,
             fallbackPackage = fallbackPackage,
@@ -282,9 +394,23 @@ class MonicaAutofillServiceNg : AutofillService() {
             return null
         }
 
+        // 自动兼容重解析仍使用自动请求的选择门槛。解析器只会把带明确登录术语的
+        // 弱账号字段提升到 MEDIUM，不能借用手动请求的全放行权限。
         val fillableTargets = selectFillableTargets(
             items = parsed.items,
             manualRequest = isManualRequest,
+        )
+        AutofillLogger.d(
+            "AF",
+            "DIAG fillableTargets",
+            metadata = mapOf(
+                "requestId" to requestId,
+                "fillableTargets" to fillableTargets.size,
+                "hints" to fillableTargets.joinToString { it.hint.name },
+                "usedWeakReparse" to usedWeakReparse,
+                "hasLoginTargets" to fillableTargets.any { isLoginHint(it.hint) },
+                "hasPasswordTarget" to (fillableTargets.any { it.hint == FieldHint.PASSWORD || it.hint == FieldHint.NEW_PASSWORD }),
+            )
         )
         if (fillableTargets.isEmpty()) {
             AutofillLogger.i(
@@ -1161,6 +1287,155 @@ class MonicaAutofillServiceNg : AutofillService() {
         return null
     }
 
+    /**
+     * 收集当前聚焦且未被已解析条目覆盖的可编辑字段，依据其 inputType 推断 hint 后
+     * 合成 ParsedItem，使响应能锚定到用户实际聚焦的框（如密码框），对齐 Bitwarden 行为。
+     */
+    private fun buildFocusedSyntheticItems(
+        structure: AssistStructure,
+        existingItems: List<EnhancedAutofillStructureParserV2.ParsedItem>,
+        hasPasswordTarget: Boolean,
+    ): List<EnhancedAutofillStructureParserV2.ParsedItem> {
+        val existingIds = existingItems.map { it.id }.toSet()
+        val out = mutableListOf<EnhancedAutofillStructureParserV2.ParsedItem>()
+        for (index in 0 until structure.windowNodeCount) {
+            collectFocusedSyntheticItems(
+                node = structure.getWindowNodeAt(index).rootViewNode,
+                existingIds = existingIds,
+                hasPasswordTarget = hasPasswordTarget,
+                out = out,
+            )
+        }
+        return out
+    }
+
+    private fun collectFocusedSyntheticItems(
+        node: AssistStructure.ViewNode,
+        existingIds: Set<AutofillId>,
+        hasPasswordTarget: Boolean,
+        out: MutableList<EnhancedAutofillStructureParserV2.ParsedItem>,
+    ) {
+        if (node.isFocused &&
+            node.autofillId != null &&
+            !existingIds.contains(node.autofillId)
+        ) {
+            val inferredHint = inferFocusedFieldHint(node, hasPasswordTarget)
+            if (inferredHint != null) {
+                out += EnhancedAutofillStructureParserV2.ParsedItem(
+                    id = node.autofillId!!,
+                    hint = inferredHint,
+                    accuracy = EnhancedAutofillStructureParserV2.Accuracy.MEDIUM,
+                    isFocused = true,
+                    isVisible = node.visibility == View.VISIBLE,
+                    traversalIndex = 0,
+                )
+            }
+        }
+        for (childIndex in 0 until node.childCount) {
+            node.getChildAt(childIndex)?.let {
+                collectFocusedSyntheticItems(
+                    node = it,
+                    existingIds = existingIds,
+                    hasPasswordTarget = hasPasswordTarget,
+                    out = out,
+                )
+            }
+        }
+    }
+
+    private fun inferFocusedFieldHint(
+        node: AssistStructure.ViewNode,
+        hasPasswordTarget: Boolean,
+    ): FieldHint? {
+        val inputType = node.inputType
+        val classBits = inputType and InputType.TYPE_MASK_CLASS
+        if (classBits == InputType.TYPE_CLASS_TEXT) {
+            when (inputType and InputType.TYPE_MASK_VARIATION) {
+                InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                -> return FieldHint.PASSWORD
+
+                InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+                -> return FieldHint.EMAIL_ADDRESS
+
+            }
+        } else if (classBits == InputType.TYPE_CLASS_PHONE) {
+            return FieldHint.PHONE_NUMBER
+        } else if (classBits == InputType.TYPE_CLASS_NUMBER) {
+            if ((inputType and InputType.TYPE_MASK_VARIATION) ==
+                InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            ) {
+                return FieldHint.PASSWORD
+            }
+        }
+        // 非密码/邮箱/电话类的聚焦文本框：仅当屏幕上已存在密码框（登录上下文）时，
+        // 才当作账号字段合成，用于补全漏识别的账号框（如影视类 App）。
+        // 无密码上下文的普通文本框（搜索框/备注/昵称等）不合成，避免误弹密码建议。
+        return if (hasPasswordTarget) FieldHint.USERNAME else null
+    }
+
+    /**
+     * 判断指定 [AutofillId] 是否存在于当前 [AssistStructure]（可见或不可见均可）。
+     * 用于密码框跨请求携带时校验缓存 id 是否仍有效，避免注入失效 id。
+     */
+    private fun structureContainsAutofillId(
+        structure: AssistStructure,
+        id: AutofillId,
+    ): Boolean {
+        for (i in 0 until structure.windowNodeCount) {
+            if (containsAutofillId(structure.getWindowNodeAt(i).rootViewNode, id)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun containsAutofillId(
+        node: AssistStructure.ViewNode,
+        id: AutofillId,
+    ): Boolean {
+        if (node.autofillId == id) return true
+        for (i in 0 until node.childCount) {
+            node.getChildAt(i)?.let {
+                if (containsAutofillId(it, id)) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * 查找指定 [AutofillId] 在当前 [AssistStructure] 中的可见性；不存在则返回 null。
+     */
+    private fun findNodeVisibility(
+        structure: AssistStructure,
+        id: AutofillId,
+    ): Boolean? {
+        for (i in 0 until structure.windowNodeCount) {
+            val visibility = findNodeVisibilityInWindow(
+                structure.getWindowNodeAt(i).rootViewNode,
+                id,
+            )
+            if (visibility != null) return visibility
+        }
+        return null
+    }
+
+    private fun findNodeVisibilityInWindow(
+        node: AssistStructure.ViewNode,
+        id: AutofillId,
+    ): Boolean? {
+        if (node.autofillId == id) return node.visibility == View.VISIBLE
+        for (i in 0 until node.childCount) {
+            node.getChildAt(i)?.let {
+                val visibility = findNodeVisibilityInWindow(it, id)
+                if (visibility != null) return visibility
+            }
+        }
+        return null
+    }
+
     override fun onConnected() {
         super.onConnected()
         AutofillLogger.i("AF", "Service connected")
@@ -1168,6 +1443,7 @@ class MonicaAutofillServiceNg : AutofillService() {
 
     override fun onDisconnected() {
         AutofillSessionGrants.clear()
+        passwordMemoryByPackage.clear()
         super.onDisconnected()
         AutofillLogger.i("AF", "Service disconnected")
     }

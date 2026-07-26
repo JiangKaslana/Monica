@@ -117,6 +117,8 @@ class EnhancedAutofillStructureParserV2 {
         val isFocused: Boolean = false,
         val isVisible: Boolean = true,
         val traversalIndex: Int = 0,
+        val hasPasswordTerm: Boolean = false,
+        val hasLoginTerm: Boolean = false,
     )
 
     private data class ParsedItemBuilder(
@@ -166,6 +168,25 @@ class EnhancedAutofillStructureParserV2 {
         "passe",
         "密码",
         "密碼",
+    )
+
+    private val autofillLabelLoginTranslations = listOf(
+        "username",
+        "login",
+        "account",
+        "用户名",
+        "用戶名",
+        "账号",
+        "帳號",
+        "账户",
+        "賬戶",
+        "登录",
+        "登錄",
+        "логин",
+        "логін",
+        "identifiant",
+        "utilisateur",
+        "kullanıcı",
     )
 
     private val autofillLabel2faTranslations = listOf(
@@ -499,6 +520,7 @@ class EnhancedAutofillStructureParserV2 {
         structure: AssistStructure,
         respectAutofillOff: Boolean = true,
         allowWeakTargets: Boolean = false,
+        requireExplicitWeakLoginSignal: Boolean = false,
     ): ParsedStructure {
         var applicationId: String? = structure.activityComponent?.packageName
         var rawStructure: RawParsedStructure? = null
@@ -546,36 +568,116 @@ class EnhancedAutofillStructureParserV2 {
                 return@let list
             }
 
-            val hasUsernameAndPassword =
-                list.any {
-                    val usernameLike =
-                        it.hint == InternalHint.USERNAME ||
-                            it.hint == InternalHint.EMAIL_ADDRESS ||
-                            it.hint == InternalHint.PHONE_NUMBER
-                    usernameLike && it.accuracy.score > Accuracy.LOWEST.score
-                } &&
-                    list.any {
-                        val passwordLike =
-                            it.hint == InternalHint.PASSWORD ||
-                                it.hint == InternalHint.NEW_PASSWORD
-                        passwordLike && it.accuracy.score > Accuracy.LOWEST.score
-                    }
-            if (hasUsernameAndPassword) {
+            // 全 LOW 精度时，只要有密码框（即使账号框精度低/缺失）就保留所有字段，
+            // 登录场景的关键判定信号是密码框而非账号框。纯搜索框/备注等（无密码框）
+            // 仍返回空，不会误弹密码建议（如 QQ 搜索框）。
+            val hasPasswordLike = list.any {
+                val passwordLike =
+                    it.hint == InternalHint.PASSWORD ||
+                        it.hint == InternalHint.NEW_PASSWORD
+                passwordLike && it.accuracy.score > Accuracy.LOWEST.score
+            }
+            if (hasPasswordLike) {
                 list
             } else {
                 emptyList()
             }
         }
 
+        // 弱目标模式分为两种：
+        // - 手动请求：维持原有宽松行为，允许用户主动选择任意弱字段。
+        // - 自动兼容重解析：密码术语可以提升密码字段；孤立的弱账号字段只有在自身携带
+        //   明确 login/account/账号等术语时才提升到 MEDIUM。普通数量、金额和搜索字段
+        //   不会因为首轮无结果而获得与手动请求相同的放行权限。
+        val effectiveItems = if (allowWeakTargets) {
+            promotePasswordTermCandidates(confidenceFilteredItems)
+        } else {
+            confidenceFilteredItems
+        }
+        val promotedPasswordCount = effectiveItems.zip(confidenceFilteredItems).count { (after, before) ->
+            (after.hint == InternalHint.PASSWORD || after.hint == InternalHint.NEW_PASSWORD) &&
+                after.hint != before.hint
+        }
+        val hasPasswordInItems = effectiveItems.any {
+            it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
+        }
+        val hasLoginTypeField = effectiveItems.any {
+            it.hint == InternalHint.USERNAME ||
+                it.hint == InternalHint.EMAIL_ADDRESS ||
+                it.hint == InternalHint.PHONE_NUMBER
+        }
+        val automaticWeakReparse = allowWeakTargets && requireExplicitWeakLoginSignal
+        val weakLoginContext = automaticWeakReparse && !hasPasswordInItems && effectiveItems.any {
+            (it.hint == InternalHint.USERNAME ||
+                it.hint == InternalHint.EMAIL_ADDRESS ||
+                it.hint == InternalHint.PHONE_NUMBER) &&
+                it.hasLoginTerm
+        }
+        val loginFilteredItems = when {
+            hasPasswordInItems -> effectiveItems
+            allowWeakTargets && !automaticWeakReparse -> effectiveItems
+            automaticWeakReparse -> effectiveItems.mapNotNull { item ->
+                val accountLike = item.hint == InternalHint.USERNAME ||
+                    item.hint == InternalHint.EMAIL_ADDRESS ||
+                    item.hint == InternalHint.PHONE_NUMBER
+                if (!accountLike) {
+                    item
+                } else {
+                    AutofillDetectionPolicy.automaticWeakAccountAccuracy(
+                        accuracy = item.accuracy,
+                        hasLoginTerm = item.hasLoginTerm,
+                    )?.let { admittedAccuracy ->
+                        item.copy(accuracy = admittedAccuracy)
+                    }
+                }
+            }
+            else -> effectiveItems.filterNot {
+                (it.hint == InternalHint.USERNAME ||
+                    it.hint == InternalHint.EMAIL_ADDRESS ||
+                    it.hint == InternalHint.PHONE_NUMBER) &&
+                    it.accuracy.score < Accuracy.MEDIUM.score
+            }
+        }
+
         val items = mutableListOf<ParsedItem>()
-        confidenceFilteredItems
+        AutofillLogger.d(
+            "PARSING",
+            "Parser field selection",
+            metadata = mapOf(
+                "candidateCount" to candidateItems.size,
+                "confidenceFilteredCount" to confidenceFilteredItems.size,
+                "loginFilteredCount" to loginFilteredItems.size,
+                "candidates" to candidateItems.joinToString { "${it.hint}:${it.accuracy.name}" },
+                "allowWeakTargets" to allowWeakTargets,
+                "requireExplicitWeakLoginSignal" to requireExplicitWeakLoginSignal,
+                "promotedPasswordCount" to promotedPasswordCount,
+                "hasPasswordInItems" to hasPasswordInItems,
+                "hasLoginTypeField" to hasLoginTypeField,
+                "weakLoginContext" to weakLoginContext,
+            )
+        )
+        loginFilteredItems
             .groupBy { it.id }
             .forEach { groupedById ->
                 val forceAutofillOff = groupedById.value.any {
                     it.hint == InternalHint.OFF && it.accuracy == Accuracy.HIGHEST
                 }
-                var structureItems = if (forceAutofillOff) {
+                val isAlwaysExcluded = groupedById.value.any {
+                    it.hint == InternalHint.OFF && it.reason == "url-bar"
+                }
+                if (AutofillDetectionPolicy.shouldSkipAutofillOffGroup(
+                        respectAutofillOff = respectAutofillOff,
+                        hasForcedOffSignal = forceAutofillOff,
+                        isAlwaysExcluded = isAlwaysExcluded,
+                    )
+                ) {
                     return@forEach
+                }
+                var structureItems = if (forceAutofillOff) {
+                    // 用户关闭“遵循 autofill-off”后，允许同组的明确字段信号覆盖
+                    // importantForAutofill=NO；URL 栏仍由 isAlwaysExcluded 永久排除。
+                    val nonOff = groupedById.value.filter { it.hint != InternalHint.OFF }
+                    if (nonOff.isNotEmpty()) nonOff else return@forEach
                 } else if (respectAutofillOff) {
                     if (groupedById.value.any { it.hint == InternalHint.OFF }) {
                         return@forEach
@@ -680,6 +782,28 @@ class EnhancedAutofillStructureParserV2 {
                 )
             }
 
+        // 诊断：记录 groupBy 后每组被跳过的原因，排查 loginFilteredCount>0 但 parsedItems=0
+        if (loginFilteredItems.isNotEmpty() && items.isEmpty()) {
+            val groupDiagnostics = loginFilteredItems
+                .groupBy { it.id }
+                .map { (id, group) ->
+                    val hints = group.joinToString { "${it.hint}:${it.accuracy.name}" }
+                    val hasOff = group.any { it.hint == InternalHint.OFF }
+                    val mappedHints = group.mapNotNull { mapHint(it.hint) }
+                    "id=$id hints=[$hints] hasOff=$hasOff mappedCount=${mappedHints.size}"
+                }
+            AutofillLogger.w(
+                "PARSING",
+                "All groups skipped after groupBy despite non-empty loginFilteredItems",
+                metadata = mapOf(
+                    "loginFilteredCount" to loginFilteredItems.size,
+                    "groupCount" to groupDiagnostics.size,
+                    "respectAutofillOff" to respectAutofillOff,
+                    "groups" to groupDiagnostics.joinToString(" | "),
+                ),
+            )
+        }
+
         val isInSelfHostedServer = kotlin.run {
             val webDomain = rawStructure?.webDomain
             val webView = rawStructure?.webView == true
@@ -697,7 +821,8 @@ class EnhancedAutofillStructureParserV2 {
             "parse result: items=${items.size}, totalNodes=${parseContext.totalNodesVisited}, " +
                 "withAutofillId=${parseContext.nodesWithAutofillId}, " +
                 "withoutAutofillId=${parseContext.nodesWithoutAutofillId}, " +
-                "webDomain=$effectiveWebDomain, webScheme=${rawStructure?.webScheme}"
+                "webDomain=$effectiveWebDomain, webScheme=${rawStructure?.webScheme}, " +
+                "itemHints=[${items.joinToString { "${it.hint}:${it.accuracy.name}" }}]"
         )
 
         return ParsedStructure(
@@ -804,6 +929,34 @@ class EnhancedAutofillStructureParserV2 {
             outBuilders += inputOut + labelOut
 
             if (node.visibility == View.VISIBLE || shouldIncludeHiddenCredentialNode(outBuilders)) {
+                val nodeHasPasswordTerm = nodeHasPasswordTermMatch(node)
+                val nodeHasLoginTerm = nodeHasLoginTermMatch(node)
+                // 诊断：当节点被识别为 LOWEST 精度的 USERNAME（纯 text fallback 路径）时，
+                // 记录其原始信号，用于排查电影猎手等 App 的账号框为何被弱推断、
+                // 以及 bitwarden 等为何能识别（对比 autofillHints/idEntry/hint/inputType）。
+                if (outBuilders.any { it.hint == InternalHint.USERNAME &&
+                    it.accuracy == Accuracy.LOWEST }) {
+                    AutofillLogger.d(
+                        "PARSING",
+                        "LOWEST username node signals",
+                        metadata = mapOf(
+                            "className" to (node.className ?: "none"),
+                            "inputType" to node.inputType.toString(),
+                            "autofillHints" to (node.autofillHints?.joinToString(",") ?: "none"),
+                            "idEntry" to (node.idEntry ?: "none"),
+                            "hintLabel" to (node.hint?.toString() ?: "none"),
+                            "hasPasswordTerm" to nodeHasPasswordTerm,
+                            "hasLoginTerm" to nodeHasLoginTerm,
+                            "htmlTag" to (node.htmlInfo?.tag ?: "none"),
+                            "htmlAttrNames" to (node.htmlInfo?.attributes
+                                ?.map { it.first }
+                                ?.distinct()
+                                ?.joinToString(",") ?: "none"),
+                            "isVisible" to (node.visibility == View.VISIBLE),
+                            "isFocused" to node.isFocused,
+                        ),
+                    )
+                }
                 out += outBuilders.map { builder ->
                     context.traversalIndex += 1
                     RawParsedItem(
@@ -819,6 +972,8 @@ class EnhancedAutofillStructureParserV2 {
                         isFocused = node.isFocused,
                         isVisible = node.visibility == View.VISIBLE,
                         traversalIndex = context.traversalIndex,
+                        hasPasswordTerm = nodeHasPasswordTerm,
+                        hasLoginTerm = nodeHasLoginTerm,
                     )
                 }
             }
@@ -1324,6 +1479,7 @@ class EnhancedAutofillStructureParserV2 {
                 out += ParsedItemBuilder(
                     accuracy = Accuracy.HIGHEST,
                     hint = InternalHint.OFF,
+                    reason = "url-bar",
                 )
                 return out
             }
@@ -1338,6 +1494,7 @@ class EnhancedAutofillStructureParserV2 {
             out += ParsedItemBuilder(
                 accuracy = Accuracy.HIGHEST,
                 hint = InternalHint.OFF,
+                reason = "important-for-autofill-no",
             )
             return out
         }
@@ -1373,10 +1530,19 @@ class EnhancedAutofillStructureParserV2 {
                         InputType.TYPE_TEXT_VARIATION_PERSON_NAME,
                         InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT,
                     ) -> {
-                        out += ParsedItemBuilder(
-                            accuracy = Accuracy.LOWEST,
-                            hint = InternalHint.USERNAME,
-                        )
+                        // 对齐 bitwarden：纯 text 变体不再无条件 fallback 为 USERNAME:LOWEST
+                        // （bitwarden 的 toAutofillView 对纯 text 返回 Unused）。
+                        // 仅当 idEntry / idType 含 username 术语时才产出 USERNAME（由
+                        // extractOfId/extractOfType 按术语定 MEDIUM 精度），避免把
+                        // 搜索框/备注等纯文本框误判为登录账号（QQ 搜索框误弹修复）。
+                        // WEB_EDIT_TEXT 变体（WebView 内可编辑文本）保留 LOWEST fallback，
+                        // 因 WebView 登录框常用该变体且无标准 hint。
+                        if (inputIsVariationType(inputType, InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT)) {
+                            out += ParsedItemBuilder(
+                                accuracy = Accuracy.LOWEST,
+                                hint = InternalHint.USERNAME,
+                            )
+                        }
                         extractOfType(node.idType.orEmpty()).let(out::addAll)
                         extractOfId(node.idEntry.orEmpty()).let(out::addAll)
                     }
@@ -1385,22 +1551,13 @@ class EnhancedAutofillStructureParserV2 {
                         inputType,
                         InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
                     ) -> {
-                        val hasUsername = out.any {
-                            it.hint == InternalHint.USERNAME ||
-                                it.hint == InternalHint.EMAIL_ADDRESS ||
-                                it.hint == InternalHint.PHONE_NUMBER
-                        }
-                        if (hasUsername) {
-                            out += ParsedItemBuilder(
-                                accuracy = Accuracy.LOWEST,
-                                hint = InternalHint.PASSWORD,
-                            )
-                        } else {
-                            out += ParsedItemBuilder(
-                                accuracy = Accuracy.LOWEST,
-                                hint = InternalHint.USERNAME,
-                            )
-                        }
+                        // 可见密码变体一定是密码框（如"显示密码"切换），
+                        // 原逻辑要求同节点已存在 username 才判定为 password，
+                        // 但账号/密码通常是独立节点，导致密码框被误判为 username。
+                        out += ParsedItemBuilder(
+                            accuracy = Accuracy.LOW,
+                            hint = InternalHint.PASSWORD,
+                        )
                     }
 
                     inputIsVariationType(
@@ -1473,6 +1630,85 @@ class EnhancedAutofillStructureParserV2 {
                 hint = mappedHint,
                 accuracy = builder.accuracy,
             )
+        }
+    }
+
+    /**
+     * 判断节点的文本信号（idEntry / label hint / autofillHints / html placeholder / className）
+     * 是否含 password 术语。用于弱目标模式下把非标准 inputType 的密码框从 USERNAME:LOWEST
+     * 提升为 PASSWORD（借鉴 bitwarden 的 updateForMissingPasswordFields）。
+     */
+    private fun nodeHasPasswordTermMatch(node: AssistStructure.ViewNode): Boolean {
+        val candidates = buildList {
+            node.idEntry?.let { add(it) }
+            node.hint?.toString()?.let { add(it) }
+            node.autofillHints?.forEach { add(it) }
+            node.htmlInfo?.attributes?.forEach { attr ->
+                val k = attr.first
+                if (k.equals("placeholder", ignoreCase = true) ||
+                    k.equals("name", ignoreCase = true) ||
+                    k.equals("id", ignoreCase = true)
+                ) {
+                    attr.second?.let { add(it) }
+                }
+            }
+            node.className?.let { add(it) }
+        }
+        return candidates.any { value ->
+            autofillLabelPasswordTranslations.any { term -> value.contains(term, ignoreCase = true) }
+        }
+    }
+
+    /**
+     * 判断节点的文本信号是否含 login 术语（username/login/账号/用户名/password/密码 等）。
+     * 用于弱目标模式下的「login 上下文门」：无密码框时，若屏幕上任意节点含 login 术语，
+     * 放行低精度账号字段（对齐 bitwarden「有 Login 字段就 Fillable」门槛）；
+     * 纯搜索/备注场景无 login 术语，不放行，缓解误弹。
+     */
+    private fun nodeHasLoginTermMatch(node: AssistStructure.ViewNode): Boolean {
+        val candidates = buildList {
+            node.idEntry?.let { add(it) }
+            node.hint?.toString()?.let { add(it) }
+            node.autofillHints?.forEach { add(it) }
+            node.htmlInfo?.attributes?.forEach { attr ->
+                val k = attr.first
+                if (k.equals("placeholder", ignoreCase = true) ||
+                    k.equals("name", ignoreCase = true) ||
+                    k.equals("id", ignoreCase = true)
+                ) {
+                    attr.second?.let { add(it) }
+                }
+            }
+        }
+        return candidates.any { value ->
+            autofillLabelLoginTranslations.any { term -> value.contains(term, ignoreCase = true) }
+        }
+    }
+
+    /**
+     * 弱目标模式下的密码字段提升（借鉴 bitwarden updateForMissingPasswordFields）：
+     * 当候选里无 PASSWORD 时，把含 password 术语但被识别为其它 hint（通常是 USERNAME:LOWEST，
+     * 因 inputType 非标准所致）的候选提升为 PASSWORD:LOW。提升后 hasPasswordInItems=true，
+     * 低精度账号字段自然保留并弹窗；无 password 术语的（如 QQ 搜索框）不受影响，仍按原逻辑过滤。
+     * 仅在 allowWeakTargets=true 时调用。
+     */
+    private fun promotePasswordTermCandidates(items: List<RawParsedItem>): List<RawParsedItem> {
+        val hasPassword = items.any {
+            it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
+        }
+        if (hasPassword) return items
+        val anyPromotable = items.any { it.hasPasswordTerm && it.hint != InternalHint.OFF }
+        if (!anyPromotable) return items
+        return items.map { item ->
+            if (item.hasPasswordTerm &&
+                item.hint != InternalHint.OFF &&
+                item.hint != InternalHint.PASSWORD &&
+                item.hint != InternalHint.NEW_PASSWORD
+            ) {
+                item.copy(hint = InternalHint.PASSWORD, accuracy = Accuracy.LOW)
+            } else {
+                item
+            }
         }
     }
 

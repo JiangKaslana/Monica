@@ -990,7 +990,7 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
                 username = username,
                 password = password,
                 preferPasswordField = preferPasswordField,
-                attempt = 1
+                attempt = 1,
             )
         }, MANUAL_ACCESSIBILITY_FILL_DELAY_MS)
 
@@ -1022,13 +1022,15 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
                 targetPackageName = resolvedTargetPackage,
                 username = username,
                 password = password,
-                preferPasswordField = preferPasswordField
+                preferPasswordField = preferPasswordField,
             )
         }
 
         AutofillLogger.i(
             "PICKER",
-            "Manual accessibility fill attempt: attempt=$attempt, filled=$filled, activePackage=${activePackage.ifBlank { "none" }}, expectedPackage=${expectedTargetPackage.orEmpty().ifBlank { "any" }}"
+            "Manual accessibility fill attempt: attempt=$attempt, filled=$filled, " +
+                "activePackage=${activePackage.ifBlank { "none" }}, " +
+                "expectedPackage=${expectedTargetPackage.orEmpty().ifBlank { "any" }}",
         )
 
         if (filled || attempt >= MANUAL_ACCESSIBILITY_MAX_ATTEMPTS) {
@@ -1044,16 +1046,20 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
                         context = appContext,
                         text = password,
                         label = appContext.getString(R.string.autofill_password),
-                        sensitive = true
+                        sensitive = true,
                     )
-                    android.widget.Toast.makeText(appContext, R.string.password_copied, android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(
+                        appContext,
+                        R.string.password_copied,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
                 } else {
                     copyManualCredentialFallback(
                         context = appContext,
                         username = username,
                         password = password,
                         usernameLabel = appContext.getString(R.string.autofill_username),
-                        passwordLabel = appContext.getString(R.string.autofill_password)
+                        passwordLabel = appContext.getString(R.string.autofill_password),
                     )
                 }
             }
@@ -1068,7 +1074,7 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
                 username = username,
                 password = password,
                 preferPasswordField = preferPasswordField,
-                attempt = attempt + 1
+                attempt = attempt + 1,
             )
         }, MANUAL_ACCESSIBILITY_RETRY_DELAY_MS)
     }

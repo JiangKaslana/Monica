@@ -184,6 +184,29 @@ class BitwardenLikeAutofillMatcherNgTest {
         assertEquals(1L, result.first().id)
     }
 
+    @Test
+    fun `strict mode rejects title-only package token matches`() {
+        val entries = listOf(
+            entry(id = 1, title = "GitHub Account"),
+        )
+
+        val strictResult = matcher.match(
+            entries = entries,
+            packageName = "com.github.fake",
+            webDomain = null,
+            config = BitwardenLikeAutofillMatcherNg.Config(strictOnly = true),
+        )
+        val nonStrictResult = matcher.match(
+            entries = entries,
+            packageName = "com.github.fake",
+            webDomain = null,
+            config = BitwardenLikeAutofillMatcherNg.Config(strictOnly = false),
+        )
+
+        assertTrue(strictResult.isEmpty())
+        assertEquals(listOf(1L), nonStrictResult.map { it.id })
+    }
+
     private fun entry(
         id: Long,
         title: String,

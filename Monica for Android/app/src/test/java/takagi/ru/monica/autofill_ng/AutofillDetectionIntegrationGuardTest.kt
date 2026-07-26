@@ -19,10 +19,57 @@ class AutofillDetectionIntegrationGuardTest {
         assertTrue(service.contains("FillRequest.FLAG_MANUAL_REQUEST"))
         assertTrue(service.contains("allowWeakTargets = isManualRequest"))
         assertTrue(service.contains("manualRequest = isManualRequest"))
+        assertFalse(service.contains("manualRequest = isManualRequest || usedWeakReparse"))
+        assertTrue(service.contains("requireExplicitWeakLoginSignal = true"))
         assertTrue(service.contains("if (!isManualRequest && loginTargetCount == 0"))
         assertTrue(parser.contains("if (allowWeakTargets) return@let list"))
+        assertTrue(parser.contains("promotePasswordTermCandidates"))
+        assertTrue(parser.contains("nodeHasPasswordTermMatch"))
+        assertTrue(parser.contains("nodeHasLoginTermMatch"))
+        assertTrue(parser.contains("weakLoginContext"))
+        assertTrue(parser.contains("hasLoginTypeField"))
+        assertTrue(parser.contains("LOWEST username node signals"))
+        assertTrue(parser.contains("autofillLabelLoginTranslations"))
+        assertTrue(parser.contains("automaticWeakAccountAccuracy"))
         assertTrue(service.contains("AutofillRequestContextPolicy.allowPackageMatching("))
         assertTrue(service.contains("allowPackageMatch = allowPackageMatch"))
+    }
+
+    @Test
+    fun manualPickerKeepsAccessibilityFillWithClipboardFallback() {
+        val picker = projectFile(
+            "app/src/main/java/takagi/ru/monica/autofill_ng/AutofillPickerActivityV2.kt"
+        ).readText()
+
+        assertTrue(picker.contains("scheduleManualAccessibilityFill"))
+        assertTrue(picker.contains("MonicaAccessibilityService.requestCredentialFill"))
+        assertTrue(picker.contains("copyManualCredentialFallback"))
+        assertFalse(picker.contains("scheduleManualClipboardFill"))
+    }
+
+    @Test
+    fun parserDiagnosticsDoNotPersistHtmlAttributeValues() {
+        val parser = projectFile(
+            "app/src/main/java/takagi/ru/monica/autofill_ng/EnhancedAutofillStructureParserV2.kt"
+        ).readText()
+
+        assertTrue(parser.contains("htmlAttrNames"))
+        assertFalse(parser.contains("\"htmlAttrs\""))
+        assertFalse(
+            parser.contains(
+                """joinToString(",") { "${'$'}{it.first}=${'$'}{it.second}" }"""
+            )
+        )
+    }
+
+    @Test
+    fun neverExpireAutofillStillHonorsExplicitVaultLock() {
+        val builder = projectFile(
+            "app/src/main/java/takagi/ru/monica/autofill_ng/builder/FilledDataBuilderNg.kt"
+        ).readText()
+
+        assertTrue(builder.contains("canAccessVaultNowStrict"))
+        assertFalse(builder.contains("canAccessVaultMaterialNow"))
     }
 
     @Test
