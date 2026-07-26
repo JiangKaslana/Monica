@@ -11,6 +11,7 @@ import javax.crypto.spec.SecretKeySpec
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 
 /**
  * 加密帮助类
@@ -44,24 +45,29 @@ class EncryptionHelper {
                 if (file.name.endsWith(".enc.zip")) {
                     return true
                 }
-                
-                // 通过文件头判断
-                if (file.length() < FILE_MAGIC.length) {
-                    return false
-                }
-                
-                FileInputStream(file).use { fis ->
-                    val header = ByteArray(FILE_MAGIC.length)
-                    val bytesRead = fis.read(header)
-                    if (bytesRead < FILE_MAGIC.length) {
-                        return false
-                    }
-                    return String(header, Charsets.UTF_8) == FILE_MAGIC
-                }
+
+                return hasEncryptedFileHeader(file)
             } catch (e: Exception) {
                 Log.e(TAG, "Error checking if file is encrypted", e)
                 return false
             }
+        }
+
+        fun hasEncryptedFileHeader(file: File): Boolean {
+            if (!file.isFile || file.length() < FILE_MAGIC.length) return false
+            return FileInputStream(file).use(::hasEncryptedFileHeader)
+        }
+
+        fun hasEncryptedFileHeader(input: InputStream): Boolean {
+            val expected = FILE_MAGIC.toByteArray(Charsets.UTF_8)
+            val header = ByteArray(expected.size)
+            var offset = 0
+            while (offset < header.size) {
+                val read = input.read(header, offset, header.size - offset)
+                if (read <= 0) return false
+                offset += read
+            }
+            return header.contentEquals(expected)
         }
         
         /**

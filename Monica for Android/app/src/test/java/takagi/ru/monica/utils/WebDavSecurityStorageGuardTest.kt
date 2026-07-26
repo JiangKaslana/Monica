@@ -35,7 +35,7 @@ class WebDavSecurityStorageGuardTest {
     fun backupCreation_doesNotUseHardcodedFallbackKeyForNewSensitiveExports() {
         val source = projectFile("app/src/main/java/takagi/ru/monica/utils/WebDavHelper.kt")
 
-        assertTrue(source.contains("val backupEncryptPassword = currentBackupEncryptionPassword()"))
+        assertTrue(source.contains("val backupEncryptPassword = BackupEncryptionPolicy.resolvePassword("))
         assertTrue(source.contains("未启用备份加密，已跳过 WebDAV 连接凭证和 Bitwarden Vault 密钥材料"))
         assertFalse(source.contains("val backupEncryptPassword = if (enableEncryption && encryptionPassword.isNotEmpty())"))
     }
@@ -47,6 +47,9 @@ class WebDavSecurityStorageGuardTest {
         assertTrue(source.contains("private const val LEGACY_WEBDAV_BACKUP_FALLBACK_KEY = \"Monica_WebDAV_Config_Key\""))
         assertTrue(source.contains("private fun decryptBackupValueWithLegacyFallback"))
         assertTrue(source.contains("if (decryptPassword.isNullOrBlank())"))
+        assertTrue(source.contains("val resolvedDecryptPassword = if (isEncrypted)"))
+        assertTrue(source.contains("restoreBitwardenVaultBackups("))
+        assertTrue(source.contains("resolvedDecryptPassword,"))
     }
 
     @Test

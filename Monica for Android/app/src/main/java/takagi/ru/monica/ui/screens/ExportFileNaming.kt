@@ -11,11 +11,16 @@ data class ExportDocumentSpec(
 
 fun exportDocumentSpec(
     selectedOption: ExportOption,
-    currentTimeMillis: Long = System.currentTimeMillis()
+    currentTimeMillis: Long = System.currentTimeMillis(),
+    encryptedZip: Boolean = false,
 ): ExportDocumentSpec {
     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date(currentTimeMillis))
     val fileName = when (selectedOption) {
-        ExportOption.ZIP_BACKUP -> "monica_backup_${timestamp}.zip"
+        ExportOption.ZIP_BACKUP -> if (encryptedZip) {
+            "monica_backup_${timestamp}.enc.zip"
+        } else {
+            "monica_backup_${timestamp}.zip"
+        }
         ExportOption.KDBX -> "monica_${timestamp}.kdbx"
         ExportOption.STEAM_MAFILE -> "steam_mafiles_${timestamp}.zip"
     }

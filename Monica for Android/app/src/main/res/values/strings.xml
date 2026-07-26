@@ -2459,6 +2459,20 @@
     <string name="backup_content_keepass_webdav_config_hint">Include KeePass WebDAV sync settings for easy setup on new devices.</string>
     <string name="backup_content_webdav_config">Monica Configuration</string>
     <string name="backup_content_webdav_config_hint">Back up WebDAV, auto backup, autofill blocks, account info, page tweaks, and Bitwarden vaults.</string>
+    <string name="zip_config_export_security_title">Protect Monica configuration</string>
+    <string name="zip_config_export_security_desc">This selection includes sensitive WebDAV and Monica configuration. Choose how to protect it before exporting.</string>
+    <string name="zip_config_export_encrypted_title">Encrypted backup (recommended)</string>
+    <string name="zip_config_export_encrypted_desc">Includes recoverable WebDAV credentials and protects the entire backup with a password.</string>
+    <string name="zip_config_export_plain_title">Regular ZIP</string>
+    <string name="zip_config_export_plain_desc">WebDAV passwords and Bitwarden key material are excluded. You must enter the connection password again after restoring.</string>
+    <string name="zip_config_export_continue">Continue</string>
+    <string name="zip_backup_password_title">Set backup password</string>
+    <string name="zip_backup_password_desc">Use this password when importing the encrypted backup. Monica does not store it.</string>
+    <string name="zip_backup_password_label">Backup password</string>
+    <string name="zip_backup_password_confirm_label">Confirm password</string>
+    <string name="zip_backup_password_required">Enter a backup password</string>
+    <string name="zip_backup_password_mismatch">Passwords do not match</string>
+    <string name="zip_backup_password_export">Encrypt and export</string>
     <string name="deselect_all">Deselect All</string>
     <string name="backup_validation_error">Please select at least one content type</string>
 

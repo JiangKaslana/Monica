@@ -3118,7 +3118,7 @@ class MultiPasswordSaveRegressionGuardTest {
     }
 
     @Test
-    fun localZipExportDoesNotInheritRemoteBackupEncryption() {
+    fun localZipExportUsesAnExplicitEncryptionChoice() {
         val dataExportSource = projectFile(
             "app/src/main/java/takagi/ru/monica/viewmodel/DataExportImportViewModel.kt"
         ).readText()
@@ -3136,36 +3136,39 @@ class MultiPasswordSaveRegressionGuardTest {
             .substringBefore("suspend fun importZipBackup(")
 
         assertTrue(
-            "Local export writes a .zip document, so it must force createBackupZip to return a plain ZIP even when remote backup encryption is enabled.",
-            prepareZipBackupBody.contains("allowBackupEncryption = false")
+            "Local export must pass only the user-selected backup password and must not silently inherit remote encryption.",
+            prepareZipBackupBody.contains("allowBackupEncryption = !backupEncryptionPassword.isNullOrBlank()") &&
+                prepareZipBackupBody.contains("backupEncryptionPassword = backupEncryptionPassword")
         )
         assertTrue(
-            "Local export must validate the generated ZIP and the bytes written to the selected document before reporting success.",
-            prepareZipBackupBody.contains("validatePlainZipFile(zipFile)") &&
+            "Local export must validate either the generated ZIP or encrypted backup and the bytes written to the selected document before reporting success.",
+            prepareZipBackupBody.contains("validatePreparedBackupFile(zipFile)") &&
                 copyZipBody.contains("validatePlainZipStream") &&
+                copyZipBody.contains("hasEncryptedFileHeader") &&
                 copyZipBody.contains("openExportOutputStream(outputUri)") &&
                 copyZipBody.contains("copiedBytes <= 0L") &&
                 copyZipBody.contains("copiedBytes != expectedBytes")
         )
         assertTrue(
-            "The export screen should prepare and validate the ZIP before ACTION_CREATE_DOCUMENT so a generation failure does not leave a 0B user-visible file.",
+            "The export screen should prepare and validate the selected backup before ACTION_CREATE_DOCUMENT so a generation failure does not leave a 0B user-visible file.",
             exportScreenSource.contains("var pendingPreparedZipBackup") &&
-                exportScreenSource.contains("onPrepareZip(backupPreferences)") &&
+                exportScreenSource.contains("onPrepareZip(backupPreferences, backupPassword)") &&
                 exportScreenSource.contains("pendingPreparedZipBackup = backup") &&
                 exportScreenSource.contains("onWritePreparedZip(safeUri, preparedZipBackup.first, preparedZipBackup.second)") &&
-                exportScreenSource.indexOf("onPrepareZip(backupPreferences)") <
+                exportScreenSource.indexOf("onPrepareZip(backupPreferences, backupPassword)") <
                     exportScreenSource.lastIndexOf("launchCreateDocument()")
         )
         assertTrue(
             "The legacy one-step export API should clean up its prepared temp ZIP after copying.",
-            exportZipBackupBody.contains("prepareZipBackup(preferences).getOrThrow()") &&
+            exportZipBackupBody.contains("prepareZipBackup(") &&
                 exportZipBackupBody.contains("writePreparedZipBackup(outputUri, zipFile, message)") &&
                 exportZipBackupBody.contains("preparedFile?.delete()")
         )
         assertTrue(
-            "Backup ZIP creation should only return an encrypted .enc.zip when the caller allows backup encryption and an encryption password exists.",
+            "Backup ZIP creation should only return an encrypted .enc.zip when the caller allows backup encryption and a resolved password exists.",
             webDavHelperSource.contains("allowBackupEncryption: Boolean = true") &&
-                webDavHelperSource.contains("val shouldEncryptBackup = allowBackupEncryption && enableEncryption && encryptionPassword.isNotEmpty()") &&
+                webDavHelperSource.contains("val backupEncryptPassword = BackupEncryptionPolicy.resolvePassword(") &&
+                webDavHelperSource.contains("val shouldEncryptBackup = backupEncryptPassword != null") &&
                 webDavHelperSource.contains("val finalFile = if (shouldEncryptBackup)")
         )
         assertFalse(

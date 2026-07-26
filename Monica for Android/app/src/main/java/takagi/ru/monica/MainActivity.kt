@@ -2576,11 +2576,18 @@ fun MonicaContent(
                 onNavigateBack = {
                     navController.popBackStack()
                 },
-                onExportZip = { uri, preferences ->
-                    dataExportImportViewModel.exportZipBackup(uri, preferences)
+                onExportZip = { uri, preferences, backupEncryptionPassword ->
+                    dataExportImportViewModel.exportZipBackup(
+                        outputUri = uri,
+                        preferences = preferences,
+                        backupEncryptionPassword = backupEncryptionPassword,
+                    )
                 },
-                onPrepareZip = { preferences ->
-                    dataExportImportViewModel.prepareZipBackup(preferences)
+                onPrepareZip = { preferences, backupEncryptionPassword ->
+                    dataExportImportViewModel.prepareZipBackup(
+                        preferences = preferences,
+                        backupEncryptionPassword = backupEncryptionPassword,
+                    )
                 },
                 onWritePreparedZip = { uri, zipFile, message ->
                     dataExportImportViewModel.writePreparedZipBackup(uri, zipFile, message)

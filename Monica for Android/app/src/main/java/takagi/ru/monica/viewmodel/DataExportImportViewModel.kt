@@ -26,6 +26,7 @@ import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.steam.data.SteamAccountRepository
 import takagi.ru.monica.steam.data.SteamDatabase
 import takagi.ru.monica.utils.BackupRestoreApplier
+import takagi.ru.monica.utils.EncryptionHelper
 import takagi.ru.monica.utils.FieldChange
 import takagi.ru.monica.utils.ImportedPasswordSnapshot
 import takagi.ru.monica.utils.OperationLogger
@@ -132,6 +133,17 @@ class DataExportImportViewModel(
         }
     }
 
+    private fun validatePreparedBackupFile(file: File): Boolean {
+        if (!file.isFile || file.length() <= 0L) {
+            throw IOException("导出的备份文件为空")
+        }
+        val encrypted = EncryptionHelper.hasEncryptedFileHeader(file)
+        if (!encrypted) {
+            validatePlainZipFile(file)
+        }
+        return encrypted
+    }
+
     private fun openExportOutputStream(uri: Uri): OutputStream {
         val resolver = context.contentResolver
         val modes = listOf("wt", "rwt", "w")
@@ -160,7 +172,7 @@ class DataExportImportViewModel(
     }
 
     private suspend fun copyZipFileToOutputUri(zipFile: File, outputUri: Uri): Long = withContext(Dispatchers.IO) {
-        validatePlainZipFile(zipFile)
+        val encrypted = validatePreparedBackupFile(zipFile)
         val expectedBytes = zipFile.length()
         val copiedBytes = openExportOutputStream(outputUri).use { output ->
             zipFile.inputStream().use { input ->
@@ -175,8 +187,15 @@ class DataExportImportViewModel(
         if (expectedBytes > 0L && copiedBytes != expectedBytes) {
             throw IOException("导出文件写入不完整：$copiedBytes/$expectedBytes")
         }
-        context.contentResolver.openInputStream(outputUri)?.use(::validatePlainZipStream)
-            ?: throw IOException("无法校验导出的ZIP文件")
+        context.contentResolver.openInputStream(outputUri)?.use { input ->
+            if (encrypted) {
+                if (!EncryptionHelper.hasEncryptedFileHeader(input)) {
+                    throw IOException("写入后的加密备份格式无效")
+                }
+            } else {
+                validatePlainZipStream(input)
+            }
+        } ?: throw IOException("无法校验导出的ZIP文件")
         copiedBytes
     }
 
@@ -210,7 +229,15 @@ class DataExportImportViewModel(
     }
 
     private fun zipBackupExportMessage(report: BackupReport): String {
-        return "成功导出备份，包含 ${report.successItems.passwords} 个密码和 ${report.successItems.images} 张图片"
+        val base = "成功导出备份，包含 ${report.successItems.passwords} 个密码和 ${report.successItems.images} 张图片"
+        val sensitiveConfigWarning = report.warnings.firstOrNull { warning ->
+            warning.contains("WebDAV 连接凭证")
+        }
+        return if (sensitiveConfigWarning != null) {
+            "$base\n$sensitiveConfigWarning"
+        } else {
+            base
+        }
     }
 
     sealed class SteamLoginImportState {
@@ -1092,7 +1119,10 @@ class DataExportImportViewModel(
      * @param outputUri 导出文件的URI
      * @param preferences 备份偏好设置（选择要导出的内容类型）
      */
-    suspend fun prepareZipBackup(preferences: takagi.ru.monica.data.BackupPreferences = takagi.ru.monica.data.BackupPreferences()): Result<Pair<File, String>> {
+    suspend fun prepareZipBackup(
+        preferences: takagi.ru.monica.data.BackupPreferences = takagi.ru.monica.data.BackupPreferences(),
+        backupEncryptionPassword: String? = null,
+    ): Result<Pair<File, String>> {
         return try {
             val webDavHelper = takagi.ru.monica.utils.WebDavHelper(context)
 
@@ -1117,7 +1147,8 @@ class DataExportImportViewModel(
                 secureItems = secureItems,
                 preferences = preferences,
                 contentScope = BackupContentScope.ALL_OFFLINE,
-                allowBackupEncryption = false
+                allowBackupEncryption = !backupEncryptionPassword.isNullOrBlank(),
+                backupEncryptionPassword = backupEncryptionPassword,
             )
 
             result.fold(
@@ -1130,7 +1161,7 @@ class DataExportImportViewModel(
                             android.util.Log.w("DataExport", "Backup report has failures: ${report.failedItems.size}")
                         }
 
-                        validatePlainZipFile(zipFile)
+                        validatePreparedBackupFile(zipFile)
                         Result.success(zipFile to zipBackupExportMessage(report))
                     } catch (error: Throwable) {
                         zipFile.delete()
@@ -1161,10 +1192,17 @@ class DataExportImportViewModel(
         }
     }
 
-    suspend fun exportZipBackup(outputUri: Uri, preferences: takagi.ru.monica.data.BackupPreferences = takagi.ru.monica.data.BackupPreferences()): Result<String> {
+    suspend fun exportZipBackup(
+        outputUri: Uri,
+        preferences: takagi.ru.monica.data.BackupPreferences = takagi.ru.monica.data.BackupPreferences(),
+        backupEncryptionPassword: String? = null,
+    ): Result<String> {
         var preparedFile: File? = null
         return try {
-            val (zipFile, message) = prepareZipBackup(preferences).getOrThrow()
+            val (zipFile, message) = prepareZipBackup(
+                preferences = preferences,
+                backupEncryptionPassword = backupEncryptionPassword,
+            ).getOrThrow()
             preparedFile = zipFile
             writePreparedZipBackup(outputUri, zipFile, message)
         } catch (e: Exception) {

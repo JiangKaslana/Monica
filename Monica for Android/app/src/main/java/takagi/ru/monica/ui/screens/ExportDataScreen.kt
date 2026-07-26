@@ -7,6 +7,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,9 +19,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
@@ -41,8 +45,8 @@ import java.io.File
 @Composable
 fun ExportDataScreen(
     onNavigateBack: () -> Unit,
-    onExportZip: suspend (Uri, BackupPreferences) -> Result<String>,
-    onPrepareZip: suspend (BackupPreferences) -> Result<Pair<File, String>> = {
+    onExportZip: suspend (Uri, BackupPreferences, String?) -> Result<String>,
+    onPrepareZip: suspend (BackupPreferences, String?) -> Result<Pair<File, String>> = { _, _ ->
         Result.failure(Exception("Not implemented"))
     },
     onWritePreparedZip: suspend (Uri, File, String) -> Result<String> = { _, _, _ ->
@@ -80,6 +84,13 @@ fun ExportDataScreen(
     var backupPreferences by remember { mutableStateOf(BackupPreferences()) }
     var zipBackupExpanded by remember { mutableStateOf(false) }
     var pendingPreparedZipBackup by remember { mutableStateOf<Pair<File, String>?>(null) }
+    var showZipConfigExportDialog by remember { mutableStateOf(false) }
+    var zipConfigExportEncrypted by remember { mutableStateOf(true) }
+    var showZipEncryptionPasswordDialog by remember { mutableStateOf(false) }
+    var zipEncryptionPassword by remember { mutableStateOf("") }
+    var zipEncryptionPasswordConfirmation by remember { mutableStateOf("") }
+    var zipEncryptionPasswordVisible by remember { mutableStateOf(false) }
+    var zipEncryptionPasswordError by remember { mutableStateOf<String?>(null) }
 
     // Steam maFile 导出
     var steamMaFileExpanded by remember { mutableStateOf(false) }
@@ -147,7 +158,7 @@ fun ExportDataScreen(
                 ExportOption.ZIP_BACKUP -> if (preparedZipBackup != null) {
                     onWritePreparedZip(safeUri, preparedZipBackup.first, preparedZipBackup.second)
                 } else {
-                    onExportZip(safeUri, backupPreferences)
+                    onExportZip(safeUri, backupPreferences, null)
                 }
                 ExportOption.KDBX -> onExportKdbx(safeUri, kdbxPassword)
                 ExportOption.STEAM_MAFILE -> preparedSteamMaFileExport?.let {
@@ -244,7 +255,12 @@ fun ExportDataScreen(
     }
 
     fun launchCreateDocument() {
-        val (fileName, mimeType) = exportDocumentSpec(selectedOption)
+        val encryptedZip = selectedOption == ExportOption.ZIP_BACKUP &&
+            pendingPreparedZipBackup?.first?.name?.endsWith(".enc.zip", ignoreCase = true) == true
+        val (fileName, mimeType) = exportDocumentSpec(
+            selectedOption = selectedOption,
+            encryptedZip = encryptedZip,
+        )
 
         val createDocumentIntent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -266,6 +282,29 @@ fun ExportDataScreen(
         }
     }
     
+    fun prepareAndLaunchZip(backupPassword: String?) {
+        isExporting = true
+        scope.launch {
+            val prepared = onPrepareZip(backupPreferences, backupPassword)
+            prepared.onSuccess { backup ->
+                pendingPreparedZipBackup = backup
+                launchCreateDocument()
+            }.onFailure { error ->
+                isExporting = false
+                snackbarHostState.showSnackbar(
+                    error.message ?: context.getString(R.string.export_data_error)
+                )
+            }
+        }
+    }
+
+    fun resetZipEncryptionPassword() {
+        zipEncryptionPassword = ""
+        zipEncryptionPasswordConfirmation = ""
+        zipEncryptionPasswordVisible = false
+        zipEncryptionPasswordError = null
+    }
+
     // 启动导出
     fun startExport() {
         if (selectedOption == ExportOption.STEAM_MAFILE) {
@@ -307,23 +346,71 @@ fun ExportDataScreen(
         }
 
         if (selectedOption == ExportOption.ZIP_BACKUP) {
-            isExporting = true
-            scope.launch {
-                val prepared = onPrepareZip(backupPreferences)
-                prepared.onSuccess { backup ->
-                    pendingPreparedZipBackup = backup
-                    launchCreateDocument()
-                }.onFailure { error ->
-                    isExporting = false
-                    snackbarHostState.showSnackbar(
-                        error.message ?: context.getString(R.string.export_data_error)
-                    )
-                }
+            if (backupPreferences.includeWebDavConfig) {
+                zipConfigExportEncrypted = true
+                showZipConfigExportDialog = true
+            } else {
+                prepareAndLaunchZip(null)
             }
             return
         }
 
         launchCreateDocument()
+    }
+
+    if (showZipConfigExportDialog) {
+        ZipConfigExportChoiceDialog(
+            encrypted = zipConfigExportEncrypted,
+            onEncryptedChange = { zipConfigExportEncrypted = it },
+            onDismiss = { showZipConfigExportDialog = false },
+            onConfirm = {
+                showZipConfigExportDialog = false
+                if (zipConfigExportEncrypted) {
+                    resetZipEncryptionPassword()
+                    showZipEncryptionPasswordDialog = true
+                } else {
+                    prepareAndLaunchZip(null)
+                }
+            }
+        )
+    }
+
+    if (showZipEncryptionPasswordDialog) {
+        ZipEncryptionPasswordDialog(
+            password = zipEncryptionPassword,
+            confirmation = zipEncryptionPasswordConfirmation,
+            passwordVisible = zipEncryptionPasswordVisible,
+            errorMessage = zipEncryptionPasswordError,
+            onPasswordChange = {
+                zipEncryptionPassword = it
+                zipEncryptionPasswordError = null
+            },
+            onConfirmationChange = {
+                zipEncryptionPasswordConfirmation = it
+                zipEncryptionPasswordError = null
+            },
+            onPasswordVisibleChange = { zipEncryptionPasswordVisible = it },
+            onDismiss = {
+                showZipEncryptionPasswordDialog = false
+                resetZipEncryptionPassword()
+            },
+            onConfirm = {
+                when {
+                    zipEncryptionPassword.isBlank() -> {
+                        zipEncryptionPasswordError = context.getString(R.string.zip_backup_password_required)
+                    }
+                    zipEncryptionPassword != zipEncryptionPasswordConfirmation -> {
+                        zipEncryptionPasswordError = context.getString(R.string.zip_backup_password_mismatch)
+                    }
+                    else -> {
+                        showZipEncryptionPasswordDialog = false
+                        val passwordForExport = zipEncryptionPassword
+                        resetZipEncryptionPassword()
+                        prepareAndLaunchZip(passwordForExport)
+                    }
+                }
+            }
+        )
     }
     
     // KDBX 密码输入对话框
@@ -697,6 +784,220 @@ fun ExportDataScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+}
+
+@Composable
+private fun ZipConfigExportChoiceDialog(
+    encrypted: Boolean,
+    onEncryptedChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Security,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
+        title = { Text(stringResource(R.string.zip_config_export_security_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.zip_config_export_security_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                ZipConfigExportChoice(
+                    selected = encrypted,
+                    icon = Icons.Default.Lock,
+                    title = stringResource(R.string.zip_config_export_encrypted_title),
+                    description = stringResource(R.string.zip_config_export_encrypted_desc),
+                    onClick = { onEncryptedChange(true) },
+                )
+                ZipConfigExportChoice(
+                    selected = !encrypted,
+                    icon = Icons.Default.Archive,
+                    title = stringResource(R.string.zip_config_export_plain_title),
+                    description = stringResource(R.string.zip_config_export_plain_desc),
+                    onClick = { onEncryptedChange(false) },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.zip_config_export_continue))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun ZipConfigExportChoice(
+    selected: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(
+                selected = selected,
+                onClick = onClick,
+                role = Role.RadioButton,
+            ),
+        shape = MaterialTheme.shapes.large,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        tonalElevation = if (selected) 2.dp else 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            RadioButton(selected = selected, onClick = null)
+        }
+    }
+}
+
+@Composable
+private fun ZipEncryptionPasswordDialog(
+    password: String,
+    confirmation: String,
+    passwordVisible: Boolean,
+    errorMessage: String?,
+    onPasswordChange: (String) -> Unit,
+    onConfirmationChange: (String) -> Unit,
+    onPasswordVisibleChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
+        title = { Text(stringResource(R.string.zip_backup_password_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.zip_backup_password_desc),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    label = { Text(stringResource(R.string.zip_backup_password_label)) },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { onPasswordVisibleChange(!passwordVisible) }) {
+                            Icon(
+                                imageVector = if (passwordVisible) {
+                                    Icons.Default.VisibilityOff
+                                } else {
+                                    Icons.Default.Visibility
+                                },
+                                contentDescription = stringResource(
+                                    if (passwordVisible) R.string.hide_password else R.string.show_password
+                                ),
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = errorMessage != null && password.isBlank(),
+                )
+                OutlinedTextField(
+                    value = confirmation,
+                    onValueChange = onConfirmationChange,
+                    label = { Text(stringResource(R.string.zip_backup_password_confirm_label)) },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = errorMessage != null,
+                    supportingText = errorMessage?.let { message ->
+                        { Text(message) }
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.zip_backup_password_export))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 @Composable

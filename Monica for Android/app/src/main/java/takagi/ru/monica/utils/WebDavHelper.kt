@@ -1084,7 +1084,8 @@ class WebDavHelper(
      * @param passwords 所有密码条目
      * @param secureItems 所有其他安全数据项
      * @param preferences 备份偏好设置
-     * @param allowBackupEncryption 是否允许沿用 WebDAV/OneDrive 的备份加密配置
+     * @param allowBackupEncryption 是否允许启用备份加密
+     * @param backupEncryptionPassword 本次备份显式指定的密码；为空时沿用远程备份加密配置
      * @return Result<Pair<File, BackupReport>> 包含生成的ZIP文件和备份报告
      */
     suspend fun createBackupZip(
@@ -1093,7 +1094,8 @@ class WebDavHelper(
         secureItems: List<SecureItem>,
         preferences: BackupPreferences = getBackupPreferences(),
         contentScope: BackupContentScope = BackupContentScope.MONICA_LOCAL_ONLY,
-        allowBackupEncryption: Boolean = true
+        allowBackupEncryption: Boolean = true,
+        backupEncryptionPassword: String? = null,
     ): Result<Pair<File, BackupReport>> = withContext(Dispatchers.IO) {
         try {
             // 验证：检查是否至少启用了一种内容类型
@@ -1138,7 +1140,13 @@ class WebDavHelper(
             
             val historyJsonFile = File(context.cacheDir, "Monica_${timestamp}_generated_history.json")
             val zipFile = File(context.cacheDir, "monica_backup_$timestamp.zip")
-            val shouldEncryptBackup = allowBackupEncryption && enableEncryption && encryptionPassword.isNotEmpty()
+            val backupEncryptPassword = BackupEncryptionPolicy.resolvePassword(
+                allowBackupEncryption = allowBackupEncryption,
+                explicitPassword = backupEncryptionPassword,
+                configuredEncryptionEnabled = enableEncryption,
+                configuredEncryptionPassword = encryptionPassword,
+            )
+            val shouldEncryptBackup = backupEncryptPassword != null
             val finalFile = if (shouldEncryptBackup) {
                 File(context.cacheDir, "monica_backup_$timestamp.enc.zip")
             } else {
@@ -1856,7 +1864,6 @@ class WebDavHelper(
                             val pageAdjustmentSettingsSnapshot = SettingsManager(context)
                                 .exportPageAdjustmentSettings()
 
-                            val backupEncryptPassword = currentBackupEncryptionPassword()
                             val canExportSensitiveConfig = backupEncryptPassword != null
                             if (!canExportSensitiveConfig) {
                                 warnings.add("未启用备份加密，已跳过 WebDAV 连接凭证和 Bitwarden Vault 密钥材料")
@@ -2308,7 +2315,11 @@ class WebDavHelper(
 
                 // 8. 加密
                 if (shouldEncryptBackup) {
-                    val encryptResult = EncryptionHelper.encryptFile(zipFile, finalFile, encryptionPassword)
+                    val encryptResult = EncryptionHelper.encryptFile(
+                        zipFile,
+                        finalFile,
+                        checkNotNull(backupEncryptPassword),
+                    )
                     if (encryptResult.isFailure) throw encryptResult.exceptionOrNull()!!
                 }
 
@@ -2725,11 +2736,16 @@ class WebDavHelper(
 
             // 1. 检测是否加密
             val isEncrypted = EncryptionHelper.isEncryptedFile(backupFile)
+            val resolvedDecryptPassword = if (isEncrypted) {
+                (decryptPassword ?: encryptionPassword).takeIf { it.isNotEmpty() }
+            } else {
+                decryptPassword
+            }
             
             // 2. 解密文件 (如果需要)
             val zipFile = if (isEncrypted) {
-                val password = decryptPassword ?: encryptionPassword
-                if (password.isEmpty()) {
+                val password = resolvedDecryptPassword
+                if (password == null) {
                     return@withContext Result.failure(PasswordRequiredException())
                 }
                 
@@ -3429,7 +3445,7 @@ class WebDavHelper(
                                         val bitwardenVaultsBackup = json.decodeFromString<BitwardenVaultsBackupEntry>(bitwardenVaultsJson)
                                         val restoredCount = restoreBitwardenVaultBackups(
                                             bitwardenVaultsBackup.vaults,
-                                            decryptPassword,
+                                            resolvedDecryptPassword,
                                         )
                                         if (restoredCount > 0) {
                                             warnings.add("✓ Bitwarden Vault已恢复: ${restoredCount}个（已锁定）")
@@ -3646,39 +3662,43 @@ class WebDavHelper(
 
                                         val restoredBitwardenVaultCount = restoreBitwardenVaultBackups(
                                             monicaConfigBackup.bitwardenVaults,
-                                            decryptPassword,
+                                            resolvedDecryptPassword,
                                         )
                                         if (restoredBitwardenVaultCount > 0) {
                                             warnings.add("✓ Bitwarden Vault已恢复: ${restoredBitwardenVaultCount}个（已锁定）")
                                         }
 
                                         if (!isConfigured()) {
-                                            try {
-                                                val decryptedWebDavPassword = decryptBackupValueWithLegacyFallback(
-                                                    monicaConfigBackup.encryptedPassword,
-                                                    decryptPassword,
-                                                ).orEmpty()
+                                            if (monicaConfigBackup.encryptedPassword.isBlank()) {
+                                                warnings.add("WebDAV连接密码未包含在备份中，恢复后需要重新填写")
+                                            } else {
+                                                try {
+                                                    val decryptedWebDavPassword = decryptBackupValueWithLegacyFallback(
+                                                        monicaConfigBackup.encryptedPassword,
+                                                        resolvedDecryptPassword,
+                                                    ).orEmpty()
 
-                                                val decryptedEncPassword = decryptBackupValueWithLegacyFallback(
-                                                    monicaConfigBackup.encryptedEncryptionPassword,
-                                                    decryptPassword,
-                                                ).orEmpty()
+                                                    val decryptedEncPassword = decryptBackupValueWithLegacyFallback(
+                                                        monicaConfigBackup.encryptedEncryptionPassword,
+                                                        resolvedDecryptPassword,
+                                                    ).orEmpty()
 
-                                                if (monicaConfigBackup.serverUrl.isNotEmpty() &&
-                                                    monicaConfigBackup.username.isNotEmpty() &&
-                                                    decryptedWebDavPassword.isNotEmpty()
-                                                ) {
-                                                    configure(monicaConfigBackup.serverUrl, monicaConfigBackup.username, decryptedWebDavPassword)
-                                                    if (monicaConfigBackup.enableEncryption && decryptedEncPassword.isNotEmpty()) {
-                                                        configureEncryption(true, decryptedEncPassword)
+                                                    if (monicaConfigBackup.serverUrl.isNotEmpty() &&
+                                                        monicaConfigBackup.username.isNotEmpty() &&
+                                                        decryptedWebDavPassword.isNotEmpty()
+                                                    ) {
+                                                        configure(monicaConfigBackup.serverUrl, monicaConfigBackup.username, decryptedWebDavPassword)
+                                                        if (monicaConfigBackup.enableEncryption && decryptedEncPassword.isNotEmpty()) {
+                                                            configureEncryption(true, decryptedEncPassword)
+                                                        }
+                                                        configureAutoBackup(monicaConfigBackup.autoBackupEnabled)
+                                                        android.util.Log.d("WebDavHelper", "Restored WebDAV config from legacy Monica config")
+                                                        warnings.add("✓ WebDAV配置已恢复: ${monicaConfigBackup.serverUrl}")
                                                     }
-                                                    configureAutoBackup(monicaConfigBackup.autoBackupEnabled)
-                                                    android.util.Log.d("WebDavHelper", "Restored WebDAV config from legacy Monica config")
-                                                    warnings.add("✓ WebDAV配置已恢复: ${monicaConfigBackup.serverUrl}")
+                                                } catch (e: Exception) {
+                                                    android.util.Log.w("WebDavHelper", "Failed to decrypt legacy Monica config WebDAV credentials: ${e.message}")
+                                                    warnings.add("WebDAV配置解密失败（可能密码不匹配）: ${e.message}")
                                                 }
-                                            } catch (e: Exception) {
-                                                android.util.Log.w("WebDavHelper", "Failed to decrypt legacy Monica config WebDAV credentials: ${e.message}")
-                                                warnings.add("WebDAV配置解密失败（可能密码不匹配）: ${e.message}")
                                             }
                                         } else {
                                             android.util.Log.d("WebDavHelper", "WebDAV already configured, skipping legacy Monica connection restore")
@@ -3699,39 +3719,42 @@ class WebDavHelper(
 
                                         // 只有当本地未配置 WebDAV 时才恢复连接信息
                                         if (!isConfigured()) {
-                                            // 尝试解密 WebDAV 密码
-                                            try {
-                                                val decryptedWebDavPassword = decryptBackupValueWithLegacyFallback(
-                                                    webDavConfigBackup.encryptedPassword,
-                                                    decryptPassword,
-                                                ).orEmpty()
+                                            if (webDavConfigBackup.encryptedPassword.isBlank()) {
+                                                warnings.add("WebDAV连接密码未包含在备份中，恢复后需要重新填写")
+                                            } else {
+                                                try {
+                                                    val decryptedWebDavPassword = decryptBackupValueWithLegacyFallback(
+                                                        webDavConfigBackup.encryptedPassword,
+                                                        resolvedDecryptPassword,
+                                                    ).orEmpty()
 
-                                                val decryptedEncPassword = decryptBackupValueWithLegacyFallback(
-                                                    webDavConfigBackup.encryptedEncryptionPassword,
-                                                    decryptPassword,
-                                                ).orEmpty()
+                                                    val decryptedEncPassword = decryptBackupValueWithLegacyFallback(
+                                                        webDavConfigBackup.encryptedEncryptionPassword,
+                                                        resolvedDecryptPassword,
+                                                    ).orEmpty()
                                                 
-                                                if (webDavConfigBackup.serverUrl.isNotEmpty() && 
-                                                    webDavConfigBackup.username.isNotEmpty() && 
-                                                    decryptedWebDavPassword.isNotEmpty()) {
-                                                    
-                                                    // 配置 WebDAV 连接
-                                                    configure(webDavConfigBackup.serverUrl, webDavConfigBackup.username, decryptedWebDavPassword)
-                                                    
-                                                    // 配置加密设置
-                                                    if (webDavConfigBackup.enableEncryption && decryptedEncPassword.isNotEmpty()) {
-                                                        configureEncryption(true, decryptedEncPassword)
+                                                    if (webDavConfigBackup.serverUrl.isNotEmpty() &&
+                                                        webDavConfigBackup.username.isNotEmpty() &&
+                                                        decryptedWebDavPassword.isNotEmpty()) {
+
+                                                        // 配置 WebDAV 连接
+                                                        configure(webDavConfigBackup.serverUrl, webDavConfigBackup.username, decryptedWebDavPassword)
+
+                                                        // 配置加密设置
+                                                        if (webDavConfigBackup.enableEncryption && decryptedEncPassword.isNotEmpty()) {
+                                                            configureEncryption(true, decryptedEncPassword)
+                                                        }
+
+                                                        // 配置自动备份
+                                                        configureAutoBackup(webDavConfigBackup.autoBackupEnabled)
+
+                                                        android.util.Log.d("WebDavHelper", "Restored WebDAV config")
+                                                        warnings.add("✓ WebDAV配置已恢复: ${webDavConfigBackup.serverUrl}")
                                                     }
-                                                    
-                                                    // 配置自动备份
-                                                    configureAutoBackup(webDavConfigBackup.autoBackupEnabled)
-                                                    
-                                                    android.util.Log.d("WebDavHelper", "Restored WebDAV config")
-                                                    warnings.add("✓ WebDAV配置已恢复: ${webDavConfigBackup.serverUrl}")
+                                                } catch (e: Exception) {
+                                                    android.util.Log.w("WebDavHelper", "Failed to decrypt WebDAV credentials: ${e.message}")
+                                                    warnings.add("WebDAV配置解密失败（可能密码不匹配）: ${e.message}")
                                                 }
-                                            } catch (e: Exception) {
-                                                android.util.Log.w("WebDavHelper", "Failed to decrypt WebDAV credentials: ${e.message}")
-                                                warnings.add("WebDAV配置解密失败（可能密码不匹配）: ${e.message}")
                                             }
                                         } else {
                                             android.util.Log.d("WebDavHelper", "WebDAV already configured, skipping restore")
@@ -5295,10 +5318,6 @@ class WebDavHelper(
             .remove(KEY_PASSWORD)
             .remove(KEY_ENCRYPTION_PASSWORD)
             .apply()
-    }
-
-    private fun currentBackupEncryptionPassword(): String? {
-        return encryptionPassword.takeIf { enableEncryption && it.isNotEmpty() }
     }
 
     private fun encryptSensitiveBackupValue(value: String?, backupEncryptPassword: String?): String? {

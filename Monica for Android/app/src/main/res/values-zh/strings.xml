@@ -2307,6 +2307,20 @@
     <string name="backup_content_keepass_webdav_config_hint">包含 KeePass WebDAV 同步配置，便于新设备快速同步。</string>
     <string name="backup_content_webdav_config">Monica 配置</string>
     <string name="backup_content_webdav_config_hint">包含 WebDAV 连接信息、自动备份设置、非自动填充字段、常用账号信息、页面调整自定义以及 Bitwarden Vault 等 Monica 配置。WebDAV 连接仅当本地未配置时才会恢复，恢复的 Bitwarden Vault 会保持锁定并需要重新验证。</string>
+    <string name="zip_config_export_security_title">保护 Monica 配置</string>
+    <string name="zip_config_export_security_desc">所选内容包含 WebDAV 和其他敏感配置，请先选择导出保护方式。</string>
+    <string name="zip_config_export_encrypted_title">加密备份（推荐）</string>
+    <string name="zip_config_export_encrypted_desc">完整保护备份，并包含可恢复的 WebDAV 连接凭证。</string>
+    <string name="zip_config_export_plain_title">普通 ZIP</string>
+    <string name="zip_config_export_plain_desc">不会导出 WebDAV 密码和 Bitwarden 密钥材料，恢复后需要重新填写连接密码。</string>
+    <string name="zip_config_export_continue">继续</string>
+    <string name="zip_backup_password_title">设置备份密码</string>
+    <string name="zip_backup_password_desc">导入加密备份时需要使用此密码，Monica 不会保存它。</string>
+    <string name="zip_backup_password_label">备份密码</string>
+    <string name="zip_backup_password_confirm_label">确认备份密码</string>
+    <string name="zip_backup_password_required">请输入备份密码</string>
+    <string name="zip_backup_password_mismatch">两次输入的密码不一致</string>
+    <string name="zip_backup_password_export">加密并导出</string>
     
     <!-- 功能拓展页面 -->
     <string name="extensions_title">功能拓展</string>
