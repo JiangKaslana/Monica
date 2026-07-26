@@ -25,6 +25,8 @@ class AutofillDetectionIntegrationGuardTest {
         assertTrue(parser.contains("nodeHasPasswordTermMatch"))
         assertTrue(parser.contains("nodeHasLoginTermMatch"))
         assertTrue(parser.contains("weakLoginContext"))
+        assertTrue(parser.contains("hasLoginTypeField"))
+        assertTrue(parser.contains("LOWEST username node signals"))
         assertTrue(parser.contains("autofillLabelLoginTranslations"))
         assertTrue(service.contains("AutofillRequestContextPolicy.allowPackageMatching("))
         assertTrue(service.contains("allowPackageMatch = allowPackageMatch"))

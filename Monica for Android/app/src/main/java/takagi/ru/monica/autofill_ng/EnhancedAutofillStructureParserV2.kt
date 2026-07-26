@@ -587,17 +587,16 @@ class EnhancedAutofillStructureParserV2 {
             }
         }
 
-        // 登录上下文约束：屏幕上不存在密码框时，低置信度的账号类字段
-        // （由普通文本框/数字框弱推断而来）不应被视为登录目标，
-        // 否则会把搜索框、备注等误判为账号（如 QQ 搜索框弹出密码条目）。
-        // 高置信度的账号字段（如显式 autofill hint）即使无密码也保留。
-        //
-        // 弱目标模式（allowWeakTargets=true，对齐 bitwarden 的"有 Login 字段就 Fillable"门槛）：
+        // 弱目标模式（allowWeakTargets=true，对齐 bitwarden「有 Login 字段就 Fillable」门槛）：
         // 1. 先用 promotePasswordTermCandidates 尝试从候选里按 password 术语提升出密码字段；
         //    提升成功则 hasPasswordInItems=true，低精度账号字段自然保留并弹窗。
-        // 2. 提升失败时，若屏幕上有任意 login 术语（username/账号/password/密码 等），
-        //    仍放行低精度账号字段——bitwarden 式门槛，确保电影猎手「密码框不在结构里、
-        //    只有账号框」时仍弹账号面板。无 login 术语的纯搜索/备注场景不放行，缓解误弹。
+        // 2. 提升后仍无密码框时，若候选中存在任意已被识别为 Login 类型的字段
+        //    （USERNAME/EMAIL/PHONE，不论精度），放行低精度账号字段，弹账号面板。
+        //    这对齐 bitwarden 的「有 Login.Username 就 Fillable」逻辑——bitwarden 不在
+        //    弹窗决策层做「无密码框时过滤低精度账号」的二次保险，而是靠前置的字段识别
+        //    阶段把搜索框等判为 Unused。Monica 的 TYPE_TEXT_VARIATION_NORMAL fallback
+        //    比 bitwarden 宽松（会把纯 text 判为 USERNAME:LOWEST），但电影猎手等真登录
+        //    场景的确定 bug优先于假设性的搜索框误弹（后者可用黑名单兜底）。
         val effectiveItems = if (allowWeakTargets) {
             promotePasswordTermCandidates(confidenceFilteredItems)
         } else {
@@ -606,8 +605,12 @@ class EnhancedAutofillStructureParserV2 {
         val hasPasswordInItems = effectiveItems.any {
             it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
         }
-        val weakLoginContext = allowWeakTargets && !hasPasswordInItems &&
-            candidateItems.any { it.hasPasswordTerm || it.hasLoginTerm }
+        val hasLoginTypeField = effectiveItems.any {
+            it.hint == InternalHint.USERNAME ||
+                it.hint == InternalHint.EMAIL_ADDRESS ||
+                it.hint == InternalHint.PHONE_NUMBER
+        }
+        val weakLoginContext = allowWeakTargets && !hasPasswordInItems && hasLoginTypeField
         val loginFilteredItems = when {
             hasPasswordInItems -> effectiveItems
             weakLoginContext -> effectiveItems
@@ -631,6 +634,7 @@ class EnhancedAutofillStructureParserV2 {
                 "allowWeakTargets" to allowWeakTargets,
                 "promotedPasswordCount" to (effectiveItems.size - confidenceFilteredItems.size).coerceAtLeast(0),
                 "hasPasswordInItems" to hasPasswordInItems,
+                "hasLoginTypeField" to hasLoginTypeField,
                 "weakLoginContext" to weakLoginContext,
             )
         )
@@ -873,6 +877,30 @@ class EnhancedAutofillStructureParserV2 {
             if (node.visibility == View.VISIBLE || shouldIncludeHiddenCredentialNode(outBuilders)) {
                 val nodeHasPasswordTerm = nodeHasPasswordTermMatch(node)
                 val nodeHasLoginTerm = nodeHasLoginTermMatch(node)
+                // 诊断：当节点被识别为 LOWEST 精度的 USERNAME（纯 text fallback 路径）时，
+                // 记录其原始信号，用于排查电影猎手等 App 的账号框为何被弱推断、
+                // 以及 bitwarden 等为何能识别（对比 autofillHints/idEntry/hint/inputType）。
+                if (outBuilders.any { it.hint == InternalHint.USERNAME &&
+                    it.accuracy == Accuracy.LOWEST }) {
+                    AutofillLogger.d(
+                        "PARSING",
+                        "LOWEST username node signals",
+                        metadata = mapOf(
+                            "className" to (node.className ?: "none"),
+                            "inputType" to node.inputType.toString(),
+                            "autofillHints" to (node.autofillHints?.joinToString(",") ?: "none"),
+                            "idEntry" to (node.idEntry ?: "none"),
+                            "hintLabel" to (node.hint?.toString() ?: "none"),
+                            "hasPasswordTerm" to nodeHasPasswordTerm,
+                            "hasLoginTerm" to nodeHasLoginTerm,
+                            "htmlTag" to (node.htmlInfo?.tag ?: "none"),
+                            "htmlAttrs" to (node.htmlInfo?.attributes
+                                ?.joinToString(",") { "${it.first}=${it.second}" } ?: "none"),
+                            "isVisible" to (node.visibility == View.VISIBLE),
+                            "isFocused" to node.isFocused,
+                        ),
+                    )
+                }
                 out += outBuilders.map { builder ->
                     context.traversalIndex += 1
                     RawParsedItem(
