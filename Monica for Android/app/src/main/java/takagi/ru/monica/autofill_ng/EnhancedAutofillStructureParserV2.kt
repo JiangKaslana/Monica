@@ -928,6 +928,25 @@ class EnhancedAutofillStructureParserV2 {
             val labelOut = parseNodeByLabel(node)
             outBuilders += inputOut + labelOut
 
+            // 搜索框识别与排除：搜索框不应作为登录凭据字段。否则在「页面存在密码框即整页按登录
+            // 上下文处理」的策略下，聚焦搜索框也会弹出密码条目（Edge 访问 GitHub 时顶部搜索框误弹）。
+            // 命中则清空凭据候选，使该节点不进入 ParsedStructure.items，从而不触发填充建议。
+            if (outBuilders.isNotEmpty() && isSearchField(node)) {
+                AutofillLogger.d(
+                    "PARSING",
+                    "Search field excluded from credential fill",
+                    metadata = mapOf(
+                        "htmlTag" to (node.htmlInfo?.tag ?: "none"),
+                        "ariaLabel" to (node.htmlInfo?.attributes
+                            ?.firstOrNull { it.first.equals("aria-label", ignoreCase = true) }?.second ?: "none"),
+                        "placeholder" to (node.htmlInfo?.attributes
+                            ?.firstOrNull { it.first.equals("placeholder", ignoreCase = true) }?.second ?: "none"),
+                        "isFocused" to node.isFocused,
+                    )
+                )
+                outBuilders.clear()
+            }
+
             if (node.visibility == View.VISIBLE || shouldIncludeHiddenCredentialNode(outBuilders)) {
                 val nodeHasPasswordTerm = nodeHasPasswordTermMatch(node)
                 val nodeHasLoginTerm = nodeHasLoginTermMatch(node)
@@ -1683,6 +1702,55 @@ class EnhancedAutofillStructureParserV2 {
         return candidates.any { value ->
             autofillLabelLoginTranslations.any { term -> value.contains(term, ignoreCase = true) }
         }
+    }
+
+    /**
+     * 判断节点是否为搜索框。搜索框不应被当作登录凭据字段——否则在「页面存在密码框即整页按登录
+     * 上下文处理」的策略下，聚焦搜索框也会弹出密码条目（Edge 访问 GitHub 时顶部搜索框误弹）。
+     *
+     * 命中任一信号即判为搜索框：
+     * - HTML type=search
+     * - HTML autocomplete 含 "search"
+     * - HTML role 含 "search"
+     * - HTML inputmode=search
+     * - aria-label / placeholder / title / name / id / 节点 hint(label) 含搜索相关词
+     *   （search / 搜索 / 查询 / 查找 / recherche / buscar / suche 等）
+     */
+    private fun isSearchField(node: AssistStructure.ViewNode): Boolean {
+        val html = node.htmlInfo ?: return false
+        val tag = html.tag?.lowercase(Locale.ENGLISH).orEmpty()
+        if (tag != "input" && tag != "search" && tag != "textarea") return false
+
+        val attrs = html.attributes
+            ?.map { it.first.lowercase(Locale.ENGLISH) to (it.second ?: "") }
+            ?.toMap()
+            .orEmpty()
+
+        val type = attrs["type"].orEmpty().lowercase(Locale.ENGLISH)
+        val autocomplete = attrs["autocomplete"].orEmpty().lowercase(Locale.ENGLISH)
+        val role = attrs["role"].orEmpty().lowercase(Locale.ENGLISH)
+        val inputMode = attrs["inputmode"].orEmpty().lowercase(Locale.ENGLISH)
+
+        if (type == "search") return true
+        if ("search" in autocomplete) return true
+        if ("search" in role) return true
+        if (inputMode == "search") return true
+
+        val searchTerms = listOf(
+            "search", "搜索", "查询", "查找",
+            "recherche", "buscar", "suche", "searchbox",
+        )
+        val textSignals = listOf(
+            attrs["aria-label"].orEmpty(),
+            attrs["placeholder"].orEmpty(),
+            attrs["title"].orEmpty(),
+            attrs["name"].orEmpty(),
+            attrs["id"].orEmpty(),
+            node.hint?.toString().orEmpty(),
+        ).map { it.lowercase(Locale.ENGLISH) }
+        if (textSignals.any { t -> searchTerms.any { term -> term in t } }) return true
+
+        return false
     }
 
     /**
