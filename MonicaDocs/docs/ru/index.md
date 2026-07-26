@@ -12,7 +12,7 @@ hero:
   actions:
     - theme: brand
       text: Перейти в Monica-cloud
-      link: /login
+      link: /ru/login
     - theme: alt
       text: Узнать об экосистеме Monica
       link: /ru/ecosystem.html

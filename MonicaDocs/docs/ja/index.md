@@ -12,7 +12,7 @@ hero:
   actions:
     - theme: brand
       text: Monica-cloud へ移動
-      link: /login
+      link: /ja/login
     - theme: alt
       text: Monica エコシステムを見る
       link: /ja/ecosystem.html

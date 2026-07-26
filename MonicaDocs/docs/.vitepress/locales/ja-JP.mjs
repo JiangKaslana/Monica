@@ -31,7 +31,7 @@ export default defineConfig({
           { text: "一覧ページ", link: "/ja/articleOverview" },
         ],
       },
-      { text: "Monica-cloud", link: "/login" },
+      { text: "Monica-cloud", link: "/ja/login" },
       { text: "✨ 支援", link: "/ja/personal/" },
     ],
     editLink: {

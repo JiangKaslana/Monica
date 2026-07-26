@@ -31,7 +31,7 @@ export default defineConfig({
           { text: "Overview", link: "/en/articleOverview" },
         ],
       },
-      { text: "Monica-cloud", link: "/login" },
+      { text: "Monica-cloud", link: "/en/login" },
       { text: "✨ Sponsor", link: "/en/personal/" },
     ],
     editLink: {

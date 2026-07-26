@@ -31,7 +31,7 @@ export default defineConfig({
           { text: "Danh sách bài viết", link: "/vi/articleOverview" },
         ],
       },
-      { text: "Monica-cloud", link: "/login" },
+      { text: "Monica-cloud", link: "/vi/login" },
       { text: "✨ Tài trợ", link: "/vi/personal/" },
     ],
     editLink: {

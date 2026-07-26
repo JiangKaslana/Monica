@@ -31,7 +31,7 @@ export default defineConfig({
           { text: "Список статей", link: "/ru/articleOverview" },
         ],
       },
-      { text: "Monica-cloud", link: "/login" },
+      { text: "Monica-cloud", link: "/ru/login" },
       { text: "✨ Донат", link: "/ru/personal/" },
     ],
     editLink: {

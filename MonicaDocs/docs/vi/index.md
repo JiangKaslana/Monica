@@ -12,7 +12,7 @@ hero:
   actions:
     - theme: brand
       text: Đi tới Monica-cloud
-      link: /login
+      link: /vi/login
     - theme: alt
       text: Khám phá hệ sinh thái Monica
       link: /vi/ecosystem.html
