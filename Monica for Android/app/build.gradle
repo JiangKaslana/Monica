@@ -215,6 +215,7 @@ dependencies {
     }
 
     // Core Android libraries
+    implementation project(':mdbx-engine')
     implementation libs.androidx.core.ktx
     implementation libs.androidx.core.splashscreen  // 添加splashscreen依赖
     implementation libs.androidx.lifecycle.runtime.ktx
