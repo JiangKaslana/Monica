@@ -1548,12 +1548,13 @@ class EnhancedAutofillStructureParserV2 {
             node.idEntry?.let { add(it) }
             node.hint?.toString()?.let { add(it) }
             node.autofillHints?.forEach { add(it) }
-            node.htmlInfo?.attributes?.forEach { (k, v) ->
+            node.htmlInfo?.attributes?.forEach { attr ->
+                val k = attr.first
                 if (k.equals("placeholder", ignoreCase = true) ||
                     k.equals("name", ignoreCase = true) ||
                     k.equals("id", ignoreCase = true)
                 ) {
-                    v?.let { add(it) }
+                    attr.second?.let { add(it) }
                 }
             }
             node.className?.let { add(it) }
@@ -1574,12 +1575,13 @@ class EnhancedAutofillStructureParserV2 {
             node.idEntry?.let { add(it) }
             node.hint?.toString()?.let { add(it) }
             node.autofillHints?.forEach { add(it) }
-            node.htmlInfo?.attributes?.forEach { (k, v) ->
+            node.htmlInfo?.attributes?.forEach { attr ->
+                val k = attr.first
                 if (k.equals("placeholder", ignoreCase = true) ||
                     k.equals("name", ignoreCase = true) ||
                     k.equals("id", ignoreCase = true)
                 ) {
-                    v?.let { add(it) }
+                    attr.second?.let { add(it) }
                 }
             }
         }
