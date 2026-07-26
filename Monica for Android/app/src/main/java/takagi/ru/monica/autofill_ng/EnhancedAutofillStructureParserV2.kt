@@ -1472,10 +1472,19 @@ class EnhancedAutofillStructureParserV2 {
                         InputType.TYPE_TEXT_VARIATION_PERSON_NAME,
                         InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT,
                     ) -> {
-                        out += ParsedItemBuilder(
-                            accuracy = Accuracy.LOWEST,
-                            hint = InternalHint.USERNAME,
-                        )
+                        // 对齐 bitwarden：纯 text 变体不再无条件 fallback 为 USERNAME:LOWEST
+                        // （bitwarden 的 toAutofillView 对纯 text 返回 Unused）。
+                        // 仅当 idEntry / idType 含 username 术语时才产出 USERNAME（由
+                        // extractOfId/extractOfType 按术语定 MEDIUM 精度），避免把
+                        // 搜索框/备注等纯文本框误判为登录账号（QQ 搜索框误弹修复）。
+                        // WEB_EDIT_TEXT 变体（WebView 内可编辑文本）保留 LOWEST fallback，
+                        // 因 WebView 登录框常用该变体且无标准 hint。
+                        if (inputIsVariationType(inputType, InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT)) {
+                            out += ParsedItemBuilder(
+                                accuracy = Accuracy.LOWEST,
+                                hint = InternalHint.USERNAME,
+                            )
+                        }
                         extractOfType(node.idType.orEmpty()).let(out::addAll)
                         extractOfId(node.idEntry.orEmpty()).let(out::addAll)
                     }
