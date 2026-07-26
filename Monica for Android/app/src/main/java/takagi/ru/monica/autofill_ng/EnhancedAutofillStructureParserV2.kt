@@ -117,6 +117,8 @@ class EnhancedAutofillStructureParserV2 {
         val isFocused: Boolean = false,
         val isVisible: Boolean = true,
         val traversalIndex: Int = 0,
+        val hasPasswordTerm: Boolean = false,
+        val hasLoginTerm: Boolean = false,
     )
 
     private data class ParsedItemBuilder(
@@ -166,6 +168,29 @@ class EnhancedAutofillStructureParserV2 {
         "passe",
         "密码",
         "密碼",
+    )
+
+    private val autofillLabelLoginTranslations = listOf(
+        "username",
+        "login",
+        "account",
+        "用户名",
+        "用戶名",
+        "账号",
+        "帳號",
+        "账户",
+        "账户",
+        "登录",
+        "登錄",
+        "логин",
+        "логін",
+        "identifiant",
+        "utilisateur",
+        "kullanıcı",
+        "用户",
+        "密码",
+        "密碼",
+        "password",
     )
 
     private val autofillLabel2faTranslations = listOf(
@@ -499,7 +524,6 @@ class EnhancedAutofillStructureParserV2 {
         structure: AssistStructure,
         respectAutofillOff: Boolean = true,
         allowWeakTargets: Boolean = false,
-        knownLoginPackage: Boolean = false,
     ): ParsedStructure {
         var applicationId: String? = structure.activityComponent?.packageName
         var rawStructure: RawParsedStructure? = null
@@ -567,18 +591,27 @@ class EnhancedAutofillStructureParserV2 {
         // （由普通文本框/数字框弱推断而来）不应被视为登录目标，
         // 否则会把搜索框、备注等误判为账号（如 QQ 搜索框弹出密码条目）。
         // 高置信度的账号字段（如显式 autofill hint）即使无密码也保留。
-        val hasPasswordInItems = confidenceFilteredItems.any {
+        //
+        // 弱目标模式（allowWeakTargets=true，对齐 bitwarden 的"有 Login 字段就 Fillable"门槛）：
+        // 1. 先用 promotePasswordTermCandidates 尝试从候选里按 password 术语提升出密码字段；
+        //    提升成功则 hasPasswordInItems=true，低精度账号字段自然保留并弹窗。
+        // 2. 提升失败时，若屏幕上有任意 login 术语（username/账号/password/密码 等），
+        //    仍放行低精度账号字段——bitwarden 式门槛，确保电影猎手「密码框不在结构里、
+        //    只有账号框」时仍弹账号面板。无 login 术语的纯搜索/备注场景不放行，缓解误弹。
+        val effectiveItems = if (allowWeakTargets) {
+            promotePasswordTermCandidates(confidenceFilteredItems)
+        } else {
+            confidenceFilteredItems
+        }
+        val hasPasswordInItems = effectiveItems.any {
             it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
         }
-        // 已知登录包（历史上出现过密码框）在弱目标模式下放行低精度账号字段：
-        // 这类 App（如影视类自定义登录框、电影猎手）的账号框常被弱推断为低精度 USERNAME，
-        // 且密码框在聚焦账号框时可能尚未可见/未被识别，首轮保守解析会丢弃全部字段导致不弹面板。
-        // 此处仅对「已知登录包」放宽，未知包（如 QQ 搜索框）仍按原逻辑过滤，避免误弹非登录弱推断字段。
-        // 放行的字段最终仍会经过上层 selectFillableTargets（isSupportedFillableHint + shouldKeepTarget）过滤。
-        val allowWeakLoginTargets = allowWeakTargets && knownLoginPackage
+        val weakLoginContext = allowWeakTargets && !hasPasswordInItems &&
+            candidateItems.any { it.hasPasswordTerm || it.hasLoginTerm }
         val loginFilteredItems = when {
-            hasPasswordInItems || allowWeakLoginTargets -> confidenceFilteredItems
-            else -> confidenceFilteredItems.filterNot {
+            hasPasswordInItems -> effectiveItems
+            weakLoginContext -> effectiveItems
+            else -> effectiveItems.filterNot {
                 (it.hint == InternalHint.USERNAME ||
                     it.hint == InternalHint.EMAIL_ADDRESS ||
                     it.hint == InternalHint.PHONE_NUMBER) &&
@@ -596,8 +629,9 @@ class EnhancedAutofillStructureParserV2 {
                 "loginFilteredCount" to loginFilteredItems.size,
                 "candidates" to candidateItems.joinToString { "${it.hint}:${it.accuracy.name}" },
                 "allowWeakTargets" to allowWeakTargets,
-                "knownLoginPackage" to knownLoginPackage,
-                "allowWeakLoginTargets" to allowWeakLoginTargets,
+                "promotedPasswordCount" to (effectiveItems.size - confidenceFilteredItems.size).coerceAtLeast(0),
+                "hasPasswordInItems" to hasPasswordInItems,
+                "weakLoginContext" to weakLoginContext,
             )
         )
         loginFilteredItems
@@ -837,6 +871,8 @@ class EnhancedAutofillStructureParserV2 {
             outBuilders += inputOut + labelOut
 
             if (node.visibility == View.VISIBLE || shouldIncludeHiddenCredentialNode(outBuilders)) {
+                val nodeHasPasswordTerm = nodeHasPasswordTermMatch(node)
+                val nodeHasLoginTerm = nodeHasLoginTermMatch(node)
                 out += outBuilders.map { builder ->
                     context.traversalIndex += 1
                     RawParsedItem(
@@ -852,6 +888,8 @@ class EnhancedAutofillStructureParserV2 {
                         isFocused = node.isFocused,
                         isVisible = node.visibility == View.VISIBLE,
                         traversalIndex = context.traversalIndex,
+                        hasPasswordTerm = nodeHasPasswordTerm,
+                        hasLoginTerm = nodeHasLoginTerm,
                     )
                 }
             }
@@ -1497,6 +1535,83 @@ class EnhancedAutofillStructureParserV2 {
                 hint = mappedHint,
                 accuracy = builder.accuracy,
             )
+        }
+    }
+
+    /**
+     * 判断节点的文本信号（idEntry / label hint / autofillHints / html placeholder / className）
+     * 是否含 password 术语。用于弱目标模式下把非标准 inputType 的密码框从 USERNAME:LOWEST
+     * 提升为 PASSWORD（借鉴 bitwarden 的 updateForMissingPasswordFields）。
+     */
+    private fun nodeHasPasswordTermMatch(node: AssistStructure.ViewNode): Boolean {
+        val candidates = buildList {
+            node.idEntry?.let { add(it) }
+            node.hint?.toString()?.let { add(it) }
+            node.autofillHints?.forEach { add(it) }
+            node.htmlInfo?.attributes?.forEach { (k, v) ->
+                if (k.equals("placeholder", ignoreCase = true) ||
+                    k.equals("name", ignoreCase = true) ||
+                    k.equals("id", ignoreCase = true)
+                ) {
+                    v?.let { add(it) }
+                }
+            }
+            node.className?.let { add(it) }
+        }
+        return candidates.any { value ->
+            autofillLabelPasswordTranslations.any { term -> value.contains(term, ignoreCase = true) }
+        }
+    }
+
+    /**
+     * 判断节点的文本信号是否含 login 术语（username/login/账号/用户名/password/密码 等）。
+     * 用于弱目标模式下的「login 上下文门」：无密码框时，若屏幕上任意节点含 login 术语，
+     * 放行低精度账号字段（对齐 bitwarden「有 Login 字段就 Fillable」门槛）；
+     * 纯搜索/备注场景无 login 术语，不放行，缓解误弹。
+     */
+    private fun nodeHasLoginTermMatch(node: AssistStructure.ViewNode): Boolean {
+        val candidates = buildList {
+            node.idEntry?.let { add(it) }
+            node.hint?.toString()?.let { add(it) }
+            node.autofillHints?.forEach { add(it) }
+            node.htmlInfo?.attributes?.forEach { (k, v) ->
+                if (k.equals("placeholder", ignoreCase = true) ||
+                    k.equals("name", ignoreCase = true) ||
+                    k.equals("id", ignoreCase = true)
+                ) {
+                    v?.let { add(it) }
+                }
+            }
+        }
+        return candidates.any { value ->
+            autofillLabelLoginTranslations.any { term -> value.contains(term, ignoreCase = true) }
+        }
+    }
+
+    /**
+     * 弱目标模式下的密码字段提升（借鉴 bitwarden updateForMissingPasswordFields）：
+     * 当候选里无 PASSWORD 时，把含 password 术语但被识别为其它 hint（通常是 USERNAME:LOWEST，
+     * 因 inputType 非标准所致）的候选提升为 PASSWORD:LOW。提升后 hasPasswordInItems=true，
+     * 低精度账号字段自然保留并弹窗；无 password 术语的（如 QQ 搜索框）不受影响，仍按原逻辑过滤。
+     * 仅在 allowWeakTargets=true 时调用。
+     */
+    private fun promotePasswordTermCandidates(items: List<RawParsedItem>): List<RawParsedItem> {
+        val hasPassword = items.any {
+            it.hint == InternalHint.PASSWORD || it.hint == InternalHint.NEW_PASSWORD
+        }
+        if (hasPassword) return items
+        val anyPromotable = items.any { it.hasPasswordTerm && it.hint != InternalHint.OFF }
+        if (!anyPromotable) return items
+        return items.map { item ->
+            if (item.hasPasswordTerm &&
+                item.hint != InternalHint.OFF &&
+                item.hint != InternalHint.PASSWORD &&
+                item.hint != InternalHint.NEW_PASSWORD
+            ) {
+                item.copy(hint = InternalHint.PASSWORD, accuracy = Accuracy.LOW)
+            } else {
+                item
+            }
         }
     }
 

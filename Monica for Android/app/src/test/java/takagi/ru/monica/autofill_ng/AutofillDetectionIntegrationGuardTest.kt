@@ -21,8 +21,11 @@ class AutofillDetectionIntegrationGuardTest {
         assertTrue(service.contains("manualRequest = isManualRequest"))
         assertTrue(service.contains("if (!isManualRequest && loginTargetCount == 0"))
         assertTrue(parser.contains("if (allowWeakTargets) return@let list"))
-        assertTrue(parser.contains("allowWeakLoginTargets"))
-        assertTrue(service.contains("knownLoginPackage"))
+        assertTrue(parser.contains("promotePasswordTermCandidates"))
+        assertTrue(parser.contains("nodeHasPasswordTermMatch"))
+        assertTrue(parser.contains("nodeHasLoginTermMatch"))
+        assertTrue(parser.contains("weakLoginContext"))
+        assertTrue(parser.contains("autofillLabelLoginTranslations"))
         assertTrue(service.contains("AutofillRequestContextPolicy.allowPackageMatching("))
         assertTrue(service.contains("allowPackageMatch = allowPackageMatch"))
     }
