@@ -11,14 +11,11 @@ hero:
     alt: Иконка приложения Monica
   actions:
     - theme: brand
-      text: Скачать для Android
-      link: https://github.com/JoyinJoester/Monica/releases
+      text: Перейти в Monica-cloud
+      link: /ru/login
     - theme: alt
-      text: Расширение для браузера
-      link: https://github.com/JoyinJoester/Monica/tree/main/Monica%20for%20Browser
-    - theme: alt
-      text: Документация проекта
-      link: /ru/reference/catalogue
+      text: Узнать об экосистеме Monica
+      link: /ru/ecosystem.html
 
 features:
   - title: Менеджер паролей

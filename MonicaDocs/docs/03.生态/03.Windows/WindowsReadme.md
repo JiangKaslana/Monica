@@ -4,7 +4,7 @@ date: 2026-06-06 21:30:00
 permalink: /ecosystem/WindowsReadme
 ---
 
-# Monica for Windows
+# Monica by Avalonia
 
 > Monica by Avalonia：用 Avalonia、.NET 与 MDBX 打造本地优先的跨平台密码库。  
 > Windows / macOS / Linux · Local Vault · MDBX-1 · KeePass · TOTP · WebDAV / OneDrive
@@ -35,16 +35,16 @@ permalink: /ecosystem/WindowsReadme
 :::
 
 ::: note 摘要
-Monica for Windows 是 Monica 密码库的桌面端实现，聚焦本地优先、密码管理与 MDBX vault 兼容。本文按项目 README 风格撰写，提供功能介绍、技术栈、架构视图与开发说明。
+Monica by Avalonia 是 Monica 密码库的桌面端实现，聚焦本地优先、密码管理与 MDBX vault 兼容。本文按项目 README 风格撰写，提供功能介绍、技术栈、架构视图与开发说明。
 :::
 
-Monica for Windows 目标是在桌面平台上延续 Monica 的本地优先与安全优先路线，提供密码、TOTP、私密笔记、银行卡与证件管理，并支持本地加密、导入导出、备份与 MDBX vault 兼容。
+Monica by Avalonia 目标是在桌面平台上延续 Monica 的本地优先与安全优先路线，提供密码、TOTP、私密笔记、银行卡与证件管理，并支持本地加密、导入导出、备份与 MDBX vault 兼容。
 
 ---
 
 ## 项目定位
 
-Monica for Windows 是面向桌面用户的本地优先密码库客户端。它以跨平台的 Avalonia 桌面 UI 为基础，结合 .NET 10 与 MDBX 本地 vault，构建一个既现代又可扩展的桌面密码管理体验。
+Monica by Avalonia 是面向桌面用户的本地优先密码库客户端。它以跨平台的 Avalonia 桌面 UI 为基础，结合 .NET 10 与 MDBX 本地 vault，构建一个既现代又可扩展的桌面密码管理体验。
 
 本项目核心目标：
 
@@ -92,7 +92,7 @@ Monica for Windows 是面向桌面用户的本地优先密码库客户端。它�
 ## 架构概览
 
 ::: tip 架构预览
-Monica for Windows 的架构是一颗“桌面密码库思维树”，核心在于：
+Monica by Avalonia 的架构是一颗“桌面密码库思维树”，核心在于：
 - UI 层负责交互与展示
 - Core 层负责业务与加密逻辑
 - Data 层负责 Vault 存储与持久化
@@ -115,7 +115,7 @@ Monica for Windows 的架构是一颗“桌面密码库思维树”，核心在�
 
 ```mermaid
 mindmap
-  root((Monica for Windows))
+  root((Monica by Avalonia))
     App["Monica.App\nAvalonia UI / ViewModels / Dialog Services"]
       UI[UI / 交互]
       Dialogs[对话框 / 桌面服务]
@@ -154,7 +154,7 @@ mindmap
 
 ## MDBX-1 接入
 
-Monica for Windows 支持 MDBX-1 本地优先 vault，它不是普通的 SQLite 密码表，而是一个带有版本历史、冲突处理、快照恢复与安全边界的本地数据库格式。
+Monica by Avalonia 支持 MDBX-1 本地优先 vault，它不是普通的 SQLite 密码表，而是一个带有版本历史、冲突处理、快照恢复与安全边界的本地数据库格式。
 
 Avalonia 端当前包含两条 MDBX 接入路径：
 
@@ -215,13 +215,13 @@ dotnet publish "src\Monica.App\Monica.App.csproj" -c Release -r win-x64 --self-c
 
 - Monica：提供产品理念、本地优先路线与密码管理体验参考
 - MDBX：提供本地优先 vault 格式与长期可维护的数据结构
-- Monica for Windows：作为桌面端实现，将两者能力融合到 Windows 桌面应用中
+- Monica by Avalonia：作为桌面端实现，将两者能力融合到 Windows 桌面应用中
 
 ---
 
 ## 致谢
 
-Monica for Windows 参考并借鉴了以下项目：
+Monica by Avalonia 参考并借鉴了以下项目：
 
 - [Avalonia](https://avaloniaui.net/)：跨平台桌面 UI
 - [FluentAvalonia](https://github.com/amwx/FluentAvalonia)：Fluent 风格控件

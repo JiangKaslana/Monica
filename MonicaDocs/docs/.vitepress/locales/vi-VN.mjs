@@ -31,11 +31,12 @@ export default defineConfig({
           { text: "Danh sách bài viết", link: "/vi/articleOverview" },
         ],
       },
+      { text: "Monica-cloud", link: "/vi/login" },
       { text: "✨ Tài trợ", link: "/vi/personal/" },
     ],
     editLink: {
       text: "Chỉnh sửa trang này trên GitHub",
-      pattern: "https://github.com/JoyinJoester/Monica/edit/master/docs/:path",
+      pattern: "https://github.com/Monica-Pass/Monica/edit/main/MonicaDocs/docs/:path",
     },
   },
 });

@@ -31,11 +31,12 @@ export default defineConfig({
           { text: "一覧ページ", link: "/ja/articleOverview" },
         ],
       },
+      { text: "Monica-cloud", link: "/ja/login" },
       { text: "✨ 支援", link: "/ja/personal/" },
     ],
     editLink: {
       text: "GitHub でこのページを編集",
-      pattern: "https://github.com/JoyinJoester/Monica/edit/master/docs/:path",
+      pattern: "https://github.com/Monica-Pass/Monica/edit/main/MonicaDocs/docs/:path",
     },
   },
 });

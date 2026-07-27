@@ -31,11 +31,12 @@ export default defineConfig({
           { text: "清单页", link: "/articleOverview" },
         ],
       },
+      { text: "Monica-cloud", link: "/login" },
       { text: "✨ 赞赏", link: "/personal/" },
     ],
     editLink: {
       text: "在 GitHub 上编辑此页",
-      pattern: "https://github.com/Monica-Pass/Monica/edit/master/docs/:path",
+      pattern: "https://github.com/Monica-Pass/Monica/edit/main/MonicaDocs/docs/:path",
     },
   },
 });

@@ -31,11 +31,12 @@ export default defineConfig({
           { text: "Overview", link: "/en/articleOverview" },
         ],
       },
+      { text: "Monica-cloud", link: "/en/login" },
       { text: "✨ Sponsor", link: "/en/personal/" },
     ],
     editLink: {
       text: "Edit this page on GitHub",
-      pattern: "https://github.com/JoyinJoester/Monica/edit/master/docs/:path",
+      pattern: "https://github.com/Monica-Pass/Monica/edit/main/MonicaDocs/docs/:path",
     },
   },
 });
