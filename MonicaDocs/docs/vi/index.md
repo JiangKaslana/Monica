@@ -11,14 +11,11 @@ hero:
     alt: Biểu tượng ứng dụng Monica
   actions:
     - theme: brand
-      text: Tải về cho Android
-      link: https://github.com/Monica-Pass/Monica/releases
+      text: Đi tới Monica-cloud
+      link: /vi/login
     - theme: alt
-      text: Tiện ích mở rộng trình duyệt
-      link: https://github.com/Monica-Pass/Monica/tree/main/Monica%20for%20Browser
-    - theme: alt
-      text: Tài liệu dự án
-      link: /vi/reference/catalogue
+      text: Khám phá hệ sinh thái Monica
+      link: /vi/ecosystem.html
 
 features:
   - title: Quản lý mật khẩu

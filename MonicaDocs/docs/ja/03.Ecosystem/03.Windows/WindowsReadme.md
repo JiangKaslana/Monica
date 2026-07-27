@@ -4,7 +4,7 @@ date: 2026-06-06 21:30:00
 permalink: /ecosystem/WindowsReadme
 ---
 
-# Monica for Windows
+# Monica by Avalonia
 
 > Monica by Avalonia: Avalonia、.NET、MDBX で構築するローカルファーストのクロスプラットフォームパスワード保管庫。  
 > Windows / macOS / Linux · Local Vault · MDBX-1 · KeePass · TOTP · WebDAV / OneDrive
@@ -35,16 +35,16 @@ permalink: /ecosystem/WindowsReadme
 :::
 
 ::: note 概要
-Monica for Windows は Monica パスワード保管庫のデスクトップ実装であり、ローカルファースト、パスワード管理、MDBX vault 互換に重点を置いています。このページは README スタイルで、機能紹介、技術スタック、アーキテクチャの見取り図、開発情報をまとめています。
+Monica by Avalonia は Monica パスワード保管庫のデスクトップ実装であり、ローカルファースト、パスワード管理、MDBX vault 互換に重点を置いています。このページは README スタイルで、機能紹介、技術スタック、アーキテクチャの見取り図、開発情報をまとめています。
 :::
 
-Monica for Windows は、Monica のローカルファーストかつセキュリティ優先の方針をデスクトップ環境でも継承し、パスワード、TOTP、セキュアノート、銀行カード、証明書情報の管理に加えて、ローカル暗号化、インポート/エクスポート、バックアップ、MDBX vault 互換を提供することを目指しています。
+Monica by Avalonia は、Monica のローカルファーストかつセキュリティ優先の方針をデスクトップ環境でも継承し、パスワード、TOTP、セキュアノート、銀行カード、証明書情報の管理に加えて、ローカル暗号化、インポート/エクスポート、バックアップ、MDBX vault 互換を提供することを目指しています。
 
 ---
 
 ## プロジェクトの位置づけ
 
-Monica for Windows は、デスクトップユーザー向けのローカルファーストパスワード保管庫クライアントです。クロスプラットフォームの Avalonia デスクトップ UI を基盤とし、.NET 10 と MDBX ローカル vault を組み合わせることで、モダンで拡張性の高いデスクトップ向けパスワード管理体験を構築します。
+Monica by Avalonia は、デスクトップユーザー向けのローカルファーストパスワード保管庫クライアントです。クロスプラットフォームの Avalonia デスクトップ UI を基盤とし、.NET 10 と MDBX ローカル vault を組み合わせることで、モダンで拡張性の高いデスクトップ向けパスワード管理体験を構築します。
 
 このプロジェクトの主な目標:
 
@@ -92,7 +92,7 @@ Monica for Windows は、デスクトップユーザー向けのローカルフ�
 ## アーキテクチャ概要
 
 ::: tip アーキテクチャ概要
-Monica for Windows のアーキテクチャは、「デスクトップパスワード保管庫の思考ツリー」として整理できます。中核となる考え方は次の通りです。
+Monica by Avalonia のアーキテクチャは、「デスクトップパスワード保管庫の思考ツリー」として整理できます。中核となる考え方は次の通りです。
 
 - UI 層が操作と表示を担当
 - Core 層が業務ロジックと暗号化ロジックを担当
@@ -116,7 +116,7 @@ Monica for Windows のアーキテクチャは、「デスクトップパスワ�
 
 ```mermaid
 mindmap
-  root((Monica for Windows))
+  root((Monica by Avalonia))
     App["Monica.App\nAvalonia UI / ViewModels / Dialog Services"]
       UI[UI / 操作]
       Dialogs[ダイアログ / デスクトップサービス]
@@ -155,7 +155,7 @@ mindmap
 
 ## MDBX-1 統合
 
-Monica for Windows は MDBX-1 ローカルファースト vault をサポートします。これは単なる SQLite のパスワードテーブルではなく、バージョン履歴、競合処理、スナップショット復元、安全境界を備えたローカルデータベース形式です。
+Monica by Avalonia は MDBX-1 ローカルファースト vault をサポートします。これは単なる SQLite のパスワードテーブルではなく、バージョン履歴、競合処理、スナップショット復元、安全境界を備えたローカルデータベース形式です。
 
 Avalonia 側には現在、次の 2 つの MDBX 統合ルートがあります。
 
@@ -216,13 +216,13 @@ dotnet publish "src\Monica.App\Monica.App.csproj" -c Release -r win-x64 --self-c
 
 - Monica: 製品思想、ローカルファースト方針、パスワード管理体験の参考
 - MDBX: ローカルファースト vault 形式と長期保守しやすいデータ構造を提供
-- Monica for Windows: この 2 つの能力を統合し、Windows デスクトップアプリとして実装
+- Monica by Avalonia: この 2 つの能力を統合し、Windows デスクトップアプリとして実装
 
 ---
 
 ## 謝辞
 
-Monica for Windows は、以下のプロジェクトを参考にし、多くを学んでいます。
+Monica by Avalonia は、以下のプロジェクトを参考にし、多くを学んでいます。
 
 - [Avalonia](https://avaloniaui.net/): クロスプラットフォームデスクトップ UI
 - [FluentAvalonia](https://github.com/amwx/FluentAvalonia): Fluent スタイルのコントロール

@@ -9,7 +9,6 @@ type ClientCard = {
   title: string;
   kicker: string;
   description: string;
-  status: string;
   accent: string;
   href: string;
 };
@@ -51,33 +50,30 @@ const copy: Record<LocaleKey, EcosystemCopy> = {
     metrics: [
       { value: "3", label: "客户端方向" },
       { value: "Local", label: "本地优先" },
-      { value: "KDBX", label: "兼容迁移" },
+      { value: "MDBX", label: "数据加密" },
     ],
     cards: [
       {
         key: "android",
         title: "Monica for Android",
-        kicker: "移动端主阵地",
+        kicker: "Android",
         description: "聚合 Bitwarden 同步能力与 KeePass 数据兼容，面向日常高频密码管理。",
-        status: "重点维护",
         accent: "#23b3a4",
         href: "/ecosystem/AndroidReadme",
       },
       {
         key: "ios",
         title: "Monica for iOS",
-        kicker: "苹果生态入口",
+        kicker: "iOS",
         description: "围绕本地保险库、恢复性和系统体验，规划 iPhone 上的安全密码管理。",
-        status: "路线规划",
         accent: "#4f8cff",
         href: "/ecosystem/iOSReadme",
       },
       {
         key: "windows",
-        title: "Monica for Windows",
-        kicker: "桌面工作台",
-        description: "承接桌面端批量整理、导入导出与多格式兼容，服务重度资料管理场景。",
-        status: "探索中",
+        title: "Monica by Avalonia",
+        kicker: "跨桌面平台",
+        description: "Monica 密码库的桌面端实现。",
         accent: "#f0a32f",
         href: "/ecosystem/WindowsReadme",
       },
@@ -86,8 +82,8 @@ const copy: Record<LocaleKey, EcosystemCopy> = {
     readMore: "查看详情",
     principles: [
       { title: "本地可控", description: "核心数据优先掌握在用户设备中，减少对单一云端的依赖。" },
-      { title: "开放迁移", description: "兼容成熟密码库生态，尽量让数据进入和离开都不痛苦。" },
-      { title: "跨端一致", description: "不同平台保留原生体验，同时共享同一套安全与同步模型。" },
+      { title: "开放迁移", description: "兼容成熟密码库生态，加密数据提供基于硬件的安全隔离边界。" },
+      { title: "跨端一致", description: "不同平台保留原生体验，同时提供本地安全与同步模型。" },
     ],
   },
   en: {
@@ -99,33 +95,30 @@ const copy: Record<LocaleKey, EcosystemCopy> = {
     metrics: [
       { value: "3", label: "Client tracks" },
       { value: "Local", label: "First by design" },
-      { value: "KDBX", label: "Migration ready" },
+      { value: "MDBX", label: "Data encryption" },
     ],
     cards: [
       {
         key: "android",
         title: "Monica for Android",
-        kicker: "Primary mobile client",
+        kicker: "Android",
         description: "Combines Bitwarden-style sync with KeePass data compatibility for everyday password workflows.",
-        status: "Active focus",
         accent: "#23b3a4",
         href: "/ecosystem/AndroidReadme",
       },
       {
         key: "ios",
         title: "Monica for iOS",
-        kicker: "Apple ecosystem entry",
+        kicker: "iOS",
         description: "Plans a secure iPhone experience around local vaults, recoverability, and native platform behavior.",
-        status: "Roadmap",
         accent: "#4f8cff",
         href: "/ecosystem/iOSReadme",
       },
       {
         key: "windows",
-        title: "Monica for Windows",
-        kicker: "Desktop workbench",
-        description: "Targets desktop-heavy import, export, organization, and multi-format compatibility workflows.",
-        status: "Exploring",
+        title: "Monica by Avalonia",
+        kicker: "Cross-desktop platform",
+        description: "The desktop implementation of the Monica password vault.",
         accent: "#f0a32f",
         href: "/ecosystem/WindowsReadme",
       },
@@ -147,33 +140,30 @@ const copy: Record<LocaleKey, EcosystemCopy> = {
     metrics: [
       { value: "3", label: "クライアント" },
       { value: "Local", label: "ローカル優先" },
-      { value: "KDBX", label: "移行対応" },
+      { value: "MDBX", label: "データ暗号化" },
     ],
     cards: [
       {
         key: "android",
         title: "Monica for Android",
-        kicker: "主要モバイルクライアント",
+        kicker: "Android",
         description: "Bitwarden 風の同期と KeePass データ互換性を組み合わせ、日常的なパスワード管理を支えます。",
-        status: "重点開発",
         accent: "#23b3a4",
         href: "/ecosystem/AndroidReadme",
       },
       {
         key: "ios",
         title: "Monica for iOS",
-        kicker: "Apple エコシステム入口",
+        kicker: "iOS",
         description: "ローカル保管庫、復旧性、ネイティブ体験を軸に iPhone 向けの安全な管理体験を設計します。",
-        status: "計画中",
         accent: "#4f8cff",
         href: "/ecosystem/iOSReadme",
       },
       {
         key: "windows",
-        title: "Monica for Windows",
-        kicker: "デスクトップ作業台",
-        description: "インポート、エクスポート、整理、複数形式互換など、重いデスクトップ作業を支えます。",
-        status: "探索中",
+        title: "Monica by Avalonia",
+        kicker: "クロスデスクトッププラットフォーム",
+        description: "Monica パスワード保管庫のデスクトップ実装。",
         accent: "#f0a32f",
         href: "/ecosystem/WindowsReadme",
       },
@@ -195,33 +185,30 @@ const copy: Record<LocaleKey, EcosystemCopy> = {
     metrics: [
       { value: "3", label: "Клиента" },
       { value: "Local", label: "Локальный подход" },
-      { value: "KDBX", label: "Миграция" },
+      { value: "MDBX", label: "Шифрование данных" },
     ],
     cards: [
       {
         key: "android",
         title: "Monica for Android",
-        kicker: "Основной мобильный клиент",
+        kicker: "Android",
         description: "Сочетает синхронизацию в стиле Bitwarden и совместимость с данными KeePass для ежедневной работы.",
-        status: "В фокусе",
         accent: "#23b3a4",
         href: "/ecosystem/AndroidReadme",
       },
       {
         key: "ios",
         title: "Monica for iOS",
-        kicker: "Вход в экосистему Apple",
+        kicker: "iOS",
         description: "Проектирует безопасный опыт на iPhone вокруг локального хранилища, восстановления и нативного поведения.",
-        status: "Планируется",
         accent: "#4f8cff",
         href: "/ecosystem/iOSReadme",
       },
       {
         key: "windows",
-        title: "Monica for Windows",
-        kicker: "Рабочая станция",
-        description: "Поддерживает импорт, экспорт, организацию и совместимость форматов для настольных сценариев.",
-        status: "Исследуется",
+        title: "Monica by Avalonia",
+        kicker: "Кроссплатформенная настольная платформа",
+        description: "Настольная реализация хранилища паролей Monica.",
         accent: "#f0a32f",
         href: "/ecosystem/WindowsReadme",
       },
@@ -243,33 +230,30 @@ const copy: Record<LocaleKey, EcosystemCopy> = {
     metrics: [
       { value: "3", label: "Hướng client" },
       { value: "Local", label: "Ưu tiên cục bộ" },
-      { value: "KDBX", label: "Sẵn sàng di chuyển" },
+      { value: "MDBX", label: "Mã hóa dữ liệu" },
     ],
     cards: [
       {
         key: "android",
         title: "Monica for Android",
-        kicker: "Client di động chính",
+        kicker: "Android",
         description: "Kết hợp đồng bộ kiểu Bitwarden với khả năng tương thích dữ liệu KeePass cho nhu cầu hằng ngày.",
-        status: "Trọng tâm",
         accent: "#23b3a4",
         href: "/ecosystem/AndroidReadme",
       },
       {
         key: "ios",
         title: "Monica for iOS",
-        kicker: "Cửa vào hệ Apple",
+        kicker: "iOS",
         description: "Định hình trải nghiệm iPhone an toàn quanh kho cục bộ, khả năng khôi phục và hành vi gốc của nền tảng.",
-        status: "Lộ trình",
         accent: "#4f8cff",
         href: "/ecosystem/iOSReadme",
       },
       {
         key: "windows",
-        title: "Monica for Windows",
-        kicker: "Bàn làm việc desktop",
-        description: "Phục vụ nhập, xuất, tổ chức dữ liệu và tương thích nhiều định dạng trong các luồng desktop nặng.",
-        status: "Đang khám phá",
+        title: "Monica by Avalonia",
+        kicker: "Nền tảng đa desktop",
+        description: "Bản triển khai desktop của kho mật khẩu Monica.",
         accent: "#f0a32f",
         href: "/ecosystem/WindowsReadme",
       },
@@ -290,29 +274,19 @@ const cards = computed(() => currentCopy.value.cards);
 
 <template>
   <section class="ecosystem-landing" aria-labelledby="ecosystem-title">
-    <div class="ecosystem-hero">
-      <div class="ecosystem-hero__copy">
-        <p class="ecosystem-hero__eyebrow">{{ currentCopy.eyebrow }}</p>
-        <h1 id="ecosystem-title">{{ currentCopy.title }}</h1>
-        <p class="ecosystem-hero__lead">{{ currentCopy.lead }}</p>
-        <div class="ecosystem-hero__actions">
-          <a class="ecosystem-button ecosystem-button--primary" :href="pageLink('/ecosystem/AndroidReadme')">
-            {{ currentCopy.primaryCta }}
-          </a>
-          <a class="ecosystem-button ecosystem-button--ghost" :href="pageLink('/reference/catalogue')">
-            {{ currentCopy.secondaryCta }}
-          </a>
-        </div>
+    <header class="ecosystem-hero">
+      <p class="ecosystem-hero__eyebrow">{{ currentCopy.eyebrow }}</p>
+      <h1 id="ecosystem-title">{{ currentCopy.title }}</h1>
+      <p class="ecosystem-hero__lead">{{ currentCopy.lead }}</p>
+      <div class="ecosystem-hero__actions">
+        <a class="ecosystem-button ecosystem-button--primary" :href="pageLink('/ecosystem/AndroidReadme')">
+          {{ currentCopy.primaryCta }}
+        </a>
+        <a class="ecosystem-button ecosystem-button--ghost" :href="pageLink('/reference/catalogue')">
+          {{ currentCopy.secondaryCta }}
+        </a>
       </div>
-
-      <div class="ecosystem-orbit" aria-hidden="true">
-        <span class="ecosystem-orbit__ring"></span>
-        <span class="ecosystem-orbit__node ecosystem-orbit__node--android">Android</span>
-        <span class="ecosystem-orbit__node ecosystem-orbit__node--ios">iOS</span>
-        <span class="ecosystem-orbit__node ecosystem-orbit__node--windows">Windows</span>
-        <span class="ecosystem-orbit__core">Monica</span>
-      </div>
-    </div>
+    </header>
 
     <div class="ecosystem-metrics" aria-label="Ecosystem summary">
       <div v-for="metric in currentCopy.metrics" :key="metric.label" class="ecosystem-metric">
@@ -329,9 +303,10 @@ const cards = computed(() => currentCopy.value.cards);
         :href="pageLink(card.href)"
         :style="{ '--card-accent': card.accent }"
       >
-        <span class="ecosystem-card__status">{{ card.status }}</span>
-        <span class="ecosystem-card__kicker">{{ card.kicker }}</span>
-        <strong>{{ card.title }}</strong>
+        <div class="ecosystem-card__meta">
+          <span class="ecosystem-card__kicker">{{ card.kicker }}</span>
+        </div>
+        <h2>{{ card.title }}</h2>
         <p>{{ card.description }}</p>
         <span class="ecosystem-card__arrow">{{ currentCopy.readMore }}</span>
       </a>
@@ -649,30 +624,14 @@ const cards = computed(() => currentCopy.value.cards);
       content: "";
     }
 
-    .ecosystem-card:has(.ecosystem-card__status) {
-      padding-inline-start: clamp(1.35rem, 1rem + 1.75cqi, 2rem);
-    }
-
     .ecosystem-card:hover {
       border-color: color-mix(in oklch, var(--card-accent), var(--eco-line) 12%);
       box-shadow: 0 1.5rem 4rem color-mix(in oklch, var(--card-accent), transparent 82%);
     }
 
-    .ecosystem-card__status,
     .ecosystem-card__kicker,
     .ecosystem-card__arrow {
       inline-size: fit-content;
-    }
-
-    .ecosystem-card__status {
-      border-radius: 100vi;
-      padding-block: 0.35rem;
-      padding-inline: 0.65rem;
-      background: color-mix(in oklch, var(--card-accent), transparent 84%);
-      color: color-mix(in oklch, var(--card-accent), var(--eco-ink) 18%);
-      font-size: clamp(0.72rem, 0.68rem + 0.2cqi, 0.82rem);
-      font-weight: 900;
-      line-height: 1;
     }
 
     .ecosystem-card__kicker {
@@ -813,6 +772,292 @@ const cards = computed(() => currentCopy.value.cards);
     to {
       translate: 0 -0.45rem;
     }
+  }
+}
+</style>
+
+<style>
+.ecosystem-landing {
+  --ecosystem-accent: var(--vp-c-brand-1);
+  --ecosystem-border: var(--vp-c-divider);
+  --ecosystem-muted: var(--vp-c-text-2);
+  --ecosystem-radius: 8px;
+  display: grid;
+  gap: 40px;
+  max-width: 960px;
+  margin: 16px auto 72px;
+  color: var(--vp-c-text-1);
+}
+
+.ecosystem-landing::before,
+.ecosystem-orbit {
+  display: none;
+}
+
+.ecosystem-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  max-width: 720px;
+  align-items: start;
+  overflow: visible;
+  padding: 12px 0 28px;
+  border: 0;
+  border-bottom: 1px solid var(--ecosystem-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ecosystem-hero__eyebrow {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ecosystem-accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+.ecosystem-hero h1 {
+  max-width: 18ch;
+  font-size: clamp(2.15rem, 4vw, 3.35rem);
+  letter-spacing: 0;
+  line-height: 1.12;
+}
+
+.ecosystem-hero__lead {
+  max-width: 640px;
+  color: var(--ecosystem-muted);
+  font-size: 1.08rem;
+  line-height: 1.75;
+}
+
+.ecosystem-hero__actions {
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.ecosystem-button {
+  min-height: 40px;
+  border-radius: var(--ecosystem-radius);
+  padding: 0 14px;
+  font-weight: 600;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.ecosystem-button--primary {
+  background: var(--vp-c-brand-3);
+  box-shadow: none;
+}
+
+.ecosystem-button--ghost {
+  border-color: var(--ecosystem-border);
+  background: transparent;
+}
+
+.ecosystem-button:hover,
+.ecosystem-card:hover {
+  translate: none;
+}
+
+.ecosystem-metrics {
+  gap: 0;
+  border-block: 1px solid var(--ecosystem-border);
+}
+
+.ecosystem-metric {
+  gap: 6px;
+  border: 0;
+  border-radius: 0;
+  padding: 16px 20px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ecosystem-metric + .ecosystem-metric {
+  border-inline-start: 1px solid var(--ecosystem-border);
+}
+
+.ecosystem-metric strong {
+  font-size: 1.35rem;
+  letter-spacing: 0;
+}
+
+.ecosystem-metric span {
+  color: var(--ecosystem-muted);
+  font-size: 0.82rem;
+}
+
+.ecosystem-cards {
+  gap: 0;
+  border: 1px solid var(--ecosystem-border);
+  border-radius: var(--ecosystem-radius);
+  overflow: hidden;
+}
+
+.ecosystem-card {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  min-height: 260px;
+  padding: 24px;
+  border: 0;
+  border-radius: 0;
+  border-top: 3px solid var(--card-accent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ecosystem-card + .ecosystem-card {
+  border-inline-start: 1px solid var(--ecosystem-border);
+}
+
+.ecosystem-card::before {
+  display: none;
+}
+
+.ecosystem-card:hover {
+  border-color: var(--card-accent);
+  background: var(--vp-c-bg-soft);
+  box-shadow: none;
+}
+
+.ecosystem-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ecosystem-card__kicker {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.ecosystem-card__kicker {
+  color: var(--ecosystem-muted);
+  font-weight: 600;
+}
+
+.ecosystem-card h2 {
+  margin: 22px 0 0;
+  border: 0;
+  padding: 0;
+  color: var(--vp-c-text-1);
+  font-size: 1.3rem;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.ecosystem-card p {
+  margin-top: 10px;
+  color: var(--ecosystem-muted);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.ecosystem-card__arrow {
+  margin-top: 24px;
+  color: var(--vp-c-brand-1);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.ecosystem-principles {
+  gap: 24px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ecosystem-principles h2 {
+  font-size: 1.55rem;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.ecosystem-principles__grid {
+  gap: 0;
+  border-top: 1px solid var(--ecosystem-border);
+}
+
+.ecosystem-principles article {
+  padding: 20px 20px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ecosystem-principles article + article {
+  padding-left: 20px;
+  border-inline-start: 1px solid var(--ecosystem-border);
+}
+
+.ecosystem-principles h3 {
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.ecosystem-principles p {
+  color: var(--ecosystem-muted);
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+@media (max-width: 640px) {
+  .ecosystem-landing {
+    gap: 28px;
+    margin-top: 0;
+  }
+
+  .ecosystem-hero {
+    padding-bottom: 24px;
+  }
+
+  .ecosystem-hero__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .ecosystem-metrics,
+  .ecosystem-cards,
+  .ecosystem-principles__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ecosystem-metric + .ecosystem-metric {
+    border-top: 1px solid var(--ecosystem-border);
+    border-inline-start: 0;
+  }
+
+  .ecosystem-card,
+  .ecosystem-card + .ecosystem-card {
+    min-height: 0;
+    border-inline-start: 0;
+    border-top: 3px solid var(--card-accent);
+  }
+
+  .ecosystem-card:first-child {
+    border-top: 3px solid var(--card-accent);
+  }
+
+  .ecosystem-principles article,
+  .ecosystem-principles article + article {
+    padding: 18px 0 0;
+    border-inline-start: 0;
+  }
+
+  .ecosystem-principles article + article {
+    border-top: 1px solid var(--ecosystem-border);
   }
 }
 </style>

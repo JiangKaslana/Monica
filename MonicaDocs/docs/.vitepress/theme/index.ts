@@ -1,6 +1,7 @@
 import Teek from "vitepress-theme-teek";
 import TeekLayoutProvider from "./components/TeekLayoutProvider.vue";
 import EcosystemLanding from "./components/EcosystemLanding.vue";
+import MonicaCloudComingSoon from "./components/MonicaCloudComingSoon.vue";
 import { h } from "vue";
 
 import "vitepress-theme-teek/index.css";
@@ -70,6 +71,7 @@ export default {
   enhanceApp(ctx) {
     Teek.enhanceApp?.(ctx);
     ctx.app.component("EcosystemLanding", EcosystemLanding);
+    ctx.app.component("MonicaCloudComingSoon", MonicaCloudComingSoon);
 
     if (typeof window === "undefined") return;
 

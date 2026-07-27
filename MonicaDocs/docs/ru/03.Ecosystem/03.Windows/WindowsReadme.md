@@ -4,7 +4,7 @@ date: 2026-06-06 21:30:00
 permalink: /ecosystem/WindowsReadme
 ---
 
-# Monica for Windows
+# Monica by Avalonia
 
 > Monica by Avalonia: local-first кроссплатформенное хранилище паролей на Avalonia, .NET и MDBX.  
 > Windows / macOS / Linux · Local Vault · MDBX-1 · KeePass · TOTP · WebDAV / OneDrive
@@ -35,16 +35,16 @@ permalink: /ecosystem/WindowsReadme
 :::
 
 ::: note Кратко
-Monica for Windows — desktop-реализация хранилища паролей Monica, сфокусированная на local-first подходе, управлении паролями и совместимости MDBX vault. Документ оформлен в стиле README и содержит обзор функций, стек, архитектуру и сведения для разработки.
+Monica by Avalonia — desktop-реализация хранилища паролей Monica, сфокусированная на local-first подходе, управлении паролями и совместимости MDBX vault. Документ оформлен в стиле README и содержит обзор функций, стек, архитектуру и сведения для разработки.
 :::
 
-Monica for Windows переносит local-first и security-first направление Monica на desktop-платформы. Приложение предоставляет управление паролями, TOTP, приватными заметками, банковскими картами и документами, а также поддерживает локальное шифрование, импорт/экспорт, резервное копирование и совместимость MDBX vault.
+Monica by Avalonia переносит local-first и security-first направление Monica на desktop-платформы. Приложение предоставляет управление паролями, TOTP, приватными заметками, банковскими картами и документами, а также поддерживает локальное шифрование, импорт/экспорт, резервное копирование и совместимость MDBX vault.
 
 ---
 
 ## Позиционирование проекта
 
-Monica for Windows — local-first клиент хранилища паролей для desktop-пользователей. Он построен на кроссплатформенном desktop UI Avalonia, .NET 10 и локальном MDBX vault, чтобы дать современный и расширяемый опыт управления паролями на desktop.
+Monica by Avalonia — local-first клиент хранилища паролей для desktop-пользователей. Он построен на кроссплатформенном desktop UI Avalonia, .NET 10 и локальном MDBX vault, чтобы дать современный и расширяемый опыт управления паролями на desktop.
 
 Ключевые цели:
 
@@ -92,7 +92,7 @@ Monica for Windows — local-first клиент хранилища пароле�
 ## Обзор архитектуры
 
 ::: tip Предпросмотр архитектуры
-Архитектуру Monica for Windows можно представить как дерево мышления desktop-хранилища паролей, где:
+Архитектуру Monica by Avalonia можно представить как дерево мышления desktop-хранилища паролей, где:
 
 - UI-слой отвечает за взаимодействие и отображение
 - Core-слой отвечает за бизнес-логику и криптографию
@@ -116,7 +116,7 @@ Monica for Windows — local-first клиент хранилища пароле�
 
 ```mermaid
 mindmap
-  root((Monica for Windows))
+  root((Monica by Avalonia))
     App["Monica.App\nAvalonia UI / ViewModels / Dialog Services"]
       UI[UI / Взаимодействие]
       Dialogs[Диалоги / Desktop-сервисы]
@@ -155,7 +155,7 @@ mindmap
 
 ## Интеграция MDBX-1
 
-Monica for Windows поддерживает MDBX-1 local-first vault. Это не обычная SQLite-таблица паролей, а локальный формат базы данных с историей версий, обработкой конфликтов, восстановлением snapshot и границами безопасности.
+Monica by Avalonia поддерживает MDBX-1 local-first vault. Это не обычная SQLite-таблица паролей, а локальный формат базы данных с историей версий, обработкой конфликтов, восстановлением snapshot и границами безопасности.
 
 На стороне Avalonia сейчас есть два пути интеграции MDBX:
 
@@ -216,13 +216,13 @@ dotnet publish "src\Monica.App\Monica.App.csproj" -c Release -r win-x64 --self-c
 
 - Monica: дает продуктовую идею, local-first направление и UX-ориентир для управления паролями
 - MDBX: дает local-first формат vault и долгосрочно поддерживаемую структуру данных
-- Monica for Windows: объединяет оба направления в desktop-реализации для Windows
+- Monica by Avalonia: объединяет оба направления в desktop-реализации для Windows
 
 ---
 
 ## Благодарности
 
-Monica for Windows ориентируется на следующие проекты и заимствует у них идеи:
+Monica by Avalonia ориентируется на следующие проекты и заимствует у них идеи:
 
 - [Avalonia](https://avaloniaui.net/) - кроссплатформенный desktop UI
 - [FluentAvalonia](https://github.com/amwx/FluentAvalonia) - Fluent-контролы

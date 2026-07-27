@@ -1,10 +1,43 @@
 <script setup lang="ts">
-import { withBase, useRouter } from "vitepress";
+import { computed } from "vue";
+import { useData, withBase, useRouter } from "vitepress";
 
 const router = useRouter();
+const { lang } = useData();
 const ns = "error-page";
+
+const copy = {
+  zh: {
+    title: "你似乎迷失在了未知的世界线... 🗺️",
+    description: "当前页面不存在或已被物理抹除",
+    home: "返回主界面",
+  },
+  en: {
+    title: "You seem to have wandered into an unknown timeline... 🗺️",
+    description: "This page does not exist or has been physically erased.",
+    home: "Back to home",
+  },
+  ja: {
+    title: "未知の世界線に迷い込んだようです... 🗺️",
+    description: "このページは存在しないか、物理的に消去されました。",
+    home: "ホームへ戻る",
+  },
+  vi: {
+    title: "Bạn dường như đã lạc vào một dòng thời gian chưa biết... 🗺️",
+    description: "Trang này không tồn tại hoặc đã bị xóa khỏi thực tại.",
+    home: "Về trang chủ",
+  },
+  ru: {
+    title: "Похоже, вы забрели в неизвестную временную линию... 🗺️",
+    description: "Эта страница не существует или была физически стёрта.",
+    home: "На главную",
+  },
+};
+
+const currentCopy = computed(() => copy[lang.value.split("-")[0] as keyof typeof copy] ?? copy.zh);
+
 const handleGoHome = () => {
-  router.go(withBase('/'));
+  router.go(withBase("/"));
 };
 </script>
 
@@ -16,11 +49,11 @@ const handleGoHome = () => {
     
     <div :class="[`${ns}__detail`, 'flx-column']">
       <h2 class="glitch-text">404</h2>
-      <h4>你似乎迷失在了未知的世界线... 🗺️</h4>
-      <p class="error-tip">当前页面不存在或已被物理抹除</p>
+      <h4>{{ currentCopy.title }}</h4>
+      <p class="error-tip">{{ currentCopy.description }}</p>
       
       <button @click="handleGoHome" class="acgn-btn">
-        <span>返回主界面</span>
+        <span>{{ currentCopy.home }}</span>
       </button>
     </div>
   </div>

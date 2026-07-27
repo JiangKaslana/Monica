@@ -11,14 +11,11 @@ hero:
     alt: Monica 应用图标
   actions:
     - theme: brand
-      text: 下载 Android 版
-      link: https://github.com/Monica-Pass/Monica/releases
+      text: 前往 Monica-cloud
+      link: /login
     - theme: alt
-      text: Windows 版
-      link: https://github.com/Monica-Pass/Monica-for-Windows
-    - theme: alt
-      text: 项目文档
-      link: /reference/catalogue
+      text: 了解 Monica 生态
+      link: /ecosystem.html
 
 features:
   - title: 密码管理

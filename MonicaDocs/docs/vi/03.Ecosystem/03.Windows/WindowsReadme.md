@@ -4,7 +4,7 @@ date: 2026-06-06 21:30:00
 permalink: /ecosystem/WindowsReadme
 ---
 
-# Monica for Windows
+# Monica by Avalonia
 
 > Monica by Avalonia: kho mật khẩu đa nền tảng ưu tiên cục bộ được xây dựng bằng Avalonia, .NET và MDBX.  
 > Windows / macOS / Linux · Local Vault · MDBX-1 · KeePass · TOTP · WebDAV / OneDrive
@@ -35,16 +35,16 @@ permalink: /ecosystem/WindowsReadme
 :::
 
 ::: note Tóm tắt
-Monica for Windows là bản triển khai desktop của kho mật khẩu Monica, tập trung vào ưu tiên cục bộ, quản lý mật khẩu và tương thích MDBX vault. Tài liệu này theo phong cách README, cung cấp giới thiệu tính năng, công nghệ, kiến trúc và ghi chú phát triển.
+Monica by Avalonia là bản triển khai desktop của kho mật khẩu Monica, tập trung vào ưu tiên cục bộ, quản lý mật khẩu và tương thích MDBX vault. Tài liệu này theo phong cách README, cung cấp giới thiệu tính năng, công nghệ, kiến trúc và ghi chú phát triển.
 :::
 
-Monica for Windows hướng tới việc đưa lộ trình ưu tiên cục bộ và ưu tiên bảo mật của Monica lên nền tảng desktop, cung cấp quản lý mật khẩu, TOTP, ghi chú riêng tư, thẻ ngân hàng và giấy tờ định danh, đồng thời hỗ trợ mã hóa cục bộ, nhập/xuất, sao lưu và tương thích MDBX vault.
+Monica by Avalonia hướng tới việc đưa lộ trình ưu tiên cục bộ và ưu tiên bảo mật của Monica lên nền tảng desktop, cung cấp quản lý mật khẩu, TOTP, ghi chú riêng tư, thẻ ngân hàng và giấy tờ định danh, đồng thời hỗ trợ mã hóa cục bộ, nhập/xuất, sao lưu và tương thích MDBX vault.
 
 ---
 
 ## Định vị dự án
 
-Monica for Windows là ứng dụng khách kho mật khẩu ưu tiên cục bộ dành cho người dùng desktop. Dựa trên UI desktop đa nền tảng Avalonia, kết hợp .NET 10 và MDBX local vault, dự án xây dựng trải nghiệm quản lý mật khẩu desktop hiện đại và có thể mở rộng.
+Monica by Avalonia là ứng dụng khách kho mật khẩu ưu tiên cục bộ dành cho người dùng desktop. Dựa trên UI desktop đa nền tảng Avalonia, kết hợp .NET 10 và MDBX local vault, dự án xây dựng trải nghiệm quản lý mật khẩu desktop hiện đại và có thể mở rộng.
 
 Mục tiêu cốt lõi:
 
@@ -92,7 +92,7 @@ Mục tiêu cốt lõi:
 ## Tổng quan kiến trúc
 
 ::: tip Xem trước kiến trúc
-Kiến trúc Monica for Windows có thể hiểu như một cây tư duy của kho mật khẩu desktop, với trọng tâm:
+Kiến trúc Monica by Avalonia có thể hiểu như một cây tư duy của kho mật khẩu desktop, với trọng tâm:
 
 - Lớp UI phụ trách tương tác và hiển thị
 - Lớp Core phụ trách nghiệp vụ và logic mã hóa
@@ -116,7 +116,7 @@ Trong kiến trúc này, <mark>MDBX không phải là bảng cơ sở dữ liệ
 
 ```mermaid
 mindmap
-  root((Monica for Windows))
+  root((Monica by Avalonia))
     App["Monica.App\nAvalonia UI / ViewModels / Dialog Services"]
       UI[UI / Tương tác]
       Dialogs[Hộp thoại / Dịch vụ desktop]
@@ -155,7 +155,7 @@ mindmap
 
 ## Tích hợp MDBX-1
 
-Monica for Windows hỗ trợ MDBX-1 local-first vault. Đây không phải là bảng mật khẩu SQLite thông thường, mà là định dạng cơ sở dữ liệu cục bộ có lịch sử phiên bản, xử lý xung đột, khôi phục snapshot và ranh giới bảo mật.
+Monica by Avalonia hỗ trợ MDBX-1 local-first vault. Đây không phải là bảng mật khẩu SQLite thông thường, mà là định dạng cơ sở dữ liệu cục bộ có lịch sử phiên bản, xử lý xung đột, khôi phục snapshot và ranh giới bảo mật.
 
 Phía Avalonia hiện có hai đường tích hợp MDBX:
 
@@ -216,13 +216,13 @@ dotnet publish "src\Monica.App\Monica.App.csproj" -c Release -r win-x64 --self-c
 
 - Monica: cung cấp理念 sản phẩm, lộ trình ưu tiên cục bộ và tham khảo trải nghiệm quản lý mật khẩu
 - MDBX: cung cấp định dạng vault ưu tiên cục bộ và cấu trúc dữ liệu có thể bảo trì lâu dài
-- Monica for Windows: triển khai desktop kết hợp năng lực của cả hai trên Windows
+- Monica by Avalonia: triển khai desktop kết hợp năng lực của cả hai trên Windows
 
 ---
 
 ## Lời cảm ơn
 
-Monica for Windows tham khảo và lấy cảm hứng từ các dự án sau:
+Monica by Avalonia tham khảo và lấy cảm hứng từ các dự án sau:
 
 - [Avalonia](https://avaloniaui.net/) - UI desktop đa nền tảng
 - [FluentAvalonia](https://github.com/amwx/FluentAvalonia) - điều khiển phong cách Fluent
