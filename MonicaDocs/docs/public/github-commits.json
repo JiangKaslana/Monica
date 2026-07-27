@@ -1,16 +1,12 @@
 {
   "repo": "Monica-Pass/Monica",
   "repoUrl": "https://github.com/Monica-Pass/Monica",
-  "generatedAt": "2026-07-26T21:11:16.637Z",
+  "generatedAt": "2026-07-27T21:29:08.848Z",
   "range": {
-    "from": "2025-07-27",
-    "to": "2026-07-26"
+    "from": "2025-07-28",
+    "to": "2026-07-27"
   },
   "activity": [
-    {
-      "date": "2025-07-27",
-      "count": 0
-    },
     {
       "date": "2025-07-28",
       "count": 0
@@ -1465,10 +1461,77 @@
     },
     {
       "date": "2026-07-26",
-      "count": 11
+      "count": 16
+    },
+    {
+      "date": "2026-07-27",
+      "count": 3
     }
   ],
   "latest": [
+    {
+      "sha": "1496f06dd1ac665236d4e60471e536c619f9d1e4",
+      "shortSha": "1496f06",
+      "message": "docs: update Afdian sponsor list",
+      "authorName": "github-actions[bot]",
+      "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "date": "2026-07-27T06:01:28Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/1496f06dd1ac665236d4e60471e536c619f9d1e4"
+    },
+    {
+      "sha": "37dc2c1b1e26f737ad44b400e245e08a2c7c91e1",
+      "shortSha": "37dc2c1",
+      "message": "Merge remote-tracking branch 'origin/main'",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-27T05:29:01Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/37dc2c1b1e26f737ad44b400e245e08a2c7c91e1"
+    },
+    {
+      "sha": "70d2bd335c29714960c7018f6f65fd59521da6ab",
+      "shortSha": "70d2bd3",
+      "message": "Merge pull request #81 from Mrmiaomrzh/main",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-27T03:03:40Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/70d2bd335c29714960c7018f6f65fd59521da6ab"
+    },
+    {
+      "sha": "63fe5473272d1607d0659e41149f7fbd29931d29",
+      "shortSha": "63fe547",
+      "message": "fixdocs): add localized Monica Cloud landing page",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-07-26T18:55:03Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/63fe5473272d1607d0659e41149f7fbd29931d29"
+    },
+    {
+      "sha": "7c298e8aae6d20271adc2f65f77610efc874db52",
+      "shortSha": "7c298e8",
+      "message": "feat(docs): refresh cloud entry and ecosystem pages",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-07-26T18:40:07Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/7c298e8aae6d20271adc2f65f77610efc874db52"
+    },
+    {
+      "sha": "76087c9bb819d5a4374f4babf5659d71bfd2bd25",
+      "shortSha": "76087c9",
+      "message": "feat(mdbx): add Rust MDBX2 engine module",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-26T18:16:15Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/76087c9bb819d5a4374f4babf5659d71bfd2bd25"
+    },
+    {
+      "sha": "aa9cb0082ac76e9b6d46c22bf1cbff3e06c501fb",
+      "shortSha": "aa9cb00",
+      "message": "Merge remote-tracking branch 'origin/main'",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-26T17:34:26Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/aa9cb0082ac76e9b6d46c22bf1cbff3e06c501fb"
+    },
     {
       "sha": "06529d1a52bd6b1b17b76e86b454369037679f66",
       "shortSha": "06529d1",
@@ -1488,76 +1551,13 @@
       "url": "https://github.com/Monica-Pass/Monica/commit/bff24388f6032aecc6bc3e66b32b32221c5c53d5"
     },
     {
-      "sha": "9930d8d8d3a7c2a025370ef9631670cb4be50196",
-      "shortSha": "9930d8d",
-      "message": "chore: restore contributor attribution for PR #57",
+      "sha": "8f2f84007f297edff330aacf5c5b0451a83f0586",
+      "shortSha": "8f2f840",
+      "message": "feat(backup): 本地 ZIP 导出支持可选加密",
       "authorName": "JoyinJoester",
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-26T05:59:55Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/9930d8d8d3a7c2a025370ef9631670cb4be50196"
-    },
-    {
-      "sha": "347458956a9eade61a205ac1319c0d417cf1f4fd",
-      "shortSha": "3474589",
-      "message": "Merge pull request #79 from Chaniug/autofill-upstream-fix",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-26T05:30:04Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/347458956a9eade61a205ac1319c0d417cf1f4fd"
-    },
-    {
-      "sha": "10cac9e3e12a237324bfaec17acc804288977aba",
-      "shortSha": "10cac9e",
-      "message": "fix(autofill): harden compatibility fallback",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-26T04:52:05Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/10cac9e3e12a237324bfaec17acc804288977aba"
-    },
-    {
-      "sha": "8a6beeb0d6935d490d08b813ac3046309e057618",
-      "shortSha": "8a6beeb",
-      "message": "fix(autofill): forceAutofillOff 保留同组非 OFF 候选，修复电影猎手有密码框却不弹",
-      "authorName": "Chaniug",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
-      "date": "2026-07-26T02:15:51Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/8a6beeb0d6935d490d08b813ac3046309e057618"
-    },
-    {
-      "sha": "f8f987c82ebe5b7517386263fbaf359b81b8d66c",
-      "shortSha": "f8f987c",
-      "message": "fix(autofill): 收紧 TYPE_TEXT_VARIATION_NORMAL fallback，修复 QQ 搜索框误弹",
-      "authorName": "Chaniug",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
-      "date": "2026-07-26T01:56:07Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/f8f987c82ebe5b7517386263fbaf359b81b8d66c"
-    },
-    {
-      "sha": "3db6aaf2073a8c504d7d53d81ba6e0e9702bff6e",
-      "shortSha": "3db6aaf",
-      "message": "fix(autofill): 弱目标模式放行条件改为「有 Login 类型字段就弹」+ 节点信号诊断",
-      "authorName": "Chaniug",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
-      "date": "2026-07-26T01:34:22Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/3db6aaf2073a8c504d7d53d81ba6e0e9702bff6e"
-    },
-    {
-      "sha": "582d7e69f9606452df1a20db1d6f8ca99506c55e",
-      "shortSha": "582d7e6",
-      "message": "fix: 修复 htmlInfo.attributes forEach 解构歧义导致的编译失败",
-      "authorName": "Chaniug",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
-      "date": "2026-07-26T00:48:21Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/582d7e69f9606452df1a20db1d6f8ca99506c55e"
-    },
-    {
-      "sha": "2633eb20b361e6473bd54ca00992fb359b5a421c",
-      "shortSha": "2633eb2",
-      "message": "fix: 删除弱重解析回退处重复的代码块，修复编译失败",
-      "authorName": "Chaniug",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
-      "date": "2026-07-26T00:43:37Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/2633eb20b361e6473bd54ca00992fb359b5a421c"
+      "date": "2026-07-26T14:57:07Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/8f2f84007f297edff330aacf5c5b0451a83f0586"
     }
   ]
 }
