@@ -50,7 +50,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import takagi.ru.monica.R
 import takagi.ru.monica.data.PasswordDatabase
-import takagi.ru.monica.repository.MdbxVaultStore
+import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.steam.data.SteamAccount
 import takagi.ru.monica.steam.data.SteamAccountRepository
@@ -81,14 +81,10 @@ fun SteamQrScannerScreen(
     val mdbxAccountStore = remember(appContext) {
         val passwordDatabase = PasswordDatabase.getDatabase(appContext)
         SteamMdbxAccountStore(
-            MdbxVaultStore(
+            MdbxRepositoryFactory.create(
                 context = appContext,
-                databaseDao = passwordDatabase.localMdbxDatabaseDao(),
+                database = passwordDatabase,
                 securityManager = securityManager,
-                remoteSourceDao = passwordDatabase.mdbxRemoteSourceDao(),
-                passwordEntryDao = passwordDatabase.passwordEntryDao(),
-                secureItemDao = passwordDatabase.secureItemDao(),
-                customFieldDao = passwordDatabase.customFieldDao()
             )
         )
     }

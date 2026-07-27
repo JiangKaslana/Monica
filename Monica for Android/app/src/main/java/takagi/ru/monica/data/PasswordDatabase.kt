@@ -45,7 +45,7 @@ import takagi.ru.monica.keepass.KeePassPendingChangeDao
         // KeePass entry-level pending changes
         KeePassPendingChange::class
     ],
-    version = 73,
+    version = 74,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -2201,6 +2201,17 @@ abstract class PasswordDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_73_74 = object : androidx.room.migration.Migration(73, 74) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                addColumnIfMissing(
+                    database = database,
+                    tableName = "local_mdbx_databases",
+                    columnName = "engine_type",
+                    definition = "TEXT NOT NULL DEFAULT 'KOTLIN_MDBX1'"
+                )
+            }
+        }
+
         private fun addColumnIfMissing(
             database: androidx.sqlite.db.SupportSQLiteDatabase,
             tableName: String,
@@ -2302,7 +2313,8 @@ abstract class PasswordDatabase : RoomDatabase() {
                         MIGRATION_69_70,   // KeePass entry-level pending changes
                         MIGRATION_70_71,   // KeePass pending base snapshots
                         MIGRATION_71_72,   // KeePass sync state updated timestamp
-                        MIGRATION_72_73    // Encrypted timeline version snapshots
+                        MIGRATION_72_73,   // Encrypted timeline version snapshots
+                        MIGRATION_73_74    // Per-database MDBX engine selection
                     )
                     // 启用多进程失效通知：IME 跑在 :ime 独立进程，主进程需要
                     // 感知 IME 进程对数据库的修改（例如最近填充时间戳等）。

@@ -23,7 +23,8 @@ import takagi.ru.monica.bitwarden.api.BitwardenVaultApi
 import takagi.ru.monica.bitwarden.api.CipherAttachmentApiData
 import takagi.ru.monica.bitwarden.crypto.BitwardenCrypto.SymmetricCryptoKey
 import takagi.ru.monica.data.PasswordEntryDao
-import takagi.ru.monica.repository.MdbxVaultStore
+import takagi.ru.monica.repository.MdbxRepository
+import takagi.ru.monica.repository.mdbxPasswordObjectId
 import java.io.File
 import java.io.OutputStream
 
@@ -50,7 +51,7 @@ class AttachmentFacade(
     private val keyVault: AttachmentKeyVault,
     private val previewCache: AttachmentPreviewCache,
     private val passwordEntryDao: PasswordEntryDao? = null,
-    private val mdbxVaultStore: MdbxVaultStore? = null,
+    private val mdbxVaultStore: MdbxRepository? = null,
     /** 用于 `openForPreview` 发出的 FileProvider authority，需与 manifest 中注册的 authority 一致。 */
     private val fileProviderAuthority: String
 ) {
@@ -176,19 +177,29 @@ class AttachmentFacade(
             }
 
             // 4. 持久化（executor 返回的 Attachment 已经是完整记录，Room 只负责 insert）
-            val id = repository.insert(attachment)
-            attachment.copy(id = id).also { saved ->
-                AttachmentLogger.logOk(
-                    event = AttachmentLogger.Event.UPLOAD,
-                    attachmentId = id,
-                    source = saved.sourceEnum,
-                    extras = mapOf(
-                        "passwordId" to request.parentPasswordId,
-                        "keepassDatabaseId" to request.keepassContext?.databaseId,
-                        "keepassEntryUuidPresent" to !request.keepassContext?.entryUuid.isNullOrBlank()
+            var id: Long? = null
+            try {
+                val insertedId = repository.insert(attachment)
+                id = insertedId
+                attachment.copy(id = insertedId).also { saved ->
+                    AttachmentLogger.logOk(
+                        event = AttachmentLogger.Event.UPLOAD,
+                        attachmentId = id,
+                        source = saved.sourceEnum,
+                        extras = mapOf(
+                            "passwordId" to request.parentPasswordId,
+                            "keepassDatabaseId" to request.keepassContext?.databaseId,
+                            "keepassEntryUuidPresent" to !request.keepassContext?.entryUuid.isNullOrBlank()
+                        )
                     )
-                )
-                mirrorAttachmentToMdbx(saved)
+                    mirrorAttachmentToMdbx(saved)
+                }
+            } catch (error: Throwable) {
+                id?.let { repository.deleteById(it) }
+                if (attachment.sourceEnum == AttachmentSource.LOCAL) {
+                    attachment.localPath?.let { storage.delete(it) }
+                }
+                throw error
             }
         } catch (e: Throwable) {
             AttachmentLogger.logFailure(
@@ -330,6 +341,25 @@ class AttachmentFacade(
         keepassContext: KeePassContext? = null
     ) = withContext(Dispatchers.IO) {
         val existing = repository.getById(attachmentId) ?: return@withContext
+        if (existing.sourceEnum == AttachmentSource.LOCAL && isStrictMdbxAttachment(existing)) {
+            mirrorAttachmentDeleteToMdbx(existing)
+            try {
+                check(repository.deleteById(attachmentId) == 1) {
+                    "MDBX2 attachment metadata was not deleted"
+                }
+            } catch (error: Throwable) {
+                mirrorAttachmentToMdbx(existing)
+                throw error
+            }
+            existing.localPath?.let { path ->
+                if (!storage.delete(path)) {
+                    repository.insert(existing)
+                    mirrorAttachmentToMdbx(existing)
+                    error("MDBX2 attachment metadata was restored because its local blob could not be deleted")
+                }
+            }
+            return@withContext
+        }
         mirrorAttachmentDeleteToMdbx(existing)
         when (existing.sourceEnum) {
             AttachmentSource.LOCAL -> {
@@ -676,10 +706,10 @@ class AttachmentFacade(
         if (attachment.localPath.isNullOrBlank() || attachment.wrappedCek.isNullOrBlank()) return
         val parent = dao.getPasswordEntryById(attachment.parentPasswordId) ?: return
         val databaseId = parent.mdbxDatabaseId ?: return
-        val parentEntryId = vaultStore.passwordObjectIdForAttachment(parent)
-        runCatching {
+        val parentEntryId = mdbxPasswordObjectId(parent)
+        try {
             vaultStore.upsertAttachment(databaseId, parentEntryId, attachment)
-        }.onFailure { error ->
+        } catch (error: Throwable) {
             AttachmentLogger.logFailure(
                 event = AttachmentLogger.Event.UPLOAD,
                 attachmentId = attachment.id,
@@ -687,6 +717,7 @@ class AttachmentFacade(
                 error = error,
                 extras = mapOf("mdbx_database_id" to databaseId)
             )
+            if (vaultStore.requiresStrictMutationConsistency(databaseId)) throw error
         }
     }
 
@@ -695,10 +726,10 @@ class AttachmentFacade(
         val dao = passwordEntryDao ?: return
         val parent = dao.getPasswordEntryById(attachment.parentPasswordId) ?: return
         val databaseId = parent.mdbxDatabaseId ?: return
-        val parentEntryId = vaultStore.passwordObjectIdForAttachment(parent)
-        runCatching {
+        val parentEntryId = mdbxPasswordObjectId(parent)
+        try {
             vaultStore.deleteAttachment(databaseId, parentEntryId, attachment)
-        }.onFailure { error ->
+        } catch (error: Throwable) {
             AttachmentLogger.logFailure(
                 event = AttachmentLogger.Event.DELETE,
                 attachmentId = attachment.id,
@@ -706,7 +737,16 @@ class AttachmentFacade(
                 error = error,
                 extras = mapOf("mdbx_database_id" to databaseId)
             )
+            if (vaultStore.requiresStrictMutationConsistency(databaseId)) throw error
         }
+    }
+
+    private suspend fun isStrictMdbxAttachment(attachment: Attachment): Boolean {
+        val vaultStore = mdbxVaultStore ?: return false
+        val dao = passwordEntryDao ?: return false
+        val databaseId = dao.getPasswordEntryById(attachment.parentPasswordId)?.mdbxDatabaseId
+            ?: return false
+        return vaultStore.requiresStrictMutationConsistency(databaseId)
     }
 
     private suspend fun materializePreview(attachment: Attachment): File {

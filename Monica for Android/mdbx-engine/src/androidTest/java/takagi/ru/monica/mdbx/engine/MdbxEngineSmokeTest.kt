@@ -13,10 +13,71 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import uniffi.mdbx_ffi.createVault
+import uniffi.mdbx_ffi.MdbxWriteCommand
 import uniffi.mdbx_ffi.openVault
 
 @RunWith(AndroidJUnit4::class)
 class MdbxEngineSmokeTest {
+
+    @Test
+    fun explicitMonicaEntryIdSurvivesUpdateDeleteAndReopen() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val testDirectory = File(context.cacheDir, "mdbx2-explicit-${UUID.randomUUID()}")
+        assertTrue(testDirectory.mkdirs())
+        val vaultFile = File(testDirectory, "explicit.mdbx")
+        val password = "mdbx2-explicit-password"
+        val deviceId = "android-explicit-device"
+        val projectId = UUID.randomUUID().toString()
+        val logicalEntryId = "password:42"
+        val entryId = UUID.nameUUIDFromBytes(
+            "monica-entry:test-vault:$logicalEntryId".toByteArray(Charsets.UTF_8)
+        ).toString()
+
+        try {
+            createVault(vaultFile.absolutePath, password, deviceId).use { vault ->
+                vault.executeWriteOperation(
+                    operationId = UUID.randomUUID().toString(),
+                    operationKind = "test-create",
+                    commands = listOf(
+                        MdbxWriteCommand.CreateProject(projectId, "Personal"),
+                        MdbxWriteCommand.CreateEntry(
+                            entryId = entryId,
+                            projectId = projectId,
+                            entryType = "login",
+                            title = "Initial",
+                            payloadJson = """{"kind":"password","monica_entry_id":"$logicalEntryId","username":"alice"}"""
+                        )
+                    )
+                )
+                assertEquals(entryId, vault.listEntries(projectId, "login").single().entryId)
+
+                vault.executeWriteOperation(
+                    operationId = UUID.randomUUID().toString(),
+                    operationKind = "test-update-delete",
+                    commands = listOf(
+                        MdbxWriteCommand.UpdateEntry(
+                            entryId = entryId,
+                            projectId = projectId,
+                            entryType = "login",
+                            title = "Updated",
+                            payloadJson = """{"kind":"password","monica_entry_id":"$logicalEntryId","username":"bob"}"""
+                        ),
+                        MdbxWriteCommand.DeleteEntry(entryId, projectId)
+                    )
+                )
+            }
+
+            openVault(vaultFile.absolutePath, password, deviceId).use { reopened ->
+                assertTrue(reopened.listEntries(projectId, null).isEmpty())
+                val deleted = reopened.listDeletedEntries(projectId, "login").single()
+                assertEquals(entryId, deleted.entryId)
+                assertEquals("Updated", deleted.title)
+                assertTrue(deleted.deleted)
+            }
+        } finally {
+            testDirectory.deleteRecursively()
+        }
+    }
 
     @Test
     fun createsWritesReadsAndReopensVault() {

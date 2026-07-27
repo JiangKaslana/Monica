@@ -171,17 +171,28 @@ class PasswordRepository(
                     updatedAt = Date()
                 )
             }
-            mdbxRepository?.upsertPasswords(entriesForMdbx)
-            mdbxRepository?.deletePasswords(
-                existingEntries.filter { it.mdbxDatabaseId != null && it.mdbxDatabaseId != databaseId }
+            val previousMdbxEntries = existingEntries.filter { it.mdbxDatabaseId != null }
+            commitMirrorThenRoom(
+                mirrorCommit = {
+                    mdbxRepository?.upsertPasswords(entriesForMdbx)
+                    mdbxRepository?.deletePasswords(
+                        previousMdbxEntries.filter { it.mdbxDatabaseId != databaseId }
+                    )
+                },
+                roomCommit = { passwordEntryDao.updatePasswordEntries(entriesForMdbx) },
+                rollbackMirror = {
+                    mdbxRepository?.deletePasswords(entriesForMdbx)
+                    mdbxRepository?.upsertPasswords(previousMdbxEntries)
+                }
             )
-            passwordEntryDao.updatePasswordEntries(entriesForMdbx)
             return
         }
-        mdbxRepository?.deletePasswords(
-            existingEntries.filter { it.mdbxDatabaseId != null }
+        val previousMdbxEntries = existingEntries.filter { it.mdbxDatabaseId != null }
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deletePasswords(previousMdbxEntries) },
+            roomCommit = { passwordEntryDao.updateMdbxDatabaseForPasswords(ids, null, folderId) },
+            rollbackMirror = { mdbxRepository?.upsertPasswords(previousMdbxEntries) }
         )
-        passwordEntryDao.updateMdbxDatabaseForPasswords(ids, databaseId, folderId)
     }
 
     suspend fun updateKeePassGroupForPasswords(ids: List<Long>, databaseId: Long, groupPath: String) {
@@ -214,8 +225,9 @@ class PasswordRepository(
     
     suspend fun insertPasswordEntry(entry: PasswordEntry): Long {
         val normalizedEntry = BitwardenMutationStateHelper.normalizePasswordInsert(entry)
-        val id = passwordEntryDao.insertPasswordEntry(normalizedEntry)
-        try {
+        return commitRoomThenMirror(
+            roomCommit = {
+                val id = passwordEntryDao.insertPasswordEntry(normalizedEntry)
             val persistedEntry = normalizedEntry.copy(
                 id = id,
                 replicaGroupId = if (normalizedEntry.mdbxDatabaseId != null) {
@@ -227,42 +239,53 @@ class PasswordRepository(
             if (persistedEntry.replicaGroupId != normalizedEntry.replicaGroupId) {
                 passwordEntryDao.updatePasswordEntry(persistedEntry)
             }
-            mdbxRepository?.upsertPassword(persistedEntry)
-        } catch (e: Exception) {
-            passwordEntryDao.deletePasswordEntryById(id)
-            throw e
-        }
-        return id
+                id to persistedEntry
+            },
+            mirrorCommit = { (_, persistedEntry) ->
+                mdbxRepository?.upsertPassword(persistedEntry)
+            },
+            rollbackRoom = { (id, _) -> passwordEntryDao.deletePasswordEntryById(id) },
+            rollbackMirror = { (_, persistedEntry) ->
+                mdbxRepository?.deletePassword(persistedEntry)
+            }
+        ).first
     }
 
     suspend fun insertPasswordEntries(entries: List<PasswordEntry>): List<Long> {
         if (entries.isEmpty()) return emptyList()
         val normalizedEntries = entries.map(BitwardenMutationStateHelper::normalizePasswordInsert)
-        val ids = passwordEntryDao.insertPasswordEntries(normalizedEntries)
-        val persistedEntries = normalizedEntries.mapIndexed { index, entry ->
-            val id = ids[index]
-            entry.copy(
-                id = id,
-                replicaGroupId = if (entry.mdbxDatabaseId != null) {
-                    entry.copy(id = id).mdbxPasswordObjectId()
-                } else {
-                    entry.replicaGroupId
+        return commitRoomThenMirror(
+            roomCommit = {
+                val ids = passwordEntryDao.insertPasswordEntries(normalizedEntries)
+                val persistedEntries = normalizedEntries.mapIndexed { index, entry ->
+                    val id = ids[index]
+                    entry.copy(
+                        id = id,
+                        replicaGroupId = if (entry.mdbxDatabaseId != null) {
+                            entry.copy(id = id).mdbxPasswordObjectId()
+                        } else {
+                            entry.replicaGroupId
+                        }
+                    )
                 }
-            )
-        }
-        return try {
-            val entriesNeedingReplicaUpdate = persistedEntries.filterIndexed { index, persistedEntry ->
-                persistedEntry.replicaGroupId != normalizedEntries[index].replicaGroupId
+                val entriesNeedingReplicaUpdate = persistedEntries.filterIndexed { index, persistedEntry ->
+                    persistedEntry.replicaGroupId != normalizedEntries[index].replicaGroupId
+                }
+                if (entriesNeedingReplicaUpdate.isNotEmpty()) {
+                    passwordEntryDao.updatePasswordEntries(entriesNeedingReplicaUpdate)
+                }
+                ids to persistedEntries
+            },
+            mirrorCommit = { (_, persistedEntries) ->
+                mdbxRepository?.upsertPasswords(persistedEntries.filter { it.mdbxDatabaseId != null })
+            },
+            rollbackRoom = { (ids, _) ->
+                ids.forEach { id -> passwordEntryDao.deletePasswordEntryById(id) }
+            },
+            rollbackMirror = { (_, persistedEntries) ->
+                mdbxRepository?.deletePasswords(persistedEntries.filter { it.mdbxDatabaseId != null })
             }
-            if (entriesNeedingReplicaUpdate.isNotEmpty()) {
-                passwordEntryDao.updatePasswordEntries(entriesNeedingReplicaUpdate)
-            }
-            mdbxRepository?.upsertPasswords(persistedEntries.filter { it.mdbxDatabaseId != null })
-            ids
-        } catch (e: Exception) {
-            ids.forEach { id -> passwordEntryDao.deletePasswordEntryById(id) }
-            throw e
-        }
+        ).first
     }
     
     suspend fun updatePasswordEntry(entry: PasswordEntry) {
@@ -274,18 +297,28 @@ class PasswordRepository(
                 candidate
             }
         }
-        if (
-            normalizedEntry.mdbxDatabaseId != null
-        ) {
-            mdbxRepository?.upsertPassword(normalizedEntry)
-        }
-        if (
-            existingEntry?.mdbxDatabaseId != null &&
-            existingEntry.mdbxDatabaseId != normalizedEntry.mdbxDatabaseId
-        ) {
-            mdbxRepository?.deletePassword(existingEntry)
-        }
-        passwordEntryDao.updatePasswordEntry(normalizedEntry)
+        commitMirrorThenRoom(
+            mirrorCommit = {
+                if (normalizedEntry.mdbxDatabaseId != null) {
+                    mdbxRepository?.upsertPassword(normalizedEntry)
+                }
+                if (
+                    existingEntry?.mdbxDatabaseId != null &&
+                    existingEntry.mdbxDatabaseId != normalizedEntry.mdbxDatabaseId
+                ) {
+                    mdbxRepository?.deletePassword(existingEntry)
+                }
+            },
+            roomCommit = { passwordEntryDao.updatePasswordEntry(normalizedEntry) },
+            rollbackMirror = {
+                if (normalizedEntry.mdbxDatabaseId != null) {
+                    mdbxRepository?.deletePassword(normalizedEntry)
+                }
+                if (existingEntry?.mdbxDatabaseId != null) {
+                    mdbxRepository?.upsertPassword(existingEntry)
+                }
+            }
+        )
     }
 
     suspend fun updatePasswordEntries(entries: List<PasswordEntry>) {
@@ -303,17 +336,27 @@ class PasswordRepository(
                 }
             }
         }
-        mdbxRepository?.upsertPasswords(normalizedEntries.filter { it.mdbxDatabaseId != null })
-        mdbxRepository?.deletePasswords(
-            normalizedEntries.mapNotNull { normalizedEntry ->
+        val previousMdbxEntries = normalizedEntries.mapNotNull { normalizedEntry ->
                 val existingEntry = existingEntriesById[normalizedEntry.id]
                 existingEntry?.takeIf {
                     it.mdbxDatabaseId != null &&
                         it.mdbxDatabaseId != normalizedEntry.mdbxDatabaseId
                 }
             }
+        val nextMdbxEntries = normalizedEntries.filter { it.mdbxDatabaseId != null }
+        commitMirrorThenRoom(
+            mirrorCommit = {
+                mdbxRepository?.upsertPasswords(nextMdbxEntries)
+                mdbxRepository?.deletePasswords(previousMdbxEntries)
+            },
+            roomCommit = { passwordEntryDao.updatePasswordEntries(normalizedEntries) },
+            rollbackMirror = {
+                mdbxRepository?.deletePasswords(nextMdbxEntries)
+                mdbxRepository?.upsertPasswords(
+                    existingEntriesById.values.filter { it.mdbxDatabaseId != null }
+                )
+            }
         )
-        passwordEntryDao.updatePasswordEntries(normalizedEntries)
     }
 
     suspend fun updatePasswordUpdatedAt(id: Long, updatedAt: java.util.Date) {
@@ -321,19 +364,30 @@ class PasswordRepository(
     }
     
     suspend fun deletePasswordEntry(entry: PasswordEntry) {
-        mdbxRepository?.deletePassword(entry)
-        passwordEntryDao.deletePasswordEntry(entry)
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deletePassword(entry) },
+            roomCommit = { passwordEntryDao.deletePasswordEntry(entry) },
+            rollbackMirror = { mdbxRepository?.upsertPassword(entry) }
+        )
     }
 
     suspend fun deletePasswordEntries(entries: List<PasswordEntry>) {
         if (entries.isEmpty()) return
-        mdbxRepository?.deletePasswords(entries.filter { it.mdbxDatabaseId != null })
-        passwordEntryDao.deletePasswordEntries(entries)
+        val mdbxEntries = entries.filter { it.mdbxDatabaseId != null }
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deletePasswords(mdbxEntries) },
+            roomCommit = { passwordEntryDao.deletePasswordEntries(entries) },
+            rollbackMirror = { mdbxRepository?.upsertPasswords(mdbxEntries) }
+        )
     }
     
     suspend fun deletePasswordEntryById(id: Long) {
-        passwordEntryDao.getPasswordEntryById(id)?.let { mdbxRepository?.deletePassword(it) }
-        passwordEntryDao.deletePasswordEntryById(id)
+        val entry = passwordEntryDao.getPasswordEntryById(id)
+        commitMirrorThenRoom(
+            mirrorCommit = { entry?.let { mdbxRepository?.deletePassword(it) } },
+            roomCommit = { passwordEntryDao.deletePasswordEntryById(id) },
+            rollbackMirror = { entry?.let { mdbxRepository?.upsertPassword(it) } }
+        )
     }
 
     private fun PasswordEntry.mdbxPasswordObjectId(): String =

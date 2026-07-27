@@ -117,7 +117,11 @@ android {
             // 仅输出 ARM 32/64 位两个 APK，不生成 universal 包。
             enable true
             reset()
-            include 'arm64-v8a', 'armeabi-v7a'
+            if (project.hasProperty('includeX86TestAbi')) {
+                include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            } else {
+                include 'arm64-v8a', 'armeabi-v7a'
+            }
             universalApk false
         }
     }

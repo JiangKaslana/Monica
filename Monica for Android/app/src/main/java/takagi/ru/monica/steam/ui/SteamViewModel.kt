@@ -21,7 +21,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import takagi.ru.monica.R
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.repository.MdbxRepository
-import takagi.ru.monica.repository.MdbxVaultStore
+import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.steam.core.SteamTotp
 import takagi.ru.monica.steam.data.SteamAccount
@@ -2232,14 +2232,10 @@ class SteamViewModel(
                     val database = SteamDatabase.getDatabase(appContext)
                     val passwordDatabase = PasswordDatabase.getDatabase(appContext)
                     val securityManager = SecurityManager(appContext)
-                    val mdbxRepository = MdbxVaultStore(
+                    val mdbxRepository = MdbxRepositoryFactory.create(
                         context = appContext,
-                        databaseDao = passwordDatabase.localMdbxDatabaseDao(),
-                        securityManager = securityManager,
-                        remoteSourceDao = passwordDatabase.mdbxRemoteSourceDao(),
-                        passwordEntryDao = passwordDatabase.passwordEntryDao(),
-                        secureItemDao = passwordDatabase.secureItemDao(),
-                        customFieldDao = passwordDatabase.customFieldDao()
+                        database = passwordDatabase,
+                        securityManager = securityManager
                     )
                     return SteamViewModel(
                         appContext = appContext,

@@ -59,7 +59,8 @@ import takagi.ru.monica.keepass.KeePassPasskeyCreateExecutor
 import takagi.ru.monica.keepass.KeePassPasskeyDeleteExecutor
 import takagi.ru.monica.repository.KeePassCompatibilityBridge
 import takagi.ru.monica.repository.KeePassWorkspaceRepository
-import takagi.ru.monica.repository.MdbxVaultStore
+import takagi.ru.monica.repository.MdbxRepository
+import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.repository.MdbxStoredFolderEntry
 import takagi.ru.monica.repository.PasskeyRepository
 import takagi.ru.monica.security.SecurityManager
@@ -115,14 +116,11 @@ class PasskeyCreateActivity : FragmentActivity() {
         BiometricAuthHelper(this)
     }
     
-    private val mdbxVaultStore: MdbxVaultStore by lazy {
-        MdbxVaultStore(
-            applicationContext,
-            database.localMdbxDatabaseDao(),
-            securityManager,
-            database.mdbxRemoteSourceDao(),
-            database.passwordEntryDao(),
-            database.secureItemDao()
+    private val mdbxVaultStore: MdbxRepository by lazy {
+        MdbxRepositoryFactory.create(
+            context = applicationContext,
+            database = database,
+            securityManager = securityManager
         )
     }
 

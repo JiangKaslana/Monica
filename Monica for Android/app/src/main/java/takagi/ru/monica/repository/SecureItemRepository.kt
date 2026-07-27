@@ -189,48 +189,70 @@ class SecureItemRepository(
     }
     
     suspend fun insertItem(item: SecureItem): Long {
-        val id = secureItemDao.insertItem(item)
-        try {
-            val persistedItem = item.copy(
-                id = id,
-                replicaGroupId = if (item.mdbxDatabaseId != null) item.mdbxObjectId(id) else item.replicaGroupId
-            )
-            if (persistedItem.replicaGroupId != item.replicaGroupId) {
-                secureItemDao.updateItem(persistedItem)
+        return commitRoomThenMirror(
+            roomCommit = {
+                val id = secureItemDao.insertItem(item)
+                val persistedItem = item.copy(
+                    id = id,
+                    replicaGroupId = if (item.mdbxDatabaseId != null) item.mdbxObjectId(id) else item.replicaGroupId
+                )
+                if (persistedItem.replicaGroupId != item.replicaGroupId) {
+                    secureItemDao.updateItem(persistedItem)
+                }
+                id to persistedItem
+            },
+            mirrorCommit = { (_, persistedItem) ->
+                mdbxRepository?.upsertSecureItem(persistedItem)
+            },
+            rollbackRoom = { (id, _) -> secureItemDao.deleteItemById(id) },
+            rollbackMirror = { (_, persistedItem) ->
+                mdbxRepository?.deleteSecureItem(persistedItem)
             }
-            mdbxRepository?.upsertSecureItem(persistedItem)
-        } catch (e: Exception) {
-            secureItemDao.deleteItemById(id)
-            throw e
-        }
-        return id
+        ).first
     }
     
     suspend fun updateItem(item: SecureItem) {
         val existingItem = if (item.id != 0L) secureItemDao.getItemById(item.id) else null
         val normalizedItem = BitwardenMutationStateHelper.normalizeSecureItemUpdate(existingItem, item)
-        if (
-            normalizedItem.mdbxDatabaseId != null
-        ) {
-            mdbxRepository?.upsertSecureItem(normalizedItem)
-        }
-        if (
-            existingItem?.mdbxDatabaseId != null &&
-            existingItem.mdbxDatabaseId != normalizedItem.mdbxDatabaseId
-        ) {
-            mdbxRepository?.deleteSecureItem(existingItem)
-        }
-        secureItemDao.updateItem(normalizedItem)
+        commitMirrorThenRoom(
+            mirrorCommit = {
+                if (normalizedItem.mdbxDatabaseId != null) {
+                    mdbxRepository?.upsertSecureItem(normalizedItem)
+                }
+                if (
+                    existingItem?.mdbxDatabaseId != null &&
+                    existingItem.mdbxDatabaseId != normalizedItem.mdbxDatabaseId
+                ) {
+                    mdbxRepository?.deleteSecureItem(existingItem)
+                }
+            },
+            roomCommit = { secureItemDao.updateItem(normalizedItem) },
+            rollbackMirror = {
+                if (normalizedItem.mdbxDatabaseId != null) {
+                    mdbxRepository?.deleteSecureItem(normalizedItem)
+                }
+                if (existingItem?.mdbxDatabaseId != null) {
+                    mdbxRepository?.upsertSecureItem(existingItem)
+                }
+            }
+        )
     }
     
     suspend fun deleteItem(item: SecureItem) {
-        mdbxRepository?.deleteSecureItem(item)
-        secureItemDao.deleteItem(item)
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deleteSecureItem(item) },
+            roomCommit = { secureItemDao.deleteItem(item) },
+            rollbackMirror = { mdbxRepository?.upsertSecureItem(item) }
+        )
     }
     
     suspend fun deleteItemById(id: Long) {
-        secureItemDao.getItemById(id)?.let { mdbxRepository?.deleteSecureItem(it) }
-        secureItemDao.deleteItemById(id)
+        val item = secureItemDao.getItemById(id)
+        commitMirrorThenRoom(
+            mirrorCommit = { item?.let { mdbxRepository?.deleteSecureItem(it) } },
+            roomCommit = { secureItemDao.deleteItemById(id) },
+            rollbackMirror = { item?.let { mdbxRepository?.upsertSecureItem(it) } }
+        )
     }
     
     suspend fun updateFavoriteStatus(id: Long, isFavorite: Boolean) {
@@ -384,9 +406,12 @@ class SecureItemRepository(
             deletedAt = java.util.Date(),
             updatedAt = java.util.Date()
         )
-        secureItemDao.updateItem(deletedItem)
-        mdbxRepository?.upsertSecureItem(deletedItem)
-        return deletedItem
+        return commitRoomThenMirror(
+            roomCommit = { secureItemDao.updateItem(deletedItem); deletedItem },
+            mirrorCommit = { mdbxRepository?.upsertSecureItem(it) },
+            rollbackRoom = { secureItemDao.updateItem(item) },
+            rollbackMirror = { mdbxRepository?.upsertSecureItem(item) }
+        )
     }
     
     /**
@@ -398,9 +423,12 @@ class SecureItemRepository(
             deletedAt = null,
             updatedAt = java.util.Date()
         )
-        secureItemDao.updateItem(restoredItem)
-        mdbxRepository?.upsertSecureItem(restoredItem)
-        return restoredItem
+        return commitRoomThenMirror(
+            roomCommit = { secureItemDao.updateItem(restoredItem); restoredItem },
+            mirrorCommit = { mdbxRepository?.upsertSecureItem(it) },
+            rollbackRoom = { secureItemDao.updateItem(item) },
+            rollbackMirror = { mdbxRepository?.upsertSecureItem(item) }
+        )
     }
     
     /**

@@ -131,6 +131,7 @@ import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.BottomNavContentTab
 import takagi.ru.monica.data.CategorySelectionUiMode
 import takagi.ru.monica.data.ItemType
+import takagi.ru.monica.data.MdbxCapability
 import takagi.ru.monica.data.KeePassSyncPhase
 import takagi.ru.monica.data.KeePassSyncStatus
 import takagi.ru.monica.data.PasskeyEntry
@@ -143,6 +144,7 @@ import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.data.isKeePassOwned
 import takagi.ru.monica.data.isLocalOnlyItem
 import takagi.ru.monica.data.isRemoteSource
+import takagi.ru.monica.data.supports
 import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.data.model.TimelinePasswordLocationState
 import takagi.ru.monica.data.model.TimelineEvent
@@ -430,7 +432,11 @@ fun PasswordListContent(
     ) {
         val database = selectedMdbxDatabase
         val viewModel = mdbxViewModel
-        if (database != null && viewModel != null) {
+        if (
+            database != null &&
+            viewModel != null &&
+            database.supports(MdbxCapability.REMOTE_SYNC)
+        ) {
             MdbxPathSyncState(
                 pendingCount = mdbxPendingSyncCounts[database.id]
                     ?: database.mdbxPathPendingSyncCount(),

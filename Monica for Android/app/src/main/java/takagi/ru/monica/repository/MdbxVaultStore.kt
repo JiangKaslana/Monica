@@ -2493,7 +2493,7 @@ class MdbxVaultStore(
         }
     }
 
-    suspend fun readStoredEntries(databaseId: Long): List<MdbxStoredVaultEntry> =
+    override suspend fun readStoredEntries(databaseId: Long): List<MdbxStoredVaultEntry> =
         withContext(Dispatchers.IO) {
             val dbInfo = databaseDao.getDatabaseById(databaseId)
                 ?: throw IllegalStateException("MDBX vault not found: $databaseId")
@@ -2536,7 +2536,7 @@ class MdbxVaultStore(
             }
         }
 
-    suspend fun readStoredAttachments(databaseId: Long): List<MdbxStoredAttachment> =
+    override suspend fun readStoredAttachments(databaseId: Long): List<MdbxStoredAttachment> =
         withContext(Dispatchers.IO) {
             val dbInfo = databaseDao.getDatabaseById(databaseId)
                 ?: throw IllegalStateException("MDBX vault not found: $databaseId")
@@ -6633,9 +6633,7 @@ class MdbxVaultStore(
     }
 
     private fun passwordObjectId(entry: PasswordEntry): String =
-        entry.replicaGroupId
-            ?.takeIf(::isMdbxPasswordObjectId)
-            ?: "password:${entry.id}"
+        mdbxPasswordObjectId(entry)
 
     private fun legacyPasswordObjectId(entry: PasswordEntry): String? =
         entry.replicaGroupId

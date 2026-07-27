@@ -17,7 +17,7 @@ import takagi.ru.monica.data.bitwarden.BitwardenPendingOperation
 import takagi.ru.monica.repository.KeePassCompatibilityBridge
 import takagi.ru.monica.repository.KeePassWorkspaceRepository
 import takagi.ru.monica.repository.MdbxRepository
-import takagi.ru.monica.repository.MdbxVaultStore
+import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.repository.PasswordRepository
 import takagi.ru.monica.repository.SecureItemRepository
 import takagi.ru.monica.data.OperationLogItemType
@@ -71,14 +71,10 @@ class TrashViewModel(application: Application) : AndroidViewModel(application) {
     
     private val database = PasswordDatabase.getDatabase(application)
     private val securityManager = SecurityManager(application)
-    private val mdbxRepository: MdbxRepository = MdbxVaultStore(
+    private val mdbxRepository: MdbxRepository = MdbxRepositoryFactory.create(
         context = application.applicationContext,
-        databaseDao = database.localMdbxDatabaseDao(),
-        securityManager = securityManager,
-        remoteSourceDao = database.mdbxRemoteSourceDao(),
-        passwordEntryDao = database.passwordEntryDao(),
-        secureItemDao = database.secureItemDao(),
-        customFieldDao = database.customFieldDao(),
+        database = database,
+        securityManager = securityManager
     )
     private val passwordRepository = PasswordRepository(
         passwordEntryDao = database.passwordEntryDao(),

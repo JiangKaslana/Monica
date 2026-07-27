@@ -33,7 +33,7 @@ import takagi.ru.monica.data.addOrReplaceLinkedAppBinding
 import takagi.ru.monica.data.isLinkedToApp
 import takagi.ru.monica.mdbx.MdbxDiagLogger
 import takagi.ru.monica.repository.MdbxRepository
-import takagi.ru.monica.repository.MdbxVaultStore
+import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.repository.PasswordRepository
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.ui.theme.MonicaTheme
@@ -66,14 +66,10 @@ class AutofillSaveActivity : ComponentActivity() {
         database = PasswordDatabase.getDatabase(applicationContext)
         securityManager = SecurityManager(applicationContext)
         settingsManager = SettingsManager(applicationContext)
-        val mdbxRepository: MdbxRepository = MdbxVaultStore(
+        val mdbxRepository: MdbxRepository = MdbxRepositoryFactory.create(
             context = applicationContext,
-            databaseDao = database.localMdbxDatabaseDao(),
-            securityManager = securityManager,
-            remoteSourceDao = database.mdbxRemoteSourceDao(),
-            passwordEntryDao = database.passwordEntryDao(),
-            secureItemDao = database.secureItemDao(),
-            customFieldDao = database.customFieldDao(),
+            database = database,
+            securityManager = securityManager
         )
         passwordRepository = PasswordRepository(
             passwordEntryDao = database.passwordEntryDao(),

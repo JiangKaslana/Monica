@@ -58,23 +58,17 @@ class AttachmentStorage(private val context: Context) {
         val relative = "$uuid.enc"
         val target = File(storageDir, relative)
         val cek = AttachmentCryptoStreams.newCek()
-        val iv = AttachmentCryptoStreams.newIv()
         val digest = MessageDigest.getInstance("SHA-256")
         var plainSize = 0L
 
         try {
             target.outputStream().buffered().use { rawOut ->
-                // 先写 12B IV 作为明文头
-                rawOut.write(iv)
-                AttachmentCryptoStreams.encryptingStream(rawOut, cek, iv).use { cipherOut ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    while (true) {
-                        val read = source.read(buffer)
-                        if (read <= 0) break
-                        cipherOut.write(buffer, 0, read)
-                        digest.update(buffer, 0, read)
-                        plainSize += read
-                    }
+                plainSize = AttachmentCryptoStreams.writeChunkedEncrypted(
+                    source = source,
+                    out = rawOut,
+                    cek = cek
+                ) { buffer, count ->
+                    digest.update(buffer, 0, count)
                 }
             }
         } catch (e: Exception) {
@@ -102,6 +96,13 @@ class AttachmentStorage(private val context: Context) {
             val file = File(storageDir, relativePath)
             if (!file.exists()) throw IOException("Attachment blob missing: $relativePath")
             val raw = file.inputStream().buffered()
+            raw.mark(AttachmentCryptoStreams.chunkedMagicSize())
+            val magic = ByteArray(AttachmentCryptoStreams.chunkedMagicSize())
+            val magicRead = raw.read(magic)
+            if (magicRead == magic.size && AttachmentCryptoStreams.isChunkedMagic(magic)) {
+                return@withContext AttachmentCryptoStreams.chunkedDecryptingStream(raw, cek)
+            }
+            raw.reset()
             val iv = ByteArray(AttachmentCryptoStreams.IV_SIZE)
             if (raw.read(iv) != AttachmentCryptoStreams.IV_SIZE) {
                 raw.close()
@@ -142,6 +143,5 @@ class AttachmentStorage(private val context: Context) {
     companion object {
         private const val TAG = "AttachmentStorage"
         private const val DIR_NAME = "secure_attachments"
-        private const val BUFFER_SIZE = 8 * 1024
     }
 }

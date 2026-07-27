@@ -42,9 +42,11 @@ import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel
 import takagi.ru.monica.data.Category
 import takagi.ru.monica.data.CategorySelectionUiMode
+import takagi.ru.monica.data.MdbxCapability
 import takagi.ru.monica.data.PasswordCardDisplayMode
 import takagi.ru.monica.data.PasswordPageContentType
 import takagi.ru.monica.data.PasswordListQuickFilterItem
+import takagi.ru.monica.data.supports
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.repository.MdbxStoredFolderEntry
 import takagi.ru.monica.security.SecurityManager
@@ -372,7 +374,12 @@ internal fun PasswordListTopSection(
                                     }
                                 )
                             }
-                            if (selectedMdbxDatabaseId != null && mdbxViewModel != null) {
+                            if (
+                                selectedMdbxDatabaseId != null &&
+                                mdbxViewModel != null &&
+                                mdbxDatabases.firstOrNull { it.id == selectedMdbxDatabaseId }
+                                    ?.supports(MdbxCapability.REMOTE_SYNC) == true
+                            ) {
                                 val selectedMdbxDatabase = mdbxDatabases
                                     .firstOrNull { it.id == selectedMdbxDatabaseId }
                                 MdbxSyncTopActionsMenuItem(

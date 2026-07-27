@@ -13,7 +13,8 @@ import takagi.ru.monica.attachments.storage.AttachmentKeyVault
 import takagi.ru.monica.attachments.storage.AttachmentPreviewCache
 import takagi.ru.monica.attachments.storage.AttachmentStorage
 import takagi.ru.monica.data.PasswordDatabase
-import takagi.ru.monica.repository.MdbxVaultStore
+import takagi.ru.monica.repository.MdbxRepository
+import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.utils.KeePassKdbxService
 
@@ -48,7 +49,7 @@ object AttachmentContainer {
     @Volatile private var reconcilerCache: BitwardenAttachmentReconciler? = null
     @Volatile private var keepassReconcilerCache: KeePassAttachmentReconciler? = null
     @Volatile private var facadeCache: AttachmentFacade? = null
-    @Volatile private var mdbxVaultStoreCache: MdbxVaultStore? = null
+    @Volatile private var mdbxVaultStoreCache: MdbxRepository? = null
 
     @Volatile private var keepassServiceOverride: KeePassKdbxService? = null
     @Volatile private var defaultKeePassServiceCache: KeePassKdbxService? = null
@@ -198,17 +199,14 @@ object AttachmentContainer {
             }
         }
 
-    private fun mdbxVaultStore(app: Context): MdbxVaultStore =
+    private fun mdbxVaultStore(app: Context): MdbxRepository =
         mdbxVaultStoreCache ?: synchronized(this) {
             mdbxVaultStoreCache ?: run {
                 val db = PasswordDatabase.getDatabase(app)
-                MdbxVaultStore(
+                MdbxRepositoryFactory.create(
                     context = app,
-                    databaseDao = db.localMdbxDatabaseDao(),
-                    securityManager = SecurityManager(app),
-                    remoteSourceDao = db.mdbxRemoteSourceDao(),
-                    passwordEntryDao = db.passwordEntryDao(),
-                    secureItemDao = db.secureItemDao()
+                    database = db,
+                    securityManager = SecurityManager(app)
                 ).also { mdbxVaultStoreCache = it }
             }
         }

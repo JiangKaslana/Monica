@@ -113,11 +113,13 @@ import takagi.ru.monica.data.CategorySelectionUiMode
 import takagi.ru.monica.data.Category
 import takagi.ru.monica.data.LocalKeePassDatabase
 import takagi.ru.monica.data.LocalMdbxDatabase
+import takagi.ru.monica.data.MdbxCapability
 import takagi.ru.monica.data.PasswordListQuickFilterItem
 import takagi.ru.monica.data.PasswordListTopModule
 import takagi.ru.monica.data.PasswordPageContentType
 import takagi.ru.monica.data.isLocalOnlyItem
 import takagi.ru.monica.data.isLocalOnlyPasskey
+import takagi.ru.monica.data.supports
 import takagi.ru.monica.data.PasskeyEntry
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordDatabase
@@ -1575,7 +1577,11 @@ fun VaultV2Pane(
 	) {
 		val database = selectedMdbxDatabase
 		val viewModel = mdbxViewModel
-		if (database != null && viewModel != null) {
+        if (
+            database != null &&
+            viewModel != null &&
+            database.supports(MdbxCapability.REMOTE_SYNC)
+        ) {
 			MdbxPathSyncState(
 				pendingCount = mdbxPendingSyncCounts[database.id]
 					?: database.mdbxPathPendingSyncCount(),
@@ -2751,7 +2757,11 @@ fun VaultV2Pane(
 									}
 								)
 							}
-							if (selectedMdbxDatabaseId != null && mdbxViewModel != null) {
+                            if (
+                                selectedMdbxDatabaseId != null &&
+                                mdbxViewModel != null &&
+                                selectedMdbxDatabase?.supports(MdbxCapability.REMOTE_SYNC) == true
+                            ) {
 								MdbxSyncTopActionsMenuItem(
 									onClick = {
 										isTopActionsMenuExpanded = false

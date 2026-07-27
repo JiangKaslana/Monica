@@ -28,6 +28,42 @@ enum class MdbxSourceType {
     REMOTE_ONEDRIVE
 }
 
+enum class MdbxEngineType {
+    KOTLIN_MDBX1,
+    RUST_MDBX2;
+
+    companion object {
+        fun fromName(name: String?): MdbxEngineType =
+            entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: KOTLIN_MDBX1
+    }
+}
+
+enum class MdbxCapability {
+    LOCAL_CRUD,
+    EMBEDDED_ATTACHMENTS,
+    EXTERNAL_STORAGE,
+    REMOTE_SYNC,
+    NESTED_FOLDERS,
+    PROJECT_TAGS,
+    DELTA_HISTORY,
+    SNAPSHOTS,
+    CONFLICTS,
+    SYNC_BUNDLES,
+    BENCHMARK
+}
+
+val MdbxEngineType.capabilities: Set<MdbxCapability>
+    get() = when (this) {
+        MdbxEngineType.KOTLIN_MDBX1 -> MdbxCapability.entries.toSet()
+        MdbxEngineType.RUST_MDBX2 -> setOf(
+            MdbxCapability.LOCAL_CRUD,
+            MdbxCapability.EMBEDDED_ATTACHMENTS
+        )
+    }
+
+fun LocalMdbxDatabase.supports(capability: MdbxCapability): Boolean =
+    capability in engineTypeEnum.capabilities
+
 /**
  * Tiga three-mode security model for MDBX vaults.
  *
@@ -104,6 +140,9 @@ data class LocalMdbxDatabase(
     @ColumnInfo(name = "source_id")
     val sourceId: Long? = null,
 
+    @ColumnInfo(name = "engine_type")
+    val engineType: String = MdbxEngineType.KOTLIN_MDBX1.name,
+
     @ColumnInfo(name = "tiga_mode")
     val tigaMode: String = MdbxTigaMode.MULTI.name,
 
@@ -165,6 +204,7 @@ data class LocalMdbxDatabase(
         runCatching { MdbxStorageLocation.valueOf(storageLocation) }.getOrDefault(MdbxStorageLocation.REMOTE_WEBDAV)
     val sourceTypeEnum: MdbxSourceType get() =
         runCatching { MdbxSourceType.valueOf(sourceType) }.getOrDefault(MdbxSourceType.REMOTE_WEBDAV)
+    val engineTypeEnum: MdbxEngineType get() = MdbxEngineType.fromName(engineType)
     val unlockMethodEnum: MdbxUnlockMethod get() = MdbxUnlockMethod.fromStoredValue(unlockMethod)
 }
 

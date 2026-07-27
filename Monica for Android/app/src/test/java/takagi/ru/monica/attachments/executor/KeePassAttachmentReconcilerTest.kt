@@ -182,6 +182,12 @@ class KeePassAttachmentReconcilerTest {
         override suspend fun selectAllLocalPaths(): List<String?> =
             items.map { it.localPath }
 
+        override suspend fun selectLocalPathsByMdbxDatabaseId(databaseId: Long): List<String> =
+            emptyList()
+
+        override suspend fun countByLocalPath(localPath: String): Int =
+            items.count { it.localPath == localPath }
+
         override suspend fun selectAllActiveLocalAttachments(): List<Attachment> =
             items.filter { !it.isDeleted && it.localPath != null && it.wrappedCek != null }
 

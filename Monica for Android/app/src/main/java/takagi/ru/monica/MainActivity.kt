@@ -87,8 +87,8 @@ import takagi.ru.monica.data.dedup.DedupMergeService
 import takagi.ru.monica.repository.PasswordRepository
 import takagi.ru.monica.repository.PasskeyRepository
 import takagi.ru.monica.repository.MdbxRepository
+import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.repository.SecureItemRepository
-import takagi.ru.monica.repository.MdbxVaultStore
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.security.SensitiveFieldMigrationManager
 import takagi.ru.monica.security.lock.MainAppAccessState
@@ -361,14 +361,10 @@ class MainActivity : BaseMonicaActivity() {
         // Initialize dependencies
         val database = PasswordDatabase.getDatabase(this)
         val securityManager = SecurityManager(this)
-        val mdbxRepository: MdbxRepository = MdbxVaultStore(
-            this.applicationContext,
-            database.localMdbxDatabaseDao(),
-            securityManager,
-            database.mdbxRemoteSourceDao(),
-            database.passwordEntryDao(),
-            database.secureItemDao(),
-            database.customFieldDao()
+        val mdbxRepository: MdbxRepository = MdbxRepositoryFactory.create(
+            context = applicationContext,
+            database = database,
+            securityManager = securityManager
         )
         val repository = PasswordRepository(
             database.passwordEntryDao(), 

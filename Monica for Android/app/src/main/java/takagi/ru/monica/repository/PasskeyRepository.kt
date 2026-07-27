@@ -129,16 +129,34 @@ class PasskeyRepository(
      * 保存 Passkey（插入或更新）
      */
     suspend fun savePasskey(passkey: PasskeyEntry) {
-        mdbxRepository?.upsertPasskey(passkey)
-        passkeyDao.insert(protectPrivateKeyForRoom(passkey))
+        val protected = protectPrivateKeyForRoom(passkey)
+        try {
+            commitMirrorThenRoom(
+                mirrorCommit = { mdbxRepository?.upsertPasskey(passkey) },
+                roomCommit = { passkeyDao.insert(protected) },
+                rollbackMirror = { mdbxRepository?.deletePasskey(passkey) }
+            )
+        } catch (error: Throwable) {
+            cleanupPrivateKeyIfUnreferenced(protected.privateKeyAlias)
+            throw error
+        }
     }
     
     /**
      * 批量保存 Passkeys
      */
     suspend fun saveAllPasskeys(passkeys: List<PasskeyEntry>) {
-        mdbxRepository?.upsertPasskeys(passkeys)
-        passkeyDao.insertAll(passkeys.map(::protectPrivateKeyForRoom))
+        val protected = passkeys.map(::protectPrivateKeyForRoom)
+        try {
+            commitMirrorThenRoom(
+                mirrorCommit = { mdbxRepository?.upsertPasskeys(passkeys) },
+                roomCommit = { passkeyDao.insertAll(protected) },
+                rollbackMirror = { mdbxRepository?.deletePasskeys(passkeys) }
+            )
+        } catch (error: Throwable) {
+            protected.forEach { cleanupPrivateKeyIfUnreferenced(it.privateKeyAlias) }
+            throw error
+        }
     }
     
     /**
@@ -151,18 +169,34 @@ class PasskeyRepository(
         } else {
             normalizeBitwardenSyncState(existing, passkey)
         }
-        if (
-            normalized.mdbxDatabaseId != null
-        ) {
-            mdbxRepository?.upsertPasskey(normalized)
+        val protected = protectPrivateKeyForRoom(normalized)
+        try {
+            commitMirrorThenRoom(
+                mirrorCommit = {
+                    if (normalized.mdbxDatabaseId != null) {
+                        mdbxRepository?.upsertPasskey(normalized)
+                    }
+                    if (
+                        existing?.mdbxDatabaseId != null &&
+                        existing.mdbxDatabaseId != normalized.mdbxDatabaseId
+                    ) {
+                        mdbxRepository?.deletePasskey(existing)
+                    }
+                },
+                roomCommit = { passkeyDao.update(protected) },
+                rollbackMirror = {
+                    if (normalized.mdbxDatabaseId != null) {
+                        mdbxRepository?.deletePasskey(normalized)
+                    }
+                    if (existing?.mdbxDatabaseId != null) {
+                        mdbxRepository?.upsertPasskey(existing)
+                    }
+                }
+            )
+        } catch (error: Throwable) {
+            cleanupPrivateKeyIfUnreferenced(protected.privateKeyAlias)
+            throw error
         }
-        if (
-            existing?.mdbxDatabaseId != null &&
-            existing.mdbxDatabaseId != normalized.mdbxDatabaseId
-        ) {
-            mdbxRepository?.deletePasskey(existing)
-        }
-        passkeyDao.update(protectPrivateKeyForRoom(normalized))
     }
 
     suspend fun protectPlaintextPrivateKeys(): Int {
@@ -188,8 +222,8 @@ class PasskeyRepository(
     ) {
         if (recordIds.isEmpty()) return
         val existingPasskeys = recordIds.mapNotNull { passkeyDao.getPasskeyByRecordId(it) }
-        if (databaseId != null) {
-            val passkeysForMdbx = existingPasskeys.map { passkey ->
+        val passkeysForMdbx = if (databaseId != null) {
+            existingPasskeys.map { passkey ->
                 passkey.copy(
                     categoryId = null,
                     mdbxDatabaseId = databaseId,
@@ -202,12 +236,29 @@ class PasskeyRepository(
                     syncStatus = "NONE"
                 )
             }
-            mdbxRepository?.upsertPasskeys(passkeysForMdbx)
+        } else {
+            emptyList()
         }
-        mdbxRepository?.deletePasskeys(
-            existingPasskeys.filter { it.mdbxDatabaseId != null && it.mdbxDatabaseId != databaseId }
+        val previousMdbxPasskeys = existingPasskeys.filter { it.mdbxDatabaseId != null }
+        commitMirrorThenRoom(
+            mirrorCommit = {
+                mdbxRepository?.upsertPasskeys(passkeysForMdbx)
+                mdbxRepository?.deletePasskeys(
+                    previousMdbxPasskeys.filter { it.mdbxDatabaseId != databaseId }
+                )
+            },
+            roomCommit = {
+                passkeyDao.updateMdbxDatabaseForPasskeys(
+                    recordIds,
+                    databaseId,
+                    folderId.takeIf { databaseId != null }
+                )
+            },
+            rollbackMirror = {
+                mdbxRepository?.deletePasskeys(passkeysForMdbx)
+                mdbxRepository?.upsertPasskeys(previousMdbxPasskeys)
+            }
         )
-        passkeyDao.updateMdbxDatabaseForPasskeys(recordIds, databaseId, folderId.takeIf { databaseId != null })
     }
 
     suspend fun syncKeePassPasskeys(
@@ -288,12 +339,15 @@ class PasskeyRepository(
     suspend fun deletePasskeysByRpId(rpId: String) {
         // 获取所有匹配的 Passkey
         val passkeys = passkeyDao.getPasskeysByRpIdSync(rpId)
-        mdbxRepository?.deletePasskeys(passkeys)
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deletePasskeys(passkeys) },
+            roomCommit = { passkeyDao.deleteByRpId(rpId) },
+            rollbackMirror = { mdbxRepository?.upsertPasskeys(passkeys) }
+        )
         for (passkey in passkeys) {
             cleanupPrivateKey(passkey.privateKeyAlias)
             logAudit("PASSKEY_DELETED", "${passkey.credentialId}|rpId=$rpId")
         }
-        passkeyDao.deleteByRpId(rpId)
     }
     
     /**
@@ -302,19 +356,25 @@ class PasskeyRepository(
     suspend fun deleteAllPasskeys() {
         // 获取所有 Passkey
         val passkeys = passkeyDao.getAllPasskeysSync()
-        mdbxRepository?.deletePasskeys(passkeys)
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deletePasskeys(passkeys) },
+            roomCommit = { passkeyDao.deleteAll() },
+            rollbackMirror = { mdbxRepository?.upsertPasskeys(passkeys) }
+        )
         for (passkey in passkeys) {
             cleanupPrivateKey(passkey.privateKeyAlias)
         }
         logAudit("PASSKEY_CLEAR_ALL", "count=${passkeys.size}")
-        passkeyDao.deleteAll()
     }
 
     suspend fun deletePasskeyLocalOnly(passkey: PasskeyEntry) {
-        mdbxRepository?.deletePasskey(passkey)
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deletePasskey(passkey) },
+            roomCommit = { passkeyDao.delete(passkey) },
+            rollbackMirror = { mdbxRepository?.upsertPasskey(passkey) }
+        )
         cleanupPrivateKey(passkey.privateKeyAlias)
         logAudit("PASSKEY_DELETED", "${passkey.credentialId}|rpId=${passkey.rpId}")
-        passkeyDao.delete(passkey)
     }
     
     // ==================== Keystore 管理 ====================
@@ -359,6 +419,13 @@ class PasskeyRepository(
         }
         if (!PasskeyPrivateKeyStore.isProtectedReference(keyReferenceOrAlias)) {
             deletePrivateKey(keyReferenceOrAlias)
+        }
+    }
+
+    private suspend fun cleanupPrivateKeyIfUnreferenced(keyReferenceOrAlias: String) {
+        if (keyReferenceOrAlias.isBlank()) return
+        if (passkeyDao.countByPrivateKeyAlias(keyReferenceOrAlias) == 0) {
+            cleanupPrivateKey(keyReferenceOrAlias)
         }
     }
 

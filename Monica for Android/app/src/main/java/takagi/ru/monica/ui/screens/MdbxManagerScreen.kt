@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
@@ -65,16 +66,23 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import takagi.ru.monica.R
 import takagi.ru.monica.data.LocalMdbxDatabase
+import takagi.ru.monica.data.MdbxCapability
+import takagi.ru.monica.data.MdbxEngineType
 import takagi.ru.monica.data.MdbxSourceType
 import takagi.ru.monica.data.MdbxTigaMode
+import takagi.ru.monica.data.supports
 import takagi.ru.monica.repository.MdbxConflictResolution
 import takagi.ru.monica.repository.MdbxConflictSummary
 import takagi.ru.monica.repository.MdbxCommitDiff
 import takagi.ru.monica.repository.MdbxDeltaSummary
+import takagi.ru.monica.repository.MdbxMigrationBlockerKind
+import takagi.ru.monica.repository.MdbxMigrationWarningKind
 import takagi.ru.monica.repository.MdbxSnapshotSummary
 import takagi.ru.monica.repository.MdbxStructureNode
 import takagi.ru.monica.repository.MdbxStructureNodeStatus
@@ -99,6 +107,7 @@ fun MdbxManagerScreen(
 ) {
     val databases by viewModel.allDatabases.collectAsState()
     val operationState by viewModel.operationState.collectAsState()
+    val migrationState by viewModel.migrationState.collectAsState()
     val conflictCounts by viewModel.conflictCounts.collectAsState()
     val vaultDiagnostics by viewModel.vaultDiagnostics.collectAsState()
     val conflictDialogState by viewModel.conflictDialogState.collectAsState()
@@ -392,6 +401,17 @@ fun MdbxManagerScreen(
                                 viewModel.refreshVaultDiagnostics(listOf(db))
                                 page = MdbxManagerPage.Maintenance(db.id, current.source)
                             },
+                            onMigrate = if (
+                                db.engineTypeEnum == MdbxEngineType.KOTLIN_MDBX1 &&
+                                db.sourceTypeEnum in setOf(
+                                    MdbxSourceType.LOCAL_INTERNAL,
+                                    MdbxSourceType.LOCAL_EXTERNAL
+                                )
+                            ) {
+                                { viewModel.prepareMdbx2Migration(db.id) }
+                            } else {
+                                null
+                            },
                             onSetDefault = { viewModel.setAsDefault(db.id) },
                             onDelete = { showDeleteDialog = db }
                         )
@@ -482,6 +502,8 @@ fun MdbxManagerScreen(
                         MdbxMaintenancePage(
                             database = db,
                             diagnostics = vaultDiagnostics[db.id],
+                            allowSync = db.supports(MdbxCapability.REMOTE_SYNC),
+                            allowPendingUpload = db.supports(MdbxCapability.REMOTE_SYNC),
                             onRefreshDiagnostics = { viewModel.refreshVaultDiagnostics(listOf(db)) },
                             onSync = { viewModel.syncVault(db.id) },
                             onFlushPendingUpload = { viewModel.flushPendingVaultUpload(db.id) }
@@ -508,6 +530,17 @@ fun MdbxManagerScreen(
 
         }
     }
+
+    MdbxMigrationDialog(
+        state = migrationState,
+        onDismiss = viewModel::dismissMdbxMigration,
+        onStart = viewModel::startMdbx2Migration,
+        onRetryPreflight = viewModel::prepareMdbx2Migration,
+        onOpenTarget = { targetDatabaseId ->
+            viewModel.dismissMdbxMigration()
+            page = MdbxManagerPage.Detail(targetDatabaseId, MdbxManagerSource.LOCAL)
+        }
+    )
 
     showDeleteDialog?.let { db ->
         AlertDialog(
@@ -539,6 +572,251 @@ fun MdbxManagerScreen(
             }
         )
     }
+}
+
+@Composable
+private fun MdbxMigrationDialog(
+    state: MdbxViewModel.MdbxMigrationState,
+    onDismiss: () -> Unit,
+    onStart: (Long, String, String) -> Unit,
+    onRetryPreflight: (Long) -> Unit,
+    onOpenTarget: (Long) -> Unit
+) {
+    when (state) {
+        MdbxViewModel.MdbxMigrationState.Hidden -> Unit
+        is MdbxViewModel.MdbxMigrationState.Preparing -> {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("检查迁移内容") },
+                text = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        Text("正在读取源数据库并检查条目与附件")
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+        is MdbxViewModel.MdbxMigrationState.Ready -> {
+            val preview = state.preview
+            var targetName by remember(preview.sourceDatabaseId) {
+                mutableStateOf(preview.suggestedTargetName)
+            }
+            var password by remember(preview.sourceDatabaseId) { mutableStateOf("") }
+            var confirmPassword by remember(preview.sourceDatabaseId) { mutableStateOf("") }
+            var passwordVisible by remember(preview.sourceDatabaseId) { mutableStateOf(false) }
+            val passwordsMatch = password.isNotEmpty() && password == confirmPassword
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("迁移到 MDBX2") },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 520.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "源数据库将保持原状，并创建一个独立的 MDBX2 本地数据库。",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        HorizontalDivider()
+                        MigrationSummaryLine("文件夹", preview.folderCount.toString())
+                        MigrationSummaryLine("有效条目", preview.activeEntryCount.toString())
+                        MigrationSummaryLine("删除记录", preview.deletedEntryCount.toString())
+                        MigrationSummaryLine(
+                            "附件",
+                            "${preview.attachmentCount} 个 · ${formatBytes(preview.attachmentBytes)}"
+                        )
+                        preview.warnings.forEach { warning ->
+                            MigrationNoticeLine(
+                                icon = Icons.Default.Info,
+                                text = migrationWarningText(warning.kind, warning.count),
+                                isError = false
+                            )
+                        }
+                        preview.blockers.forEach { blocker ->
+                            MigrationNoticeLine(
+                                icon = Icons.Default.Warning,
+                                text = migrationBlockerText(blocker.kind, blocker.count),
+                                isError = true
+                            )
+                        }
+                        OutlinedTextField(
+                            value = targetName,
+                            onValueChange = { targetName = it },
+                            label = { Text("新数据库名称") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("新数据库密码") },
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(Icons.Default.Visibility, contentDescription = "显示密码")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = confirmPassword,
+                            onValueChange = { confirmPassword = it },
+                            label = { Text("确认密码") },
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            isError = confirmPassword.isNotEmpty() && !passwordsMatch,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = preview.isEligible && targetName.isNotBlank() && passwordsMatch,
+                        onClick = { onStart(preview.sourceDatabaseId, targetName, password) }
+                    ) {
+                        Text("开始迁移")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                }
+            )
+        }
+        is MdbxViewModel.MdbxMigrationState.Running -> {
+            val progress = if (state.total > 0) {
+                (state.completed.toFloat() / state.total.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("正在迁移") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(migrationStageText(state.stage))
+                        if (state.total > 0) {
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                "${state.completed} / ${state.total}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+        is MdbxViewModel.MdbxMigrationState.Success -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("迁移完成") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("已创建 ${state.targetName}，源数据库仍然保留。")
+                        MigrationSummaryLine("文件夹", state.verification.folderCount.toString())
+                        MigrationSummaryLine("条目", state.verification.entryCount.toString())
+                        MigrationSummaryLine(
+                            "附件",
+                            "${state.verification.attachmentCount} 个 · ${formatBytes(state.verification.attachmentBytes)}"
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { onOpenTarget(state.targetDatabaseId) }) {
+                        Text("打开新数据库")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) { Text("完成") }
+                }
+            )
+        }
+        is MdbxViewModel.MdbxMigrationState.Error -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("迁移失败") },
+                text = { Text(state.message) },
+                confirmButton = {
+                    TextButton(onClick = { onRetryPreflight(state.sourceDatabaseId) }) {
+                        Text("重新检查")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) { Text("关闭") }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun MigrationSummaryLine(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun MigrationNoticeLine(icon: ImageVector, text: String, isError: Boolean) {
+    val color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = color)
+    }
+}
+
+private fun migrationWarningText(kind: MdbxMigrationWarningKind, count: Int): String = when (kind) {
+    MdbxMigrationWarningKind.NESTED_FOLDERS_FLATTENED -> "$count 个嵌套文件夹将使用完整名称平铺"
+    MdbxMigrationWarningKind.IMPLICIT_FOLDERS_CREATED -> "$count 个条目引用的目录将自动补建"
+    MdbxMigrationWarningKind.UNKNOWN_ENTRY_TYPES_COPIED -> "$count 个未知类型条目会保留原始数据"
+    MdbxMigrationWarningKind.DELETED_ENTRIES_COPIED -> "$count 条删除记录会保留为删除状态"
+    MdbxMigrationWarningKind.DELETED_ATTACHMENTS_IGNORED -> "$count 个已删除附件不会复制"
+}
+
+private fun migrationBlockerText(kind: MdbxMigrationBlockerKind, count: Int): String = when (kind) {
+    MdbxMigrationBlockerKind.SOURCE_ENGINE_UNSUPPORTED -> "仅支持从 MDBX1 迁移"
+    MdbxMigrationBlockerKind.SOURCE_LOCATION_UNSUPPORTED -> "仅支持本地数据库"
+    MdbxMigrationBlockerKind.DUPLICATE_FOLDER_ID -> "存在 $count 个重复文件夹标识"
+    MdbxMigrationBlockerKind.FOLDER_CYCLE -> "存在 $count 个循环文件夹关系"
+    MdbxMigrationBlockerKind.DUPLICATE_ENTRY_ID -> "存在 $count 个重复条目标识"
+    MdbxMigrationBlockerKind.INVALID_ENTRY_PAYLOAD -> "存在 $count 个无效条目载荷"
+    MdbxMigrationBlockerKind.DUPLICATE_ATTACHMENT_ID -> "存在 $count 个重复附件标识"
+    MdbxMigrationBlockerKind.ATTACHMENT_TOO_LARGE -> "存在 $count 个超过 64 MiB 的附件"
+    MdbxMigrationBlockerKind.ATTACHMENT_KEY_MISSING -> "存在 $count 个缺少内容密钥的附件"
+    MdbxMigrationBlockerKind.ATTACHMENT_PARENT_MISSING -> "存在 $count 个找不到父条目的附件"
+}
+
+private fun migrationStageText(stage: MdbxViewModel.MdbxMigrationStage): String = when (stage) {
+    MdbxViewModel.MdbxMigrationStage.PREFLIGHT -> "重新检查源数据库"
+    MdbxViewModel.MdbxMigrationStage.FOLDERS -> "创建文件夹"
+    MdbxViewModel.MdbxMigrationStage.ENTRIES -> "复制条目"
+    MdbxViewModel.MdbxMigrationStage.ATTACHMENTS -> "复制附件"
+    MdbxViewModel.MdbxMigrationStage.VERIFYING -> "重开并校验 MDBX2 数据"
+    MdbxViewModel.MdbxMigrationStage.IMPORTING -> "更新 Monica 数据索引"
 }
 
 private enum class MdbxManagerSource {
@@ -879,11 +1157,16 @@ private fun MdbxVaultDetailPage(
     onShowSnapshots: () -> Unit,
     onShowCommitHistory: () -> Unit,
     onShowMaintenance: () -> Unit,
+    onMigrate: (() -> Unit)?,
     onSetDefault: () -> Unit,
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
     val tigaLabel = runCatching { MdbxTigaMode.valueOf(database.tigaMode).label }.getOrDefault(database.tigaMode)
+    val supportsSync = database.supports(MdbxCapability.REMOTE_SYNC)
+    val supportsConflicts = database.supports(MdbxCapability.CONFLICTS)
+    val supportsSnapshots = database.supports(MdbxCapability.SNAPSHOTS)
+    val supportsHistory = database.supports(MdbxCapability.DELTA_HISTORY)
     val healthIssueCount = diagnostics?.healthIssueCount ?: 0
     val hasUnavailableCopy = diagnostics?.isReadable == false
 
@@ -934,7 +1217,7 @@ private fun MdbxVaultDetailPage(
                             }
                         }
                         Text(
-                            "Tiga: $tigaLabel · ${mdbxSourceLabel(database)}",
+                            "${database.engineTypeEnum.displayName()} · Tiga: $tigaLabel · ${mdbxSourceLabel(database)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -957,9 +1240,17 @@ private fun MdbxVaultDetailPage(
             ) {
                 StatusTile(
                     modifier = Modifier.weight(1f),
-                    icon = if (conflictCount > 0) Icons.AutoMirrored.Filled.CallMerge else Icons.Default.CheckCircle,
+                    icon = if (!supportsConflicts) {
+                        Icons.Default.Info
+                    } else if (conflictCount > 0) {
+                        Icons.AutoMirrored.Filled.CallMerge
+                    } else {
+                        Icons.Default.CheckCircle
+                    },
                     label = stringResource(R.string.mdbx_status_conflicts),
-                    value = if (conflictCount > 0) {
+                    value = if (!supportsConflicts) {
+                        "不支持"
+                    } else if (conflictCount > 0) {
                         stringResource(R.string.mdbx_conflict_count_short, conflictCount)
                     } else {
                         stringResource(R.string.mdbx_no_conflicts_short)
@@ -987,9 +1278,11 @@ private fun MdbxVaultDetailPage(
             ) {
                 StatusTile(
                     modifier = Modifier.weight(1f),
-                    icon = Icons.Default.History,
+                    icon = if (supportsHistory) Icons.Default.History else Icons.Default.Info,
                     label = stringResource(R.string.mdbx_status_delta),
-                    value = diagnostics?.let {
+                    value = if (!supportsHistory) {
+                        "不支持"
+                    } else diagnostics?.let {
                         stringResource(R.string.mdbx_commit_tombstone_short, it.commitCount, it.tombstoneCount)
                     } ?: stringResource(R.string.mdbx_status_loading),
                     isWarning = false
@@ -1074,11 +1367,16 @@ private fun MdbxVaultDetailPage(
             MdbxDetailActionList(
                 isDefault = isDefault,
                 conflictCount = conflictCount,
+                allowSync = supportsSync,
+                allowConflicts = supportsConflicts,
+                allowSnapshots = supportsSnapshots,
+                allowCommitHistory = supportsHistory,
                 onSync = onSync,
                 onShowConflicts = onShowConflicts,
                 onShowSnapshots = onShowSnapshots,
                 onShowCommitHistory = onShowCommitHistory,
                 onShowMaintenance = onShowMaintenance,
+                onMigrate = onMigrate,
                 onSetDefault = onSetDefault,
                 onDelete = onDelete
             )
@@ -1090,11 +1388,16 @@ private fun MdbxVaultDetailPage(
 private fun MdbxDetailActionList(
     isDefault: Boolean,
     conflictCount: Int,
+    allowSync: Boolean,
+    allowConflicts: Boolean,
+    allowSnapshots: Boolean,
+    allowCommitHistory: Boolean,
     onSync: () -> Unit,
     onShowConflicts: () -> Unit,
     onShowSnapshots: () -> Unit,
     onShowCommitHistory: () -> Unit,
     onShowMaintenance: () -> Unit,
+    onMigrate: (() -> Unit)?,
     onSetDefault: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -1104,18 +1407,30 @@ private fun MdbxDetailActionList(
                 MdbxNavigationActionRow(Icons.Default.Star, stringResource(R.string.mdbx_set_default), onSetDefault)
                 HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
             }
-            MdbxNavigationActionRow(Icons.Default.Sync, "同步", onSync)
-            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
-            MdbxNavigationActionRow(
-                Icons.AutoMirrored.Filled.CallMerge,
-                if (conflictCount > 0) "冲突管理($conflictCount)" else "冲突管理",
-                onShowConflicts
-            )
-            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
-            MdbxNavigationActionRow(Icons.Default.Restore, "快照", onShowSnapshots)
-            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
-            MdbxNavigationActionRow(Icons.Default.History, "提交历史", onShowCommitHistory)
-            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+            if (allowSync) {
+                MdbxNavigationActionRow(Icons.Default.Sync, "同步", onSync)
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+            }
+            if (allowConflicts) {
+                MdbxNavigationActionRow(
+                    Icons.AutoMirrored.Filled.CallMerge,
+                    if (conflictCount > 0) "冲突管理($conflictCount)" else "冲突管理",
+                    onShowConflicts
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+            }
+            if (allowSnapshots) {
+                MdbxNavigationActionRow(Icons.Default.Restore, "快照", onShowSnapshots)
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+            }
+            if (allowCommitHistory) {
+                MdbxNavigationActionRow(Icons.Default.History, "提交历史", onShowCommitHistory)
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+            }
+            onMigrate?.let { migrate ->
+                MdbxNavigationActionRow(Icons.Default.SwapHoriz, "迁移到 MDBX2", migrate)
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+            }
             MdbxNavigationActionRow(Icons.Default.ReportProblem, "诊断 / 维护", onShowMaintenance)
             HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
             MdbxNavigationActionRow(
@@ -1621,6 +1936,8 @@ private fun MdbxAdvancedToolsPage(
 private fun MdbxMaintenancePage(
     database: LocalMdbxDatabase,
     diagnostics: MdbxVaultDiagnostics?,
+    allowSync: Boolean,
+    allowPendingUpload: Boolean,
     onRefreshDiagnostics: () -> Unit,
     onSync: () -> Unit,
     onFlushPendingUpload: () -> Unit
@@ -1646,6 +1963,8 @@ private fun MdbxMaintenancePage(
 
         item {
             MaintenanceActionPanel(
+                allowSync = allowSync,
+                allowPendingUpload = allowPendingUpload,
                 onRefreshDiagnostics = onRefreshDiagnostics,
                 onSync = onSync,
                 onFlushPendingUpload = onFlushPendingUpload
@@ -1701,6 +2020,8 @@ private fun MdbxMaintenancePage(
 
 @Composable
 private fun MaintenanceActionPanel(
+    allowSync: Boolean,
+    allowPendingUpload: Boolean,
     onRefreshDiagnostics: () -> Unit,
     onSync: () -> Unit,
     onFlushPendingUpload: () -> Unit
@@ -1717,25 +2038,34 @@ private fun MaintenanceActionPanel(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("刷新")
                 }
-                OutlinedButton(
-                    onClick = onSync,
-                    modifier = Modifier.weight(1f).heightIn(min = 44.dp)
-                ) {
-                    Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("同步")
+                if (allowSync) {
+                    OutlinedButton(
+                        onClick = onSync,
+                        modifier = Modifier.weight(1f).heightIn(min = 44.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("同步")
+                    }
                 }
             }
-            FilledTonalButton(
-                onClick = onFlushPendingUpload,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)
-            ) {
-                Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("上传待处理写入")
+            if (allowPendingUpload) {
+                FilledTonalButton(
+                    onClick = onFlushPendingUpload,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                ) {
+                    Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("上传待处理写入")
+                }
             }
         }
     }
+}
+
+private fun MdbxEngineType.displayName(): String = when (this) {
+    MdbxEngineType.KOTLIN_MDBX1 -> "MDBX1"
+    MdbxEngineType.RUST_MDBX2 -> "MDBX2"
 }
 
 @Composable

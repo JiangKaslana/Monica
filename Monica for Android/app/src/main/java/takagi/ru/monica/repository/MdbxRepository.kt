@@ -17,6 +17,11 @@ import takagi.ru.monica.data.SecureItem
  * and ViewModel code do not grow their own MDBX table behavior.
  */
 interface MdbxRepository {
+    suspend fun requiresStrictMutationConsistency(databaseId: Long): Boolean = false
+
+    suspend fun readStoredEntries(databaseId: Long): List<MdbxStoredVaultEntry>
+    suspend fun readStoredAttachments(databaseId: Long): List<MdbxStoredAttachment>
+
     suspend fun createFolder(
         databaseId: Long,
         name: String,

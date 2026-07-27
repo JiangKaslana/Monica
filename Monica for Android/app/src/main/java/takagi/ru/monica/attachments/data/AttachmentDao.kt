@@ -95,6 +95,20 @@ interface AttachmentDao {
     @Query("SELECT local_path FROM attachments WHERE local_path IS NOT NULL")
     suspend fun selectAllLocalPaths(): List<String?>
 
+    @Query(
+        """
+        SELECT DISTINCT attachments.local_path FROM attachments
+        INNER JOIN password_entries
+            ON password_entries.id = attachments.parent_password_id
+        WHERE password_entries.mdbx_database_id = :databaseId
+          AND attachments.local_path IS NOT NULL
+        """
+    )
+    suspend fun selectLocalPathsByMdbxDatabaseId(databaseId: Long): List<String>
+
+    @Query("SELECT COUNT(*) FROM attachments WHERE local_path = :localPath")
+    suspend fun countByLocalPath(localPath: String): Int
+
     /** 列出所有未软删除且本地已下载（有 local_path 与 wrappedCek）的附件，供备份 / 迁移使用。 */
     @Query(
         """

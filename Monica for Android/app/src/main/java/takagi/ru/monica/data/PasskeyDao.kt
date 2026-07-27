@@ -409,6 +409,9 @@ interface PasskeyDao {
     @Query("SELECT * FROM passkeys WHERE mdbx_database_id = :databaseId ORDER BY last_used_at DESC")
     suspend fun getByMdbxDatabaseId(databaseId: Long): List<PasskeyEntry>
 
+    @Query("SELECT COUNT(*) FROM passkeys WHERE private_key_alias = :keyReference")
+    suspend fun countByPrivateKeyAlias(keyReference: String): Int
+
     @Query("DELETE FROM passkeys WHERE mdbx_database_id = :databaseId")
     suspend fun deleteAllByMdbxDatabaseId(databaseId: Long)
 

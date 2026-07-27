@@ -690,6 +690,8 @@ external fun uniffi_mdbx_ffi_checksum_func_default_write_operation_limits(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_create_attachment_with_content(
 ): Short
+external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_create_attachment_with_external_content(
+): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_delete_attachment(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_execute_attachment_batch(
@@ -707,6 +709,8 @@ external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_read_attachment_content(
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_rename_attachment(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_replace_attachment_content(
+): Short
+external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_replace_attachment_external_content(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_verify_attachment_integrity(
 ): Short
@@ -1076,6 +1080,8 @@ external fun uniffi_mdbx_ffi_fn_free_mdbxvault(`handle`: Long,uniffi_out_err: Un
 ): Unit
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_create_attachment_with_content(`ptr`: Long,`operationId`: RustBuffer.ByValue,`request`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`limits`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_mdbx_ffi_fn_method_mdbxvault_create_attachment_with_external_content(`ptr`: Long,`operationId`: RustBuffer.ByValue,`request`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`limits`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_delete_attachment(`ptr`: Long,`attachmentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_execute_attachment_batch(`ptr`: Long,`operationId`: RustBuffer.ByValue,`commands`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1093,6 +1099,8 @@ external fun uniffi_mdbx_ffi_fn_method_mdbxvault_read_attachment_content(`ptr`: 
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_rename_attachment(`ptr`: Long,`attachmentId`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`mediaType`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_replace_attachment_content(`ptr`: Long,`operationId`: RustBuffer.ByValue,`attachmentId`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`limits`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_mdbx_ffi_fn_method_mdbxvault_replace_attachment_external_content(`ptr`: Long,`operationId`: RustBuffer.ByValue,`attachmentId`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`limits`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_verify_attachment_integrity(`ptr`: Long,`attachmentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
@@ -1697,6 +1705,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_create_attachment_with_content() != 62473.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_create_attachment_with_external_content() != 49999.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_delete_attachment() != 36945.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1722,6 +1733,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_replace_attachment_content() != 22542.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_replace_attachment_external_content() != 32237.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_verify_attachment_integrity() != 60826.toShort()) {
@@ -4032,6 +4046,14 @@ public interface MdbxVaultInterface {
     
     fun `createAttachmentWithContent`(`operationId`: kotlin.String, `request`: MdbxAttachmentCreateRequest, `content`: kotlin.ByteArray, `limits`: MdbxAttachmentContentLimits): MdbxAttachmentWriteResult
     
+    /**
+     * Store attachment ciphertext in the vault's content-addressed Blob sidecar.
+     *
+     * The transactional state delta contains only encrypted Blob references, so
+     * maximum-size attachments do not inflate the delta payload.
+     */
+    fun `createAttachmentWithExternalContent`(`operationId`: kotlin.String, `request`: MdbxAttachmentCreateRequest, `content`: kotlin.ByteArray, `limits`: MdbxAttachmentContentLimits): MdbxAttachmentWriteResult
+
     fun `deleteAttachment`(`attachmentId`: kotlin.String)
     
     fun `executeAttachmentBatch`(`operationId`: kotlin.String, `commands`: List<MdbxAttachmentBatchCommand>): MdbxAttachmentBatchResult
@@ -4050,6 +4072,8 @@ public interface MdbxVaultInterface {
     
     fun `replaceAttachmentContent`(`operationId`: kotlin.String, `attachmentId`: kotlin.String, `content`: kotlin.ByteArray, `limits`: MdbxAttachmentContentLimits): MdbxAttachmentWriteResult
     
+    fun `replaceAttachmentExternalContent`(`operationId`: kotlin.String, `attachmentId`: kotlin.String, `content`: kotlin.ByteArray, `limits`: MdbxAttachmentContentLimits): MdbxAttachmentWriteResult
+
     fun `verifyAttachmentIntegrity`(`attachmentId`: kotlin.String): kotlin.Boolean
     
     /**
@@ -4539,7 +4563,27 @@ open class MdbxVault: Disposable, AutoCloseable, MdbxVaultInterface
     }
     )
     }
+
+
     
+    /**
+     * Store attachment ciphertext in the vault's content-addressed Blob sidecar.
+     *
+     * The transactional state delta contains only encrypted Blob references, so
+     * maximum-size attachments do not inflate the delta payload.
+     */
+    @Throws(MdbxFfiException::class)override fun `createAttachmentWithExternalContent`(`operationId`: kotlin.String, `request`: MdbxAttachmentCreateRequest, `content`: kotlin.ByteArray, `limits`: MdbxAttachmentContentLimits): MdbxAttachmentWriteResult {
+            return FfiConverterTypeMdbxAttachmentWriteResult.lift(
+    callWithHandle {
+    uniffiRustCallWithError(MdbxFfiException) { _status ->
+    UniffiLib.uniffi_mdbx_ffi_fn_method_mdbxvault_create_attachment_with_external_content(
+        it,
+        FfiConverterString.lower(`operationId`),FfiConverterTypeMdbxAttachmentCreateRequest.lower(`request`),FfiConverterByteArray.lower(`content`),FfiConverterTypeMdbxAttachmentContentLimits.lower(`limits`),_status)
+}
+    }
+    )
+    }
+
 
     
     @Throws(MdbxFfiException::class)override fun `deleteAttachment`(`attachmentId`: kotlin.String)
@@ -4667,6 +4711,20 @@ open class MdbxVault: Disposable, AutoCloseable, MdbxVaultInterface
     
 
     
+    @Throws(MdbxFfiException::class)override fun `replaceAttachmentExternalContent`(`operationId`: kotlin.String, `attachmentId`: kotlin.String, `content`: kotlin.ByteArray, `limits`: MdbxAttachmentContentLimits): MdbxAttachmentWriteResult {
+            return FfiConverterTypeMdbxAttachmentWriteResult.lift(
+    callWithHandle {
+    uniffiRustCallWithError(MdbxFfiException) { _status ->
+    UniffiLib.uniffi_mdbx_ffi_fn_method_mdbxvault_replace_attachment_external_content(
+        it,
+        FfiConverterString.lower(`operationId`),FfiConverterString.lower(`attachmentId`),FfiConverterByteArray.lower(`content`),FfiConverterTypeMdbxAttachmentContentLimits.lower(`limits`),_status)
+}
+    }
+    )
+    }
+
+
+
     @Throws(MdbxFfiException::class)override fun `verifyAttachmentIntegrity`(`attachmentId`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithHandle {
@@ -16082,5 +16140,3 @@ public object FfiConverterSequenceTypeMdbxWriteCommand: FfiConverterRustBuffer<L
     )
     }
     
-
-
