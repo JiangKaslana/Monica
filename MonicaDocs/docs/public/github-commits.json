@@ -1,16 +1,12 @@
 {
   "repo": "Monica-Pass/Monica",
   "repoUrl": "https://github.com/Monica-Pass/Monica",
-  "generatedAt": "2026-07-27T21:29:08.848Z",
+  "generatedAt": "2026-07-28T21:31:03.978Z",
   "range": {
-    "from": "2025-07-28",
-    "to": "2026-07-27"
+    "from": "2025-07-29",
+    "to": "2026-07-28"
   },
   "activity": [
-    {
-      "date": "2025-07-28",
-      "count": 0
-    },
     {
       "date": "2025-07-29",
       "count": 0
@@ -1466,9 +1462,22 @@
     {
       "date": "2026-07-27",
       "count": 3
+    },
+    {
+      "date": "2026-07-28",
+      "count": 1
     }
   ],
   "latest": [
+    {
+      "sha": "0174c9466fddeaa9ef49f5d0f21d056912eeb449",
+      "shortSha": "0174c94",
+      "message": "docs: update Afdian sponsor list",
+      "authorName": "github-actions[bot]",
+      "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "date": "2026-07-28T05:26:30Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/0174c9466fddeaa9ef49f5d0f21d056912eeb449"
+    },
     {
       "sha": "1496f06dd1ac665236d4e60471e536c619f9d1e4",
       "shortSha": "1496f06",
@@ -1549,15 +1558,6 @@
       "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
       "date": "2026-07-26T15:18:46Z",
       "url": "https://github.com/Monica-Pass/Monica/commit/bff24388f6032aecc6bc3e66b32b32221c5c53d5"
-    },
-    {
-      "sha": "8f2f84007f297edff330aacf5c5b0451a83f0586",
-      "shortSha": "8f2f840",
-      "message": "feat(backup): 本地 ZIP 导出支持可选加密",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-26T14:57:07Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/8f2f84007f297edff330aacf5c5b0451a83f0586"
     }
   ]
 }
