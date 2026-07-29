@@ -505,6 +505,9 @@ class MultiPasswordSaveRegressionGuardTest {
         val managerSource = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/screens/MdbxManagerScreen.kt"
         ).readText()
+        val revertCommitBody = viewModelSource
+            .substringAfter("fun revertCommit(")
+            .substringBefore("fun resolveConflict(")
 
         assertTrue(
             "MDBX history must store per-object versions so Diff/Revert are real, not just commit metadata.",
@@ -542,11 +545,11 @@ class MultiPasswordSaveRegressionGuardTest {
             viewModelSource.contains("fun showCommitDiff(")
         )
         assertTrue(
-            "ViewModel must expose revert and re-import MDBX entries after reverting.",
+            "ViewModel must expose revert and rebuild the Room mirror from the reverted MDBX state without rescuing deleted rows.",
             viewModelSource.contains("fun revertCommit(") &&
-                viewModelSource.substringAfter("fun revertCommit(")
-                    .substringBefore("fun resolveConflict(")
-                    .contains("importEntriesFromVault(databaseId)")
+                revertCommitBody.contains("importEntriesFromVault(") &&
+                revertCommitBody.contains("databaseId,") &&
+                revertCommitBody.contains("orphanPolicy = MdbxImportOrphanPolicy.APPLY_REMOTE_STATE")
         )
         assertTrue(
             "History UI must expose Diff and Revert controls.",
@@ -732,6 +735,9 @@ class MultiPasswordSaveRegressionGuardTest {
         val vaultV2Source = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/vaultv2/VaultV2Pane.kt"
         ).readText()
+        val activePreloadBody = viewModelSource
+            .substringAfter("fun preloadActiveMdbxDatabase(databaseId: Long)")
+            .substringBefore("// --- WebDAV connection ---")
 
         assertTrue(
             "MDBX should remember the active vault across process restarts without adding a Room migration.",
@@ -741,17 +747,18 @@ class MultiPasswordSaveRegressionGuardTest {
                 viewModelSource.contains("fun activateMdbxDatabase(databaseId: Long)")
         )
         assertTrue(
-            "MDBX active preload must be single-vault and cancellable so many configured vaults do not all open at once.",
+            "MDBX active preload must be single-vault and cancellable, and only the selected MDBX2 vault may refresh its Room mirror.",
             viewModelSource.contains("private var activePreloadJob: Job? = null") &&
                 viewModelSource.contains("private var activePreloadDatabaseId: Long? = null") &&
                 viewModelSource.contains("activePreloadJob?.cancel()") &&
                 viewModelSource.contains("fun preloadActiveMdbxDatabase(databaseId: Long)") &&
-                viewModelSource.contains("vaultStore.getVaultDiagnostics(database.id)") &&
-                viewModelSource.contains("vaultStore.listDeltaHistory(database.id)") &&
-                viewModelSource.contains("vaultStore.listSnapshots(database.id)") &&
-                !viewModelSource.substringAfter("fun preloadActiveMdbxDatabase(databaseId: Long)")
-                    .substringBefore("// --- WebDAV connection ---")
-                    .contains("importEntriesFromVault(")
+                activePreloadBody.contains("val database = databaseDao.getDatabaseById(databaseId)") &&
+                activePreloadBody.contains("if (database.engineTypeEnum == MdbxEngineType.RUST_MDBX2)") &&
+                activePreloadBody.contains("importEntriesFromVault(database.id)") &&
+                activePreloadBody.contains("vaultStore.getVaultDiagnostics(database.id)") &&
+                activePreloadBody.contains("vaultStore.listDeltaHistory(database.id)") &&
+                activePreloadBody.contains("vaultStore.listSnapshots(database.id)") &&
+                !activePreloadBody.contains("databases.forEach")
         )
         assertTrue(
             "MDBX manager should stay on the format-management hub and only activate vaults after the user opens or navigates to them.",
@@ -1924,7 +1931,10 @@ class MultiPasswordSaveRegressionGuardTest {
             mixedBatchSource.contains("val targetMdbxFolderId = when (target)") &&
                 mixedBatchSource.contains("is UnifiedMoveCategoryTarget.MdbxFolderTarget -> target.folderId") &&
                 mixedBatchSource.contains("viewModel.movePasswordsToMdbxDatabaseAwait(selectedIds, target.databaseId, target.folderId)") &&
-                mixedBatchSource.contains("aggregateUiState.totpViewModel?.moveToMdbxDatabase(") &&
+                mixedBatchSource.contains("totpViewModel.moveTotpToStorage(") &&
+                mixedBatchSource.contains("noteViewModel.moveNoteToStorage(") &&
+                mixedBatchSource.contains("bankCardViewModel.moveCardToStorage(") &&
+                mixedBatchSource.contains("documentViewModel.moveDocumentToStorage(") &&
                 mixedBatchSource.contains("mdbxDatabaseId = targetMdbxDatabaseId") &&
                 mixedBatchSource.contains("mdbxFolderId = targetMdbxFolderId")
         )
@@ -2274,10 +2284,19 @@ class MultiPasswordSaveRegressionGuardTest {
         val markLegacyEntryDeletedBody = mdbxStoreSource
             .substringAfter("private fun markLegacyEntryDeleted(")
             .substringBefore("private fun writeEntryDeleteMutation(")
+        val mdbxRepositoryFactorySource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/MdbxRepositoryFactory.kt"
+        ).readText()
+        val mdbx2RepositorySource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2Repository.kt"
+        ).readText()
         assertTrue(
             "MDBX password object ids must reuse imported MDBX entry ids across clients, while tombstoning the broken local Room-id object written by older builds.",
-            mdbxStoreSource.contains("?.takeIf(::isMdbxPasswordObjectId)") &&
-                mdbxStoreSource.contains("?: \"password:${'$'}{entry.id}\"") &&
+            mdbxRepositoryFactorySource.contains("fun mdbxPasswordObjectId(entry: PasswordEntry): String") &&
+                mdbxRepositoryFactorySource.contains("?.takeIf { it.startsWith(\"password:\")") &&
+                mdbxRepositoryFactorySource.contains("?: \"password:${'$'}{entry.id}\"") &&
+                mdbxStoreSource.contains("mdbxPasswordObjectId(entry)") &&
+                mdbx2RepositorySource.contains("mdbxPasswordObjectId(entry)") &&
                 mdbxStoreSource.contains("private fun legacyPasswordObjectId(entry: PasswordEntry): String?") &&
                 mdbxStoreSource.contains("?.let { \"password:${'$'}{entry.id}\" }") &&
                 mdbxStoreSource.contains("private fun isMdbxPasswordObjectId(value: String): Boolean") &&
@@ -2434,6 +2453,12 @@ class MultiPasswordSaveRegressionGuardTest {
         val batchDeleteBody = viewModelSource
             .substringAfter("suspend fun deletePasswordEntriesBatch(")
             .substringBefore("private suspend fun handleBitwardenQueuedDelete(")
+        val repositoryBatchUpdateBody = repositorySource
+            .substringAfter("suspend fun updatePasswordEntries(entries: List<PasswordEntry>)")
+            .substringBefore("suspend fun updatePasswordUpdatedAt(")
+        val repositoryBatchDeleteBody = repositorySource
+            .substringAfter("suspend fun deletePasswordEntries(entries: List<PasswordEntry>)")
+            .substringBefore("suspend fun deletePasswordEntryById(")
 
         assertTrue(
             "Password batch delete must collect local targets and flush them through the batch helper instead of writing each item inside the main loop.",
@@ -2454,11 +2479,13 @@ class MultiPasswordSaveRegressionGuardTest {
         assertTrue(
             "PasswordRepository batch update/delete must forward MDBX entries through MDBX batch APIs before writing Room in batches.",
             repositorySource.contains("suspend fun updatePasswordEntries(entries: List<PasswordEntry>)") &&
-                repositorySource.contains("mdbxRepository?.upsertPasswords(normalizedEntries.filter { it.mdbxDatabaseId != null })") &&
-                repositorySource.contains("passwordEntryDao.updatePasswordEntries(normalizedEntries)") &&
+                repositoryBatchUpdateBody.contains("val nextMdbxEntries = normalizedEntries.filter { it.mdbxDatabaseId != null }") &&
+                repositoryBatchUpdateBody.contains("mdbxRepository?.upsertPasswords(nextMdbxEntries)") &&
+                repositoryBatchUpdateBody.contains("roomCommit = { passwordEntryDao.updatePasswordEntries(normalizedEntries) }") &&
                 repositorySource.contains("suspend fun deletePasswordEntries(entries: List<PasswordEntry>)") &&
-                repositorySource.contains("mdbxRepository?.deletePasswords(entries.filter { it.mdbxDatabaseId != null })") &&
-                repositorySource.contains("passwordEntryDao.deletePasswordEntries(entries)")
+                repositoryBatchDeleteBody.contains("val mdbxEntries = entries.filter { it.mdbxDatabaseId != null }") &&
+                repositoryBatchDeleteBody.contains("mirrorCommit = { mdbxRepository?.deletePasswords(mdbxEntries) }") &&
+                repositoryBatchDeleteBody.contains("roomCommit = { passwordEntryDao.deletePasswordEntries(entries) }")
         )
         assertTrue(
             "MDBX entry batch mutations must share one commit whose changed-object list contains the whole batch, otherwise batch delete creates one commit and snapshot per item.",
@@ -2682,11 +2709,13 @@ class MultiPasswordSaveRegressionGuardTest {
             savePasswordsAcrossTargetsBody.contains("requestedTargetKeys") &&
                 savePasswordsAcrossTargetsBody.contains("catch (e: Exception)") &&
                 savePasswordsAcrossTargetsBody.contains("savePasswordsAcrossTargets crashed") &&
-                savePasswordsAcrossTargetsBody.contains("onComplete(firstId)")
+                savePasswordsAcrossTargetsBody.contains("onComplete(saveResult.firstPasswordId)") &&
+                savePasswordsAcrossTargetsBody.contains("onCompleteWithIds(saveResult.firstPasswordId, saveResult.savedPasswordIds)")
         )
         assertTrue(
             "Grouped password updates must not silently report success when an existing row update is rejected.",
-            saveGroupedBody.contains("val updated = updatePasswordEntryInternal(updatedEntry)") &&
+            saveGroupedBody.contains("val updated = updatePasswordEntryInternal(") &&
+                saveGroupedBody.contains("entry = updatedEntry") &&
                 saveGroupedBody.contains("saveGroupedPasswords aborted due to password update failure") &&
                 saveGroupedBody.contains("return null")
         )
@@ -2855,8 +2884,8 @@ class MultiPasswordSaveRegressionGuardTest {
                 resolverSource.contains("withAutofillSaveInitialTarget")
         )
         assertTrue(
-            "Legacy autofill save must inject MdbxVaultStore and write MDBX creates through the MDBX-aware repository path.",
-            legacySource.contains("MdbxVaultStore(") &&
+            "Legacy autofill save must create the engine-aware MDBX repository and write through the MDBX-aware password repository path.",
+            legacySource.contains("val mdbxRepository: MdbxRepository = MdbxRepositoryFactory.create(") &&
                 legacySource.contains("mdbxRepository = mdbxRepository") &&
                 legacySource.contains("resolveInitialTarget()") &&
                 legacySource.contains(".withAutofillSaveInitialTarget(initialTarget)") &&
@@ -2866,7 +2895,7 @@ class MultiPasswordSaveRegressionGuardTest {
         assertTrue(
             "Transparent autofill save must pass the resolved MDBX database/folder into AddEditPasswordScreen.",
             transparentSource.contains("produceState<AutofillSaveInitialTarget?>") &&
-                transparentSource.contains("MdbxVaultStore(") &&
+                transparentSource.contains("val mdbxRepository: MdbxRepository = MdbxRepositoryFactory.create(") &&
                 transparentSource.contains("mdbxRepository = mdbxRepository") &&
                 transparentSource.contains("mdbxDatabasesFallback = resolvedInitialTarget.mdbxDatabasesFallback") &&
                 transparentSource.contains("initialMdbxDatabaseId = resolvedInitialTarget.mdbxDatabaseId") &&
@@ -2897,7 +2926,7 @@ class MultiPasswordSaveRegressionGuardTest {
 
         assertTrue(
             "Trash restore must inject an MDBX repository, otherwise MDBX restore only flips Room flags and sync deletes it again.",
-            source.contains("private val mdbxRepository: MdbxRepository = MdbxVaultStore(") &&
+            source.contains("private val mdbxRepository: MdbxRepository = MdbxRepositoryFactory.create(") &&
                 source.contains("mdbxRepository = mdbxRepository") &&
                 source.contains("private val secureItemRepository = SecureItemRepository(") &&
                 source.contains("database.secureItemDao(),") &&

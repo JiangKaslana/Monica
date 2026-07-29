@@ -1,6 +1,7 @@
 package takagi.ru.monica.utils
 
 import android.content.Context
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -19,12 +20,18 @@ class OneDriveMdbxFileSource(
     override suspend fun listDirectory(path: String?): List<FileSourceEntry> =
         withContext(Dispatchers.IO) {
             val normalizedPath = OneDriveKeePassFileSource.normalizeOptionalRemotePath(path)
-            delegate().listDirectory(normalizedPath)
+            listDirectoryAll(normalizedPath)
                 .filter { it.isDirectory || it.name.endsWith(".mdbx", ignoreCase = true) }
                 .sortedWith(
                     compareByDescending<FileSourceEntry> { it.isDirectory }
                         .thenBy { it.name.lowercase() }
                 )
+        }
+
+    suspend fun listDirectoryAll(path: String?): List<FileSourceEntry> =
+        withContext(Dispatchers.IO) {
+            val normalizedPath = OneDriveKeePassFileSource.normalizeOptionalRemotePath(path)
+            delegate().listDirectory(normalizedPath)
         }
 
     override suspend fun createDirectory(
@@ -61,5 +68,44 @@ class OneDriveMdbxFileSource(
 
     override suspend fun readFile(path: String): ByteArray = withContext(Dispatchers.IO) {
         delegate(path).read()
+    }
+
+    suspend fun statPath(path: String): FileSourceStat? = withContext(Dispatchers.IO) {
+        try {
+            delegate(path).stat()
+        } catch (error: OneDriveHttpException) {
+            if (error.statusCode == 404) null else throw error
+        }
+    }
+
+    suspend fun readFileTo(path: String, destination: File) = withContext(Dispatchers.IO) {
+        delegate(path).readTo(destination)
+    }
+
+    suspend fun writeFileFrom(
+        path: String,
+        source: File,
+        mode: MdbxRemoteWriteMode = MdbxRemoteWriteMode.CREATE_ONLY,
+        expectedVersion: String? = null
+    ): FileSourceWriteResult = withContext(Dispatchers.IO) {
+        val parent = OneDriveKeePassFileSource.parentPathOf(path)
+        if (parent.isNotBlank()) ensureDirectoryPath(parent)
+        delegate(path).writeFrom(source, mode, expectedVersion)
+    }
+
+    suspend fun ensureDirectoryPath(path: String) = withContext(Dispatchers.IO) {
+        val segments = OneDriveKeePassFileSource.normalizeOptionalRemotePath(path)
+            .split('/')
+            .filter(String::isNotBlank)
+        var current = ""
+        for (segment in segments) {
+            val next = OneDriveKeePassFileSource.buildChildPath(current, segment)
+            val existing = statPath(next)
+            when {
+                existing == null -> createDirectory(current.ifBlank { null }, segment)
+                !existing.isDirectory -> error("OneDrive 远端路径不是目录: $next")
+            }
+            current = next
+        }
     }
 }

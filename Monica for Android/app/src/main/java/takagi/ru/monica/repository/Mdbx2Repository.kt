@@ -1,8 +1,11 @@
 package takagi.ru.monica.repository
 
 import android.content.Context
+import android.net.Uri
+import android.util.Base64
 import java.io.File
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,8 +16,12 @@ import takagi.ru.monica.attachments.storage.AttachmentKeyVault
 import takagi.ru.monica.attachments.storage.AttachmentStorage
 import takagi.ru.monica.data.CustomFieldDao
 import takagi.ru.monica.data.ItemType
+import takagi.ru.monica.data.LocalMdbxDatabase
 import takagi.ru.monica.data.LocalMdbxDatabaseDao
 import takagi.ru.monica.data.MdbxTigaMode
+import takagi.ru.monica.data.MdbxSyncStatus
+import takagi.ru.monica.data.capabilities
+import takagi.ru.monica.data.isRemoteSource
 import takagi.ru.monica.data.PasskeyEntry
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordEntryDao
@@ -26,6 +33,11 @@ import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.util.TotpDataResolver
 import uniffi.mdbx_ffi.MdbxAttachmentContentLimits
 import uniffi.mdbx_ffi.MdbxAttachmentCreateRequest
+import uniffi.mdbx_ffi.MdbxConflictChoice
+import uniffi.mdbx_ffi.MdbxDeviceAssurance
+import uniffi.mdbx_ffi.MdbxDeviceContext
+import uniffi.mdbx_ffi.MdbxSnapshotKind
+import uniffi.mdbx_ffi.MdbxSnapshotStructureNode
 import uniffi.mdbx_ffi.MdbxVault
 import uniffi.mdbx_ffi.MdbxWriteCommand
 
@@ -38,7 +50,13 @@ class Mdbx2Repository(
     private val customFieldDao: CustomFieldDao? = null
 ) : MdbxRepository {
     private val appContext = context.applicationContext
-    private val sessions = Mdbx2VaultSessionExecutor(appContext, databaseDao, securityManager)
+    private val externalStorage = Mdbx2ExternalStorage(appContext)
+    private val sessions = Mdbx2VaultSessionExecutor(
+        context = appContext,
+        databaseDao = databaseDao,
+        securityManager = securityManager,
+        externalStorage = externalStorage
+    )
     private val attachmentStorage = AttachmentStorage(appContext)
     private val attachmentKeyVault = AttachmentKeyVault(securityManager)
 
@@ -49,7 +67,46 @@ class Mdbx2Repository(
         password: String
     ): File = sessions.createInitializedVaultFile(tigaMode, password)
 
+    internal suspend fun createInitializedVaultFile(
+        tigaMode: MdbxTigaMode,
+        credential: MdbxVaultCredential
+    ): File = sessions.createInitializedVaultFile(tigaMode, credential)
+
     suspend fun deleteOwnedVaultFile(file: File): Boolean = sessions.deleteOwnedVaultFile(file)
+
+    internal suspend fun createExternalDocument(
+        treeUri: Uri,
+        displayName: String,
+        workingCopy: File
+    ): Mdbx2ExternalDocument = sessions.createExternalDocument(treeUri, displayName, workingCopy)
+
+    internal suspend fun deleteCreatedExternalDocument(document: Mdbx2ExternalDocument) {
+        sessions.deleteCreatedExternalDocument(document)
+    }
+
+    internal suspend fun copyExternalDocumentToOwnedFile(
+        sourceUri: Uri,
+        sourceTreeUri: Uri? = null
+    ): File = sessions.copyExternalDocumentToOwnedFile(sourceUri, sourceTreeUri)
+
+    internal suspend fun inspectVaultFormat(file: File): String? = sessions.inspectVaultFormat(file)
+
+    internal suspend fun validatePasswordVaultFile(file: File, password: String) {
+        sessions.validatePasswordVaultFile(file, password)
+    }
+
+    internal suspend fun validateVaultFile(file: File, credential: MdbxVaultCredential) {
+        sessions.validateVaultFile(file, credential)
+    }
+
+    internal suspend fun refreshExternalWorkingCopy(databaseId: Long) {
+        sessions.refreshExternalWorkingCopy(databaseId)
+    }
+
+    internal suspend fun <T> withVaultForSync(
+        databaseId: Long,
+        block: suspend (LocalMdbxDatabase, MdbxVault) -> T
+    ): T = sessions.withVault(databaseId, block)
 
     override suspend fun readStoredEntries(databaseId: Long): List<MdbxStoredVaultEntry> =
         sessions.withVault(databaseId) { _, vault ->
@@ -132,62 +189,135 @@ class Mdbx2Repository(
     ): MdbxStoredFolderEntry {
         val title = name.trim().takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("Folder name cannot be empty")
-        check(parentFolderId.isNullOrBlank() || parentFolderId.equals("root", ignoreCase = true)) {
-            "Nested MDBX2 folders are not supported yet"
-        }
-        return sessions.withVault(databaseId) { _, vault ->
+        return sessions.withMutatingVault(databaseId) { _, vault ->
+            val rootId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
+            val parentProjectId = normalizeFolderParentId(parentFolderId, rootId)
             val folderId = UUID.randomUUID().toString()
             vault.executeWriteOperation(
                 operationId = UUID.randomUUID().toString(),
                 operationKind = "monica-create-folder",
-                commands = listOf(MdbxWriteCommand.CreateProject(folderId, title))
+                commands = listOf(
+                    MdbxWriteCommand.CreateProjectWithParent(
+                        projectId = folderId,
+                        title = title,
+                        parentProjectId = parentProjectId
+                    )
+                )
             )
-            MdbxStoredFolderEntry(
-                folderId = folderId,
-                parentFolderId = null,
-                name = title,
-                pathKey = title.lowercase(),
-                objectClock = System.currentTimeMillis()
-            )
+            markPendingUpload(databaseId)
+            listFolderEntries(vault, rootId).first { it.folderId == folderId }
         }
     }
 
     override suspend fun listFolders(databaseId: Long): List<MdbxStoredFolderEntry> =
         sessions.withVault(databaseId) { _, vault ->
             val rootId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
-            vault.listAllProjects()
-                .asSequence()
-                .filterNot { it.collectionId == rootId }
-                .map { project ->
-                    MdbxStoredFolderEntry(
-                        folderId = project.collectionId,
-                        parentFolderId = null,
-                        name = project.title,
-                        pathKey = project.title.lowercase(),
-                        objectClock = project.updatedAt.hashCode().toLong()
-                    )
-                }
-                .sortedBy { it.name.lowercase() }
-                .toList()
+            listFolderEntries(vault, rootId)
         }
+
+    override suspend fun renameFolder(
+        databaseId: Long,
+        folderId: String,
+        name: String
+    ): MdbxStoredFolderEntry {
+        val title = name.trim().takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("Folder name cannot be empty")
+        return sessions.withMutatingVault(databaseId) { _, vault ->
+            val rootId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
+            requireMutableFolderId(folderId, rootId)
+            vault.executeWriteOperation(
+                operationId = UUID.randomUUID().toString(),
+                operationKind = "monica-rename-folder",
+                commands = listOf(MdbxWriteCommand.RenameProject(folderId, title))
+            )
+            markPendingUpload(databaseId)
+            listFolderEntries(vault, rootId).first { it.folderId == folderId }
+        }
+    }
+
+    override suspend fun moveFolder(
+        databaseId: Long,
+        folderId: String,
+        parentFolderId: String?
+    ): MdbxStoredFolderEntry = sessions.withMutatingVault(databaseId) { _, vault ->
+        val rootId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
+        requireMutableFolderId(folderId, rootId)
+        val parentProjectId = normalizeFolderParentId(parentFolderId, rootId)
+        vault.executeWriteOperation(
+            operationId = UUID.randomUUID().toString(),
+            operationKind = "monica-move-folder",
+            commands = listOf(MdbxWriteCommand.MoveProject(folderId, parentProjectId))
+        )
+        markPendingUpload(databaseId)
+        listFolderEntries(vault, rootId).first { it.folderId == folderId }
+    }
+
+    override suspend fun deleteFolder(databaseId: Long, folderId: String) {
+        sessions.withMutatingVault(databaseId) { _, vault ->
+            val rootId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
+            requireMutableFolderId(folderId, rootId)
+            vault.executeWriteOperation(
+                operationId = UUID.randomUUID().toString(),
+                operationKind = "monica-delete-folder",
+                commands = listOf(MdbxWriteCommand.DeleteProject(folderId))
+            )
+            markPendingUpload(databaseId)
+        }
+    }
+
+    override suspend fun restoreFolder(
+        databaseId: Long,
+        folderId: String,
+        parentFolderId: String?
+    ): MdbxStoredFolderEntry = sessions.withMutatingVault(databaseId) { _, vault ->
+        val rootId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
+        requireMutableFolderId(folderId, rootId)
+        val parentProjectId = normalizeFolderParentId(parentFolderId, rootId)
+        vault.executeWriteOperation(
+            operationId = UUID.randomUUID().toString(),
+            operationKind = "monica-restore-folder",
+            commands = listOf(MdbxWriteCommand.RestoreProject(folderId, parentProjectId))
+        )
+        markPendingUpload(databaseId)
+        listFolderEntries(vault, rootId).first { it.folderId == folderId }
+    }
 
     internal suspend fun createMigrationFolders(
         databaseId: Long,
         folders: List<MdbxMigrationFolderPlan>
-    ): Map<String, String> = sessions.withVault(databaseId) { _, vault ->
+    ): Map<String, String> = sessions.withMutatingVault(databaseId) { _, vault ->
         val vaultId = vault.info().vaultId
         val mapping = folders.associate { folder ->
             folder.sourceFolderId to UUID.nameUUIDFromBytes(
                 "monica-migration-folder:$vaultId:${folder.sourceFolderId}".toByteArray(Charsets.UTF_8)
             ).toString()
         }
-        folders.chunked(MIGRATION_BATCH_SIZE).forEach { batch ->
-            val commands = batch.mapNotNull { folder ->
+        topologicallySortedFolders(folders).chunked(MIGRATION_BATCH_SIZE).forEach { batch ->
+            val commands = batch.flatMap { folder ->
                 val targetFolderId = mapping.getValue(folder.sourceFolderId)
-                if (vault.getCollectionSummary(targetFolderId) == null) {
-                    MdbxWriteCommand.CreateProject(targetFolderId, folder.targetDisplayName)
-                } else {
-                    null
+                val targetParentId = folder.sourceParentFolderId
+                    .normalizedMigrationParentId()
+                    ?.let(mapping::getValue)
+                val existing = vault.getCollectionSummary(targetFolderId)
+                buildList {
+                    if (existing == null) {
+                        add(
+                            MdbxWriteCommand.CreateProjectWithParent(
+                                projectId = targetFolderId,
+                                title = folder.targetDisplayName,
+                                parentProjectId = targetParentId
+                            )
+                        )
+                    } else {
+                        if (existing.deleted) {
+                            add(MdbxWriteCommand.RestoreProject(targetFolderId, targetParentId))
+                        } else if (existing.groupId != targetParentId) {
+                            add(MdbxWriteCommand.MoveProject(targetFolderId, targetParentId))
+                        }
+                        if (existing.title != folder.targetDisplayName) {
+                            add(MdbxWriteCommand.RenameProject(targetFolderId, folder.targetDisplayName))
+                        }
+                    }
                 }
             }
             if (commands.isNotEmpty()) {
@@ -196,6 +326,7 @@ class Mdbx2Repository(
                     operationKind = "monica-migration-folders",
                     commands = commands
                 )
+                markPendingUpload(databaseId)
             }
         }
         mapping
@@ -238,7 +369,7 @@ class Mdbx2Repository(
                         "Source attachment content hash does not match its metadata"
                     }
                 }
-                sessions.withVault(databaseId) { _, vault ->
+                sessions.withMutatingVault(databaseId) { _, vault ->
                     val vaultId = vault.info().vaultId
                     val physicalParentEntryId = mdbx2PhysicalEntryId(vaultId, plan.parentEntryId)
                     val parent = vault.getObjectSummary(physicalParentEntryId)
@@ -438,10 +569,17 @@ class Mdbx2Repository(
     override suspend fun getVaultDiagnostics(databaseId: Long): MdbxVaultDiagnostics =
         sessions.withVault(databaseId) { database, vault ->
             val file = File(database.resolvedActiveFilePath())
-            val projects = vault.listAllProjects()
-            val entries = projects.flatMap { vault.listEntries(it.collectionId, null) }
-            val deletedEntries = projects.flatMap { vault.listDeletedEntries(it.collectionId, null) }
-            val attachments = projects.flatMap { vault.listAttachments(it.collectionId, null) }
+            val native = vault.diagnosticsSummary()
+            val health = vault.healthCheck()
+            val status = runCatching { MdbxSyncStatus.valueOf(database.lastSyncStatus) }.getOrNull()
+            val rootProjectId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
+            val rootProjectCount = if (vault.getCollectionSummary(rootProjectId)?.deleted == false) 1 else 0
+            val issueSummary = health.issues
+                .take(MAX_DIAGNOSTIC_ISSUE_PREVIEW)
+                .joinToString(separator = "; ") { issue ->
+                    "${issue.category}: ${issue.description}"
+                }
+                .ifBlank { "Rust health check passed" }
             MdbxVaultDiagnostics(
                 databaseId = databaseId,
                 filePath = file.absolutePath,
@@ -451,96 +589,494 @@ class Mdbx2Repository(
                 currentDeviceId = vault.info().deviceId,
                 formatVersion = "MDBX2",
                 releaseLabel = "Rust MDBX2",
-                capabilityFlags = "local-crud,attachments",
+                capabilityFlags = database.engineTypeEnum.capabilities
+                    .joinToString(separator = ",") { capability ->
+                        capability.name.lowercase().replace('_', '-')
+                    },
                 defaultTigaMode = database.tigaMode,
-                integrityOk = true,
-                integrityMessage = "Vault opened successfully",
-                folderCount = projects.count { it.title != Mdbx2VaultSessionExecutor.ROOT_PROJECT_TITLE },
-                indexedObjectCount = entries.size + deletedEntries.size,
-                entryCount = entries.size,
-                deletedEntryCount = deletedEntries.size,
-                attachmentCount = attachments.count { !it.deleted },
-                originalAttachmentBytes = attachments.sumOf { it.originalSize.toLong() },
-                storedAttachmentBytes = attachments.sumOf { it.storedSize.toLong() },
+                integrityOk = health.healthy,
+                integrityMessage = issueSummary,
+                unresolvedConflictCount = native.unresolvedConflictCount.toDiagnosticInt(),
+                pendingSyncCount = pendingSyncCount(database, status, vault),
+                commitCount = native.commitCount.toDiagnosticInt(),
+                tombstoneCount = native.tombstoneCount.toDiagnosticInt(),
+                branchCount = native.branchCount.toDiagnosticInt(),
+                deviceCount = native.deviceCount.toDiagnosticInt(),
+                snapshotCount = native.snapshotCount.toDiagnosticInt(),
+                folderCount = (native.projectCount.toDiagnosticInt() - rootProjectCount).coerceAtLeast(0),
+                indexedObjectCount = (native.entryCount + native.deletedEntryCount).toDiagnosticInt(),
+                entryCount = native.entryCount.toDiagnosticInt(),
+                deletedEntryCount = native.deletedEntryCount.toDiagnosticInt(),
+                attachmentCount = native.attachmentCount.toDiagnosticInt(),
+                externalAttachmentCount = native.externalAttachmentCount.toDiagnosticInt(),
+                originalAttachmentBytes = native.originalAttachmentBytes.toDiagnosticLong(),
+                storedAttachmentBytes = native.storedAttachmentBytes.toDiagnosticLong(),
+                danglingParentCount = health.issues.count { it.category == "orphans" },
+                danglingBranchHeadCount = health.issues.count {
+                    it.category == "stale-heads" && it.description.contains("branch", ignoreCase = true)
+                },
+                danglingDeviceHeadCount = health.issues.count {
+                    it.category == "stale-heads" && it.description.contains("device", ignoreCase = true)
+                },
+                attachmentChunkMismatchCount = health.issues.count {
+                    it.category == "attachment-chunks"
+                },
                 lastSyncStatus = database.lastSyncStatus,
                 lastSyncError = database.lastSyncError
             )
         }
 
-    override suspend fun getPendingSyncCount(databaseId: Long): Int = 0
+    override suspend fun getPendingSyncCount(databaseId: Long): Int {
+        val database = databaseDao.getDatabaseById(databaseId) ?: return 0
+        val status = runCatching { MdbxSyncStatus.valueOf(database.lastSyncStatus) }.getOrNull()
+        if (status == MdbxSyncStatus.LOCAL_ONLY || status == MdbxSyncStatus.IN_SYNC) {
+            return 0
+        }
 
-    override suspend fun setProjectTags(databaseId: Long, projectId: String, tags: List<String>) {
-        unsupported<Unit>("Project tags")
+        return sessions.withVault(databaseId) { _, vault -> pendingSyncCount(database, status, vault) }
     }
 
-    override suspend fun listProjectTags(databaseId: Long, projectId: String): List<String> = emptyList()
+    override suspend fun setProjectTags(databaseId: Long, projectId: String, tags: List<String>) {
+        val desired = normalizeProjectTags(tags)
+        sessions.withMutatingVault(databaseId) { _, vault ->
+            val existing = projectTagRecords(vault, projectId)
+            val existingByKey = existing.associateBy { it.name.normalizedProjectTagKey() }
+            val desiredKeys = desired.map { it.normalizedProjectTagKey() }.toSet()
+            val commands = buildList {
+                existing
+                    .filter { it.name.normalizedProjectTagKey() !in desiredKeys }
+                    .forEach { add(MdbxWriteCommand.DeleteObjectLabel(it.labelId)) }
 
-    override suspend fun listAllProjectTags(databaseId: Long): List<MdbxProjectTagSummary> = emptyList()
+                desired.forEach { tag ->
+                    val existingLabel = existingByKey[tag.normalizedProjectTagKey()]
+                    if (existingLabel == null) {
+                        add(
+                            MdbxWriteCommand.CreateObjectLabel(
+                                labelId = UUID.randomUUID().toString(),
+                                collectionId = projectId,
+                                name = tag,
+                                payloadJson = projectTagPayload(tag),
+                                payloadSchemaVersion = PROJECT_TAG_PAYLOAD_SCHEMA_VERSION
+                            )
+                        )
+                    } else if (existingLabel.name != tag ||
+                        !isProjectTagPayload(existingLabel.payloadJson)
+                    ) {
+                        add(
+                            MdbxWriteCommand.UpdateObjectLabel(
+                                labelId = existingLabel.labelId,
+                                name = tag,
+                                payloadJson = projectTagPayload(tag),
+                                payloadSchemaVersion = PROJECT_TAG_PAYLOAD_SCHEMA_VERSION
+                            )
+                        )
+                    }
+                }
+            }
+            if (commands.isNotEmpty()) {
+                vault.executeWriteOperation(
+                    operationId = UUID.randomUUID().toString(),
+                    operationKind = "monica-project-tags",
+                    commands = commands
+                )
+                markPendingUpload(databaseId)
+            }
+        }
+    }
+
+    override suspend fun listProjectTags(databaseId: Long, projectId: String): List<String> =
+        sessions.withVault(databaseId) { _, vault ->
+            projectTagRecords(vault, projectId)
+                .map { it.name }
+                .sortedWith(String.CASE_INSENSITIVE_ORDER)
+        }
+
+    override suspend fun listAllProjectTags(databaseId: Long): List<MdbxProjectTagSummary> =
+        sessions.withVault(databaseId) { _, vault ->
+            val counts = linkedMapOf<String, Pair<String, Int>>()
+            vault.listAllProjects()
+                .filterNot { it.title == Mdbx2VaultSessionExecutor.ROOT_PROJECT_TITLE }
+                .forEach { project ->
+                    projectTagRecords(vault, project.collectionId).forEach { label ->
+                        val tag = label.name.trim()
+                        if (tag.isBlank()) return@forEach
+                        val key = tag.normalizedProjectTagKey()
+                        val current = counts[key]
+                        counts[key] = (current?.first ?: tag) to ((current?.second ?: 0) + 1)
+                    }
+                }
+            counts.values
+                .map { (tag, count) -> MdbxProjectTagSummary(tag, count) }
+                .sortedWith(
+                    compareByDescending<MdbxProjectTagSummary> { it.projectCount }
+                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.tag }
+                )
+        }
 
     override suspend fun searchProjects(
         databaseId: Long,
         query: String,
         requiredTags: List<String>
     ): List<MdbxProjectSearchResult> = sessions.withVault(databaseId) { _, vault ->
-        if (requiredTags.isNotEmpty()) return@withVault emptyList()
         val normalized = query.trim()
+        val normalizedRequiredTags = normalizeProjectTags(requiredTags)
+            .map { it.normalizedProjectTagKey() }
         vault.listAllProjects()
             .filterNot { it.title == Mdbx2VaultSessionExecutor.ROOT_PROJECT_TITLE }
-            .filter { normalized.isBlank() || it.title.contains(normalized, ignoreCase = true) }
             .map { project ->
+                val tags = projectTagRecords(vault, project.collectionId).map { it.name }
+                project to tags
+            }
+            .filter { (project, tags) ->
+                (normalized.isBlank() || project.title.contains(normalized, ignoreCase = true)) &&
+                    tags.map { it.normalizedProjectTagKey() }.containsAll(normalizedRequiredTags)
+            }
+            .map { project ->
+                val (summary, tags) = project
                 MdbxProjectSearchResult(
-                    projectId = project.collectionId,
-                    title = project.title,
-                    parentFolderId = null,
-                    entryTypes = vault.listEntries(project.collectionId, null)
+                    projectId = summary.collectionId,
+                    title = summary.title,
+                    parentFolderId = summary.groupId,
+                    entryTypes = vault.listEntries(summary.collectionId, null)
                         .map { it.entryType }
                         .distinct(),
-                    tags = emptyList(),
-                    updatedAt = project.updatedAt
+                    tags = tags.sortedWith(String.CASE_INSENSITIVE_ORDER),
+                    updatedAt = summary.updatedAt
                 )
             }
     }
 
-    override suspend fun listDeltaHistory(databaseId: Long): List<MdbxDeltaSummary> = emptyList()
-    override suspend fun listCommitDiff(databaseId: Long, commitId: String): List<MdbxCommitDiff> = emptyList()
-    override suspend fun revertCommit(databaseId: Long, commitId: String): Int = unsupported("Commit revert")
-    override suspend fun listSnapshots(databaseId: Long): List<MdbxSnapshotSummary> = emptyList()
+    override suspend fun listDeltaHistory(databaseId: Long): List<MdbxDeltaSummary> =
+        sessions.withVault(databaseId) { _, vault ->
+            buildList {
+                var cursor: String? = null
+                while (size < MAX_HISTORY_ITEMS) {
+                    val pageSize = minOf(HISTORY_PAGE_SIZE, MAX_HISTORY_ITEMS - size).toUInt()
+                    val page = vault.listCommitHistory(pageSize, cursor)
+                    page.items.forEach { item ->
+                        val objectIds = item.changes.map { it.objectId }.distinct()
+                        val objectPreview = item.changes
+                            .take(MAX_HISTORY_PREVIEW_OBJECTS)
+                            .joinToString(separator = " · ") { change ->
+                                "${change.objectType}:${change.objectId.take(SHORT_ID_LENGTH)}"
+                            }
+                            .ifBlank { "No object changes" }
+                        val fieldSummary = item.changes
+                            .flatMap { change ->
+                                change.fields.ifEmpty { listOf(change.action) }
+                            }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .joinToString(separator = ", ")
+                            .ifBlank { "metadata" }
+                        add(
+                            MdbxDeltaSummary(
+                                commitId = item.commitId,
+                                deviceId = item.deviceId,
+                                localSeq = item.localSeq.toLong(),
+                                commitKind = item.commitKind,
+                                changeScope = item.changeScope,
+                                changedObjectIds = JSONArray(objectIds).toString(),
+                                changedObjectPreview = objectPreview,
+                                changedFieldSummary = fieldSummary,
+                                parentCount = item.parentIds.size,
+                                createdAt = item.createdAt
+                            )
+                        )
+                    }
+                    cursor = page.nextCursor
+                    if (cursor == null || page.items.isEmpty()) break
+                }
+            }
+        }
+
+    override suspend fun listCommitDiff(databaseId: Long, commitId: String): List<MdbxCommitDiff> =
+        sessions.withVault(databaseId) { _, vault ->
+            vault.listCommitDiff(commitId).map { diff ->
+                MdbxCommitDiff(
+                    commitId = diff.commitId,
+                    objectType = diff.objectType,
+                    objectId = diff.objectId,
+                    displayTitle = diff.currentTitle ?: diff.previousTitle,
+                    storagePath = diff.collectionId,
+                    previousTitle = diff.previousTitle,
+                    currentTitle = diff.currentTitle,
+                    previousPayloadPreview = diff.previousPayloadPreview,
+                    currentPayloadPreview = diff.currentPayloadPreview,
+                    previousDeleted = diff.previousDeleted,
+                    currentDeleted = diff.currentDeleted,
+                    changedFields = diff.changedFields,
+                    createdAt = diff.createdAt
+                )
+            }
+        }
+
+    override suspend fun revertCommit(databaseId: Long, commitId: String): Int =
+        sessions.withMutatingVault(databaseId) { _, vault ->
+            vault.revertCommit(
+                commitId = commitId,
+                operationId = UUID.randomUUID().toString(),
+                device = snapshotDeviceContext()
+            ).revertedObjectCount.toInt()
+        }.also {
+            markPendingUpload(databaseId)
+        }
+
+    override suspend fun listSnapshots(databaseId: Long): List<MdbxSnapshotSummary> =
+        sessions.withVault(databaseId) { _, vault ->
+            buildList {
+                var cursor: String? = null
+                while (size < MAX_SNAPSHOT_ITEMS) {
+                    val pageSize = minOf(SNAPSHOT_PAGE_SIZE, MAX_SNAPSHOT_ITEMS - size).toUInt()
+                    val page = vault.listManagedSnapshots(pageSize, cursor)
+                    page.items.forEach { snapshot -> add(snapshot.toRepositorySummary()) }
+                    cursor = page.nextCursor
+                    if (cursor == null || page.items.isEmpty()) break
+                }
+            }
+        }
 
     override suspend fun createSnapshot(
         databaseId: Long,
         name: String,
         fullSnapshot: Boolean,
         autoPrune: Boolean
-    ): MdbxSnapshotSummary = unsupported("Snapshots")
+    ): MdbxSnapshotSummary {
+        check(!autoPrune) { "Automatic MDBX2 snapshot creation is managed by retention policy" }
+        return sessions.withMutatingVault(databaseId) { _, vault ->
+            // MDBX2 snapshots always capture the complete authenticated vault state.
+            vault.createManualSnapshot(name, snapshotDeviceContext()).toRepositorySummary()
+        }.also {
+            markPendingUpload(databaseId)
+        }
+    }
 
     override suspend fun deleteSnapshot(databaseId: Long, snapshotId: String) {
-        unsupported<Unit>("Snapshots")
+        sessions.withMutatingVault(databaseId) { _, vault ->
+            vault.deleteSnapshot(snapshotId, snapshotDeviceContext())
+        }
+        markPendingUpload(databaseId)
     }
 
     override suspend fun revertToSnapshot(databaseId: Long, snapshotId: String): Int =
-        unsupported("Snapshots")
+        sessions.withMutatingVault(databaseId) { _, vault ->
+            vault.restoreSnapshot(snapshotId, snapshotDeviceContext()).affectedObjectCount.toInt()
+        }.also {
+            markPendingUpload(databaseId)
+        }
+
+    override suspend fun pruneAutomaticSnapshots(
+        databaseId: Long,
+        keepCount: Int?,
+        maxBytes: Long?
+    ): Int = sessions.withMutatingVault(databaseId) { _, vault ->
+        val keepLatest = (keepCount ?: 0).coerceAtLeast(0).toUInt()
+        val plan = vault.planAutomaticSnapshotPrune(keepLatest)
+        if (plan.candidates.isEmpty()) {
+            0
+        } else {
+            vault.pruneAutomaticSnapshots(
+                planToken = plan.planToken,
+                keepLatest = keepLatest,
+                device = snapshotDeviceContext()
+            ).deletedSnapshotIds.size
+        }
+    }.also { deletedCount ->
+        if (deletedCount > 0) markPendingUpload(databaseId)
+    }
 
     override suspend fun getSnapshotStructurePreview(
         databaseId: Long,
         snapshotId: String
-    ): MdbxStructurePreview = unsupported("Snapshots")
+    ): MdbxStructurePreview = sessions.withVault(databaseId) { _, vault ->
+        val preview = vault.getSnapshotStructurePreview(snapshotId)
+        val snapshots = vault.listManagedSnapshots(MAX_SNAPSHOT_ITEMS.toUInt(), null).items
+        val snapshotName = snapshots.firstOrNull { it.snapshotId == snapshotId }?.name
+            ?: snapshotId.take(SHORT_ID_LENGTH)
+        val rootIds = (preview.currentNodes + preview.snapshotNodes)
+            .filter { node ->
+                node.nodeType.equals("folder", ignoreCase = true) &&
+                    node.name == Mdbx2VaultSessionExecutor.ROOT_PROJECT_TITLE
+            }
+            .mapTo(mutableSetOf()) { it.id }
+        MdbxStructurePreview(
+            snapshotId = preview.snapshotId,
+            snapshotName = snapshotName,
+            currentNodes = preview.currentNodes.mapNotNull { it.toRepositoryNode(rootIds) },
+            snapshotNodes = preview.snapshotNodes.mapNotNull { it.toRepositoryNode(rootIds) },
+            currentItemCount = preview.currentItemCount.toInt(),
+            snapshotItemCount = preview.snapshotItemCount.toInt()
+        )
+    }
 
-    override suspend fun exportSyncBundle(databaseId: Long, baseCommitId: String?): MdbxSyncBundle =
-        unsupported("Sync bundles")
+    override suspend fun exportSyncBundle(databaseId: Long, baseCommitId: String?): MdbxSyncBundle {
+        require(baseCommitId.isNullOrBlank()) {
+            "MDBX2 manual sync exports a complete authenticated bundle; incremental base commits are not accepted"
+        }
+        return sessions.withVault(databaseId) { _, vault ->
+            val temporary = newManualSyncBundleFile()
+            try {
+                val info = vault.exportManualSyncBundle(temporary.absolutePath)
+                require(info.fileSizeBytes <= MAX_MANUAL_SYNC_BUNDLE_BYTES.toULong()) {
+                    "MDBX2 manual sync bundle exceeds the Android text-transfer limit"
+                }
+                val payload = temporary.inputStream().buffered().use { input ->
+                    input.readBytesBounded(MAX_MANUAL_SYNC_BUNDLE_BYTES)
+                }
+                try {
+                    val payloadHash = sha256Hex(payload)
+                    check(payloadHash.equals(info.payloadSha256.toHex(), ignoreCase = true)) {
+                        "MDBX2 manual sync bundle digest changed after export"
+                    }
+                    MdbxSyncBundle(
+                        bundleId = payloadHash,
+                        baseCommitId = null,
+                        headCommitId = info.headCommitId,
+                        commitCount = info.commitCount.toInt(),
+                        payloadJson = JSONObject()
+                            .put("format", MDBX2_MANUAL_SYNC_PAYLOAD_FORMAT)
+                            .put("vault_id", info.vaultId)
+                            .put("source_device_id", info.sourceDeviceId)
+                            .put("encoding", "base64")
+                            .put("data", Base64.encodeToString(payload, Base64.NO_WRAP))
+                            .toString(),
+                        payloadHash = payloadHash,
+                        createdAt = info.exportedAt
+                    )
+                } finally {
+                    payload.fill(0)
+                }
+            } finally {
+                temporary.delete()
+            }
+        }
+    }
 
-    override suspend fun importSyncBundle(databaseId: Long, bundle: MdbxSyncBundle): MdbxApplyResult =
-        unsupported("Sync bundles")
+    override suspend fun importSyncBundle(
+        databaseId: Long,
+        bundle: MdbxSyncBundle
+    ): MdbxApplyResult {
+        val envelope = JSONObject(bundle.payloadJson)
+        require(envelope.optString("format") == MDBX2_MANUAL_SYNC_PAYLOAD_FORMAT) {
+            "Unsupported MDBX2 manual sync payload"
+        }
+        require(envelope.optString("encoding") == "base64") {
+            "Unsupported MDBX2 manual sync encoding"
+        }
+        val encoded = envelope.getString("data")
+        require(encoded.length <= MAX_MANUAL_SYNC_BASE64_CHARACTERS) {
+            "MDBX2 manual sync payload exceeds the Android text-transfer limit"
+        }
+        val payload = Base64.decode(encoded, Base64.NO_WRAP)
+        try {
+            require(payload.size.toLong() <= MAX_MANUAL_SYNC_BUNDLE_BYTES) {
+                "MDBX2 manual sync payload exceeds the Android text-transfer limit"
+            }
+            val payloadHash = sha256Hex(payload)
+            require(payloadHash.equals(bundle.payloadHash, ignoreCase = true)) {
+                "MDBX2 manual sync payload hash mismatch"
+            }
+            return sessions.withMutatingVault(databaseId) { _, vault ->
+                val temporary = newManualSyncBundleFile()
+                try {
+                    temporary.outputStream().buffered().use { output -> output.write(payload) }
+                    val result = vault.applyManualSyncBundle(temporary.absolutePath)
+                    check(result.bundle.payloadSha256.toHex().equals(payloadHash, ignoreCase = true)) {
+                        "MDBX2 authenticated bundle digest does not match its transfer envelope"
+                    }
+                    if (result.appliedCommits > 0u || result.conflictCount > 0u) {
+                        markPendingUpload(databaseId)
+                    }
+                    MdbxApplyResult(
+                        appliedObjectCount = result.appliedCommits.toInt(),
+                        keptLocalObjectCount = result.skippedCommits.toInt(),
+                        conflictCount = result.conflictCount.toInt(),
+                        tombstoneCount = 0
+                    )
+                } finally {
+                    temporary.delete()
+                }
+            }
+        } finally {
+            payload.fill(0)
+        }
+    }
 
-    override suspend fun flushPendingWorkingCopy(databaseId: Long) = Unit
-    override suspend fun flushWorkingCopy(databaseId: Long) = Unit
-    override suspend fun listConflicts(databaseId: Long): List<MdbxConflictSummary> = emptyList()
+    internal suspend fun runBenchmark(
+        databaseId: Long,
+        operationCount: Int
+    ): MdbxBenchmarkResult = sessions.withMutatingVault(databaseId) { database, vault ->
+        val count = operationCount.coerceIn(1, MAX_METADATA_BENCHMARK_OPERATIONS)
+        val activeFile = File(database.resolvedActiveFilePath())
+        val beforeBytes = vaultArtifactBytes(activeFile)
+        val nativeResult = vault.runMetadataBenchmark(count.toUInt())
+        markPendingUpload(databaseId)
+        val afterBytes = vaultArtifactBytes(activeFile)
+        MdbxBenchmarkResult(
+            runId = UUID.randomUUID().toString(),
+            scenario = "rust-metadata-commit",
+            operationCount = nativeResult.operationCount.toInt(),
+            elapsedMs = nativeResult.elapsedMs.toLong(),
+            fileDeltaBytes = afterBytes - beforeBytes,
+            createdAt = Instant.now().toString()
+        )
+    }
+
+    override suspend fun flushPendingWorkingCopy(databaseId: Long) {
+        sessions.flushExternalWorkingCopy(databaseId, onlyIfPending = true)
+    }
+
+    override suspend fun flushWorkingCopy(databaseId: Long) {
+        sessions.flushExternalWorkingCopy(databaseId, onlyIfPending = false)
+    }
+    override suspend fun listConflicts(databaseId: Long): List<MdbxConflictSummary> =
+        sessions.withVault(databaseId) { _, vault ->
+            buildList {
+                var cursor: String? = null
+                while (size < MAX_CONFLICT_ITEMS) {
+                    val pageSize = minOf(MAX_CONFLICT_PAGE_SIZE, MAX_CONFLICT_ITEMS - size).toUInt()
+                    val page = vault.listUnresolvedConflictSummaries(
+                        objectType = null,
+                        pageSize = pageSize,
+                        cursor = cursor
+                    )
+                    page.items.forEach { conflict ->
+                        add(
+                            MdbxConflictSummary(
+                                conflictId = conflict.conflictId,
+                                objectType = conflict.objectType,
+                                objectId = conflict.objectId,
+                                baseCommitId = conflict.baseCommitId,
+                                localCommitId = conflict.localCommitId,
+                                incomingCommitId = conflict.incomingCommitId,
+                                conflictingFields = JSONArray(conflict.conflictingFields).toString(),
+                                createdAt = conflict.createdAt
+                            )
+                        )
+                    }
+                    cursor = page.nextCursor
+                    if (cursor == null || page.items.isEmpty()) break
+                }
+            }
+        }
 
     override suspend fun resolveConflict(
         databaseId: Long,
         conflictId: String,
         resolution: MdbxConflictResolution
     ) {
-        unsupported<Unit>("Conflict resolution")
+        val choice = when (resolution) {
+            MdbxConflictResolution.LOCAL_WINS,
+            MdbxConflictResolution.MARK_RESOLVED -> MdbxConflictChoice.LOCAL_WINS
+            MdbxConflictResolution.INCOMING_WINS -> MdbxConflictChoice.INCOMING_WINS
+            MdbxConflictResolution.CUSTOM_MERGE -> {
+                error("Custom MDBX2 conflict merge requires an explicit merged payload")
+            }
+        }
+        sessions.withMutatingVault(databaseId) { _, vault ->
+            vault.resolveConflict(conflictId, choice)
+        }
+        markPendingUpload(databaseId)
     }
 
     override suspend fun upsertAttachment(
@@ -563,7 +1099,7 @@ class Mdbx2Repository(
         } finally {
             cek.fill(0)
         }
-        sessions.withVault(databaseId) { _, vault ->
+        sessions.withMutatingVault(databaseId) { _, vault ->
             val vaultId = vault.info().vaultId
             val physicalParentEntryId = mdbx2PhysicalEntryId(vaultId, parentEntryId)
             val parent = vault.getObjectSummary(physicalParentEntryId)
@@ -600,6 +1136,7 @@ class Mdbx2Repository(
                 )
             }
         }
+        markPendingUpload(databaseId)
         Unit
     }
 
@@ -617,18 +1154,19 @@ class Mdbx2Repository(
         parentEntryId: String,
         attachment: Attachment
     ) {
-        sessions.withVault(databaseId) { _, vault ->
+        sessions.withMutatingVault(databaseId) { _, vault ->
             val logicalAttachmentId = attachmentObjectId(parentEntryId, attachment)
             val attachmentId = mdbx2PhysicalAttachmentId(vault.info().vaultId, logicalAttachmentId)
             if (vault.getAttachment(attachmentId) != null) {
                 vault.deleteAttachment(attachmentId)
             }
         }
+        markPendingUpload(databaseId)
     }
 
     private suspend fun upsertMutations(mutations: List<EntryMutation>) {
         mutations.groupBy { it.databaseId }.forEach { (databaseId, grouped) ->
-            sessions.withVault(databaseId) { _, vault ->
+            sessions.withMutatingVault(databaseId) { _, vault ->
                 val vaultId = vault.info().vaultId
                 val rootProjectId = Mdbx2VaultSessionExecutor.rootProjectId(vaultId)
                 val commands = grouped.flatMap { mutation ->
@@ -682,13 +1220,14 @@ class Mdbx2Repository(
                         operationKind = "monica-upsert-entries",
                         commands = commands
                     )
+                    markPendingUpload(databaseId)
                 }
             }
         }
     }
 
     private suspend fun deleteEntries(databaseId: Long, entryIds: List<String>) {
-        sessions.withVault(databaseId) { _, vault ->
+        sessions.withMutatingVault(databaseId) { _, vault ->
             val vaultId = vault.info().vaultId
             val commands = entryIds.distinct().mapNotNull { entryId ->
                 val physicalEntryId = mdbx2PhysicalEntryId(vaultId, entryId)
@@ -702,8 +1241,55 @@ class Mdbx2Repository(
                     operationKind = "monica-delete-entries",
                     commands = commands
                 )
+                markPendingUpload(databaseId)
             }
         }
+    }
+
+    private suspend fun markPendingUpload(databaseId: Long) {
+        val database = databaseDao.getDatabaseById(databaseId) ?: return
+        if (database.isRemoteSource()) {
+            databaseDao.updateSyncStatus(databaseId, MdbxSyncStatus.PENDING_UPLOAD.name, null)
+        }
+    }
+
+    private fun pendingSyncCount(
+        database: LocalMdbxDatabase,
+        status: MdbxSyncStatus?,
+        vault: MdbxVault
+    ): Int {
+        if (status == MdbxSyncStatus.LOCAL_ONLY || status == MdbxSyncStatus.IN_SYNC) return 0
+        if (status == MdbxSyncStatus.CONFLICT) {
+            return vault.diagnosticsSummary().unresolvedConflictCount
+                .toDiagnosticInt()
+                .coerceAtLeast(1)
+        }
+
+        val currentDeviceId = vault.info().deviceId
+        val lastSyncedAt = database.lastSyncedAt
+        var cursor: String? = null
+        var count = 0
+        var scanned = 0
+        while (scanned < MAX_PENDING_SYNC_ITEMS) {
+            val pageSize = minOf(
+                PENDING_SYNC_PAGE_SIZE,
+                MAX_PENDING_SYNC_ITEMS - scanned
+            ).toUInt()
+            val page = vault.listCommitHistory(pageSize, cursor)
+            scanned += page.items.size
+            page.items.forEach { item ->
+                if (item.deviceId != currentDeviceId) return@forEach
+                val createdAtMillis = runCatching {
+                    Instant.parse(item.createdAt).toEpochMilli()
+                }.getOrNull()
+                if (lastSyncedAt == null || createdAtMillis == null || createdAtMillis > lastSyncedAt) {
+                    count += 1
+                }
+            }
+            cursor = page.nextCursor
+            if (cursor == null || page.items.isEmpty()) break
+        }
+        return count.coerceIn(1, MAX_PENDING_SYNC_ITEMS)
     }
 
     private suspend fun passwordMutation(entry: PasswordEntry): EntryMutation? {
@@ -910,6 +1496,21 @@ class Mdbx2Repository(
     private fun sha256Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+    private fun newManualSyncBundleFile(): File {
+        val directory = File(appContext.cacheDir, "mdbx2-manual-sync").also { target ->
+            check(target.exists() || target.mkdirs()) {
+                "Cannot create the MDBX2 manual sync cache directory"
+            }
+        }
+        return File(directory, "${UUID.randomUUID()}.mdbx-sync")
+    }
+
+    private fun vaultArtifactBytes(file: File): Long =
+        listOf(file, File("${file.absolutePath}-wal"))
+            .sumOf { artifact -> artifact.takeIf(File::isFile)?.length() ?: 0L }
+
     private suspend fun readPortableAttachmentPlaintext(attachment: MdbxStoredAttachment): ByteArray {
         val storedCek = attachment.wrappedCek?.takeIf(String::isNotBlank)
             ?: error("MDBX migration attachment key is missing")
@@ -963,8 +1564,168 @@ class Mdbx2Repository(
         return projects
     }
 
-    private fun <T> unsupported(feature: String): T =
-        throw UnsupportedOperationException("$feature is not available for local MDBX2 vaults yet")
+    private fun projectTagRecords(
+        vault: MdbxVault,
+        projectId: String
+    ): List<uniffi.mdbx_ffi.MdbxObjectLabelRecord> =
+        vault.listObjectLabels(projectId)
+            .filter { !it.deleted && isProjectTagPayload(it.payloadJson) }
+
+    private fun isProjectTagPayload(payloadJson: String): Boolean =
+        runCatching {
+            JSONObject(payloadJson).optString("kind") == PROJECT_TAG_PAYLOAD_KIND
+        }.getOrDefault(false)
+
+    private fun projectTagPayload(tag: String): String =
+        JSONObject()
+            .put("kind", PROJECT_TAG_PAYLOAD_KIND)
+            .put("tag", tag)
+            .toString()
+
+    private fun normalizeProjectTags(tags: List<String>): List<String> =
+        tags.asSequence()
+            .map { it.trim().replace(Regex("\\s+"), " ") }
+            .filter(String::isNotBlank)
+            .distinctBy { it.normalizedProjectTagKey() }
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+            .take(MAX_PROJECT_TAGS)
+            .toList()
+
+    private fun String.normalizedProjectTagKey(): String = lowercase().trim()
+
+    private fun listFolderEntries(
+        vault: MdbxVault,
+        rootProjectId: String
+    ): List<MdbxStoredFolderEntry> {
+        val summaries = vault.listAllProjects()
+            .filterNot { it.collectionId == rootProjectId }
+        val byId = summaries.associateBy { it.collectionId }
+        val parentById = summaries.associate { summary ->
+            val parentId = summary.groupId
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && it != rootProjectId && it in byId }
+            summary.collectionId to parentId
+        }
+        val pathById = mutableMapOf<String, String>()
+
+        fun pathFor(folderId: String, visiting: MutableSet<String> = linkedSetOf()): String {
+            pathById[folderId]?.let { return it }
+            if (!visiting.add(folderId)) return "/$folderId"
+            val parentPath = parentById[folderId]
+                ?.let { parentId -> pathFor(parentId, visiting) }
+                ?.takeUnless { it == "/" }
+            visiting.remove(folderId)
+            return (parentPath?.let { "$it/$folderId" } ?: "/$folderId")
+                .also { pathById[folderId] = it }
+        }
+
+        return summaries.map { summary ->
+            MdbxStoredFolderEntry(
+                folderId = summary.collectionId,
+                parentFolderId = parentById[summary.collectionId],
+                name = summary.title,
+                pathKey = pathFor(summary.collectionId),
+                objectClock = summary.updatedAt.hashCode().toLong()
+            )
+        }.sortedWith(compareBy({ it.pathKey }, { it.name.lowercase() }, { it.folderId }))
+    }
+
+    private fun normalizeFolderParentId(parentFolderId: String?, rootProjectId: String): String? {
+        val value = parentFolderId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return value.takeUnless {
+            it.equals("root", ignoreCase = true) || it == rootProjectId
+        }
+    }
+
+    private fun requireMutableFolderId(folderId: String, rootProjectId: String) {
+        require(folderId.isNotBlank()) { "Folder ID cannot be empty" }
+        require(folderId != rootProjectId && !folderId.equals("root", ignoreCase = true)) {
+            "The MDBX2 root collection cannot be modified as a folder"
+        }
+    }
+
+    private fun topologicallySortedFolders(
+        folders: List<MdbxMigrationFolderPlan>
+    ): List<MdbxMigrationFolderPlan> {
+        val byId = folders.associateBy { it.sourceFolderId }
+        require(byId.size == folders.size) { "Migration folder IDs must be unique" }
+        val state = mutableMapOf<String, Int>()
+        val sorted = mutableListOf<MdbxMigrationFolderPlan>()
+
+        fun visit(folder: MdbxMigrationFolderPlan) {
+            when (state[folder.sourceFolderId]) {
+                1 -> error("Migration folder hierarchy contains a cycle at ${folder.sourceFolderId}")
+                2 -> return
+            }
+            state[folder.sourceFolderId] = 1
+            folder.sourceParentFolderId.normalizedMigrationParentId()?.let { parentId ->
+                val parent = byId[parentId]
+                    ?: error("Migration parent folder is missing: $parentId")
+                visit(parent)
+            }
+            state[folder.sourceFolderId] = 2
+            sorted += folder
+        }
+
+        folders.forEach(::visit)
+        return sorted
+    }
+
+    private fun String?.normalizedMigrationParentId(): String? {
+        val value = this?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return value.takeUnless { it.equals("root", ignoreCase = true) }
+    }
+
+    private fun snapshotDeviceContext(): MdbxDeviceContext = MdbxDeviceContext(
+        assurance = MdbxDeviceAssurance.STANDARD,
+        secureClipboardAvailable = true,
+        screenCaptureProtectionAvailable = true,
+        secureTempFilesAvailable = true
+    )
+
+    private fun uniffi.mdbx_ffi.MdbxManagedSnapshotSummary.toRepositorySummary(): MdbxSnapshotSummary =
+        MdbxSnapshotSummary(
+            snapshotId = snapshotId,
+            baseCommitId = baseCommitId,
+            name = name,
+            snapshotType = if (kind == MdbxSnapshotKind.AUTOMATIC) "auto" else "manual",
+            isFull = isFull,
+            payloadBytes = payloadBytes.toLong(),
+            createdAt = createdAt,
+            createdByDeviceId = createdByDeviceId,
+            autoPrune = autoPrune,
+            integrityOk = integrityOk
+        )
+
+    private fun MdbxSnapshotStructureNode.toRepositoryNode(
+        rootIds: Set<String>
+    ): MdbxStructureNode? {
+        if (nodeType.equals("folder", ignoreCase = true) && id in rootIds) return null
+        val parentIsRoot = parentId != null && parentId in rootIds
+        return MdbxStructureNode(
+            id = id,
+            parentId = parentId?.takeUnless { it in rootIds },
+            name = name,
+            type = if (nodeType.equals("folder", ignoreCase = true)) {
+                MdbxStructureNodeType.FOLDER
+            } else {
+                MdbxStructureNodeType.ENTRY
+            },
+            path = if (parentIsRoot) path.substringAfter('/', name) else path,
+            status = when (status.lowercase()) {
+                "added" -> MdbxStructureNodeStatus.ADDED
+                "removed" -> MdbxStructureNodeStatus.REMOVED
+                "modified" -> MdbxStructureNodeStatus.MODIFIED
+                else -> MdbxStructureNodeStatus.UNCHANGED
+            },
+            childCount = childCount.toInt(),
+            metadata = metadata
+        )
+    }
+
+    private fun ULong.toDiagnosticInt(): Int = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
+
+    private fun ULong.toDiagnosticLong(): Long = coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
 
     private data class EntryMutation(
         val databaseId: Long,
@@ -996,6 +1757,24 @@ class Mdbx2Repository(
             AttachmentFingerprint::sha256
         )
         private const val COLLECTION_PAGE_SIZE = 200u
+        private const val HISTORY_PAGE_SIZE = 100
+        private const val MAX_HISTORY_ITEMS = 120
+        private const val MAX_HISTORY_PREVIEW_OBJECTS = 4
+        private const val PENDING_SYNC_PAGE_SIZE = 100
+        private const val MAX_PENDING_SYNC_ITEMS = 1_000
+        private const val MAX_DIAGNOSTIC_ISSUE_PREVIEW = 3
+        private const val SNAPSHOT_PAGE_SIZE = 100
+        private const val MAX_SNAPSHOT_ITEMS = 200
+        private const val MAX_CONFLICT_PAGE_SIZE = 50
+        private const val MAX_CONFLICT_ITEMS = 100
+        private const val MAX_PROJECT_TAGS = 64
+        private const val PROJECT_TAG_PAYLOAD_KIND = "monica-project-tag"
+        private const val PROJECT_TAG_PAYLOAD_SCHEMA_VERSION = 1u
+        private const val MDBX2_MANUAL_SYNC_PAYLOAD_FORMAT = "mdbx2-authenticated-complete-v1"
+        private const val MAX_MANUAL_SYNC_BUNDLE_BYTES = 32L * 1024L * 1024L
+        private const val MAX_MANUAL_SYNC_BASE64_CHARACTERS = 44_739_248
+        private const val MAX_METADATA_BENCHMARK_OPERATIONS = 500
+        private const val SHORT_ID_LENGTH = 8
         private const val ATTACHMENT_CHUNK_BYTES = 256L * 1024L
         private const val ATTACHMENT_BUFFER_BYTES = 8 * 1024
         private const val MAX_ATTACHMENT_BYTES = 64L * 1024L * 1024L

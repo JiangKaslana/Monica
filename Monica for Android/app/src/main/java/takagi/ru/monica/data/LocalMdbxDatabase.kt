@@ -57,7 +57,16 @@ val MdbxEngineType.capabilities: Set<MdbxCapability>
         MdbxEngineType.KOTLIN_MDBX1 -> MdbxCapability.entries.toSet()
         MdbxEngineType.RUST_MDBX2 -> setOf(
             MdbxCapability.LOCAL_CRUD,
-            MdbxCapability.EMBEDDED_ATTACHMENTS
+            MdbxCapability.EMBEDDED_ATTACHMENTS,
+            MdbxCapability.EXTERNAL_STORAGE,
+            MdbxCapability.REMOTE_SYNC,
+            MdbxCapability.NESTED_FOLDERS,
+            MdbxCapability.PROJECT_TAGS,
+            MdbxCapability.DELTA_HISTORY,
+            MdbxCapability.SNAPSHOTS,
+            MdbxCapability.CONFLICTS,
+            MdbxCapability.SYNC_BUNDLES,
+            MdbxCapability.BENCHMARK
         )
     }
 
@@ -190,6 +199,9 @@ data class LocalMdbxDatabase(
     @ColumnInfo(name = "cache_copy_path")
     val cacheCopyPath: String? = null,
 
+    @ColumnInfo(name = "external_tree_uri")
+    val externalTreeUri: String? = null,
+
     @ColumnInfo(name = "is_offline_available")
     val isOfflineAvailable: Boolean = false,
 
@@ -271,4 +283,15 @@ interface LocalMdbxDatabaseDao {
 
     @Query("UPDATE local_mdbx_databases SET last_sync_status = :status, last_sync_error = :error WHERE id = :databaseId")
     suspend fun updateSyncStatus(databaseId: Long, status: String, error: String?)
+
+    @Query(
+        """
+        UPDATE local_mdbx_databases
+        SET last_synced_at = :time,
+            last_sync_status = :status,
+            last_sync_error = NULL
+        WHERE id = :databaseId
+        """
+    )
+    suspend fun updateSyncSuccess(databaseId: Long, status: String, time: Long)
 }

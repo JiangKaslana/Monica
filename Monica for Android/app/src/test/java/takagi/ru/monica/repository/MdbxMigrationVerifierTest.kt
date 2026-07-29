@@ -56,6 +56,29 @@ class MdbxMigrationVerifierTest {
         )
     }
 
+    @Test
+    fun folderParentMismatchIsReported() {
+        val plan = MdbxMigrationPlanner.build(
+            source = sourceDatabase(),
+            folders = listOf(
+                MdbxStoredFolderEntry("parent", null, "Parent", "/parent", 1L),
+                MdbxStoredFolderEntry("child", "parent", "Child", "/parent/child", 1L)
+            ),
+            entries = emptyList(),
+            attachments = emptyList()
+        )
+        val mapping = mapOf("parent" to "target-parent", "child" to "target-child")
+        val actual = listOf(
+            MdbxStoredFolderEntry("target-parent", null, "Parent", "/target-parent", 1L),
+            MdbxStoredFolderEntry("target-child", null, "Child", "/target-child", 1L)
+        )
+
+        assertEquals(
+            listOf("folder mismatch:target-child"),
+            MdbxMigrationVerifier.folderErrors(plan, mapping, actual)
+        )
+    }
+
     private fun sourceDatabase() = LocalMdbxDatabase(
         id = 1L,
         name = "Source",

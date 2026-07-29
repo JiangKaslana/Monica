@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VpnKey
@@ -128,7 +129,8 @@ internal fun MdbxPasswordFieldSection(
 @Composable
 internal fun MdbxUnlockMethodSection(
     unlockMethod: MdbxUnlockMethod,
-    onUnlockMethodChange: (MdbxUnlockMethod) -> Unit
+    onUnlockMethodChange: (MdbxUnlockMethod) -> Unit,
+    includeDeviceKey: Boolean = false
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -144,15 +146,27 @@ internal fun MdbxUnlockMethodSection(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            val methods = listOf(
+            val methods = buildList {
+                add(
                 Triple(MdbxUnlockMethod.MASTER_PASSWORD, Icons.Default.Key, "只用主密码解锁"),
+                )
+                add(
                 Triple(MdbxUnlockMethod.KEY_FILE, Icons.Default.VpnKey, "只用 MDBX key file 解锁"),
-                Triple(MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE, Icons.Default.Shield, "两者同时正确才可解锁")
-            )
+                )
+                add(
+                    Triple(MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE, Icons.Default.Shield, "两者同时正确才可解锁")
+                )
+                if (includeDeviceKey) {
+                    add(
+                        Triple(MdbxUnlockMethod.DEVICE_KEY, Icons.Default.Smartphone, "仅在当前设备的安全存储中解锁")
+                    )
+                }
+            }
             val titles = mapOf(
                 MdbxUnlockMethod.MASTER_PASSWORD to "主密码",
                 MdbxUnlockMethod.KEY_FILE to "密钥文件",
-                MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE to "主密码 + 密钥文件"
+                MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE to "主密码 + 密钥文件",
+                MdbxUnlockMethod.DEVICE_KEY to "设备密钥"
             )
 
             methods.forEach { (method, icon, description) ->

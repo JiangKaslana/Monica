@@ -1,7 +1,6 @@
 package takagi.ru.monica.utils
 
 import android.content.Context
-import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -12,9 +11,42 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import takagi.ru.monica.data.KeepassRemoteSource
+import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.util.Locale
+
+internal class OneDriveHttpException(
+    val statusCode: Int,
+    responseBody: String
+) : IOException(
+    "HTTP $statusCode: " + responseBody.ifBlank { "OneDrive 请求失败" }
+)
+
+internal fun interface OneDriveAccessTokenProvider {
+    suspend fun acquire(): String
+}
+
+private class MsalOneDriveAccessTokenProvider(
+    context: Context,
+    private val accountIdentifier: String
+) : OneDriveAccessTokenProvider {
+    private val authManager = OneDriveAuthManager(context.applicationContext)
+
+    override suspend fun acquire(): String =
+        authManager.acquireAccessToken(accountIdentifier).accessToken
+            ?: throw IOException("OneDrive 访问令牌为空")
+}
+
+private data class OneDriveFileSourceDependencies(
+    val accessTokenProvider: OneDriveAccessTokenProvider,
+    val httpClient: OkHttpClient,
+    val graphBaseUrl: String,
+    val cacheDirectory: File
+)
 
 @Serializable
 private data class OneDriveDriveItemDto(
@@ -79,17 +111,60 @@ private data class OneDriveUploadSessionItemDto(
     val conflictBehavior: String = "replace"
 )
 
-class OneDriveKeePassFileSource(
-    context: Context,
+class OneDriveKeePassFileSource private constructor(
     private val accountIdentifier: String,
     private val driveId: String? = null,
     private val itemId: String? = null,
-    private val remotePath: String? = null
+    private val remotePath: String? = null,
+    dependencies: OneDriveFileSourceDependencies
 ) : KeePassFileSource {
-    private val appContext = context.applicationContext
-    private val authManager = OneDriveAuthManager(appContext)
+    private val accessTokenProvider = dependencies.accessTokenProvider
+    private val httpClient = dependencies.httpClient
+    private val graphBaseUrl = dependencies.graphBaseUrl
+    private val cacheDirectory = dependencies.cacheDirectory
     private val normalizedRemotePath = normalizeOptionalRemotePath(remotePath)
     private val json = Json { ignoreUnknownKeys = true }
+
+    constructor(
+        context: Context,
+        accountIdentifier: String,
+        driveId: String? = null,
+        itemId: String? = null,
+        remotePath: String? = null
+    ) : this(
+        accountIdentifier = accountIdentifier,
+        driveId = driveId,
+        itemId = itemId,
+        remotePath = remotePath,
+        dependencies = OneDriveFileSourceDependencies(
+            accessTokenProvider = MsalOneDriveAccessTokenProvider(context, accountIdentifier),
+            httpClient = sharedHttpClient,
+            graphBaseUrl = GRAPH_BASE_URL,
+            cacheDirectory = context.applicationContext.cacheDir
+        )
+    )
+
+    internal constructor(
+        accountIdentifier: String,
+        driveId: String? = null,
+        itemId: String? = null,
+        remotePath: String? = null,
+        accessTokenProvider: OneDriveAccessTokenProvider,
+        httpClient: OkHttpClient,
+        graphBaseUrl: String,
+        cacheDirectory: File
+    ) : this(
+        accountIdentifier = accountIdentifier,
+        driveId = driveId,
+        itemId = itemId,
+        remotePath = remotePath,
+        dependencies = OneDriveFileSourceDependencies(
+            accessTokenProvider = accessTokenProvider,
+            httpClient = httpClient,
+            graphBaseUrl = graphBaseUrl.trimEnd('/'),
+            cacheDirectory = cacheDirectory
+        )
+    )
 
     override suspend fun stat(): FileSourceStat = withContext(Dispatchers.IO) {
         requireRemotePath()
@@ -98,12 +173,121 @@ class OneDriveKeePassFileSource(
 
     override suspend fun read(): ByteArray = withContext(Dispatchers.IO) {
         requireRemotePath()
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         executeBytesRequest(
             relativeUrl = buildItemContentRelativeUrl(),
             accessToken = token
         )
+    }
+
+    /** Stream a OneDrive object to an atomically published local file. */
+    suspend fun readTo(destination: File) = withContext(Dispatchers.IO) {
+        requireRemotePath()
+        val token = accessToken()
+        val parent = destination.parentFile ?: throw IOException("下载目标目录不存在")
+        check(parent.exists() || parent.mkdirs()) { "无法创建下载目标目录" }
+        val temporary = File.createTempFile(".mdbx-download-", ".tmp", parent)
+        try {
+            val request = Request.Builder()
+                .url(resolveGraphUrl(buildItemContentRelativeUrl()))
+                .header("Authorization", "Bearer $token")
+                .get()
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw OneDriveHttpException(response.code, response.body?.string().orEmpty())
+                }
+                response.body?.byteStream()?.use { input ->
+                    temporary.outputStream().use { output -> input.copyTo(output) }
+                } ?: throw IOException("OneDrive 返回了空内容")
+            }
+            try {
+                Files.move(
+                    temporary.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+            } catch (_: Exception) {
+                if (!temporary.renameTo(destination)) {
+                    throw IOException("无法发布 OneDrive 下载文件")
+                }
+            }
+        } finally {
+            if (temporary.exists()) temporary.delete()
+        }
+    }
+
+    /** File-based upload for MDBX2 bootstrap, segments and content-addressed Blobs. */
+    suspend fun writeFrom(
+        source: File,
+        mode: MdbxRemoteWriteMode = MdbxRemoteWriteMode.CREATE_ONLY,
+        expectedVersion: String? = null
+    ): FileSourceWriteResult = withContext(Dispatchers.IO) {
+        requireRemotePath()
+        MdbxRemoteSyncPaths.requireRegularFile(source)
+        val existing = try {
+            stat()
+        } catch (error: OneDriveHttpException) {
+            if (error.statusCode == 404) null else throw error
+        }
+        if (mode == MdbxRemoteWriteMode.CREATE_ONLY && existing != null) {
+            if (existing.isDirectory) throw IOException("OneDrive 远端路径已是目录")
+            val temporary = File.createTempFile(".mdbx-compare-", ".tmp", cacheDirectory)
+            try {
+                readTo(temporary)
+                if (temporary.length() == source.length() &&
+                    MdbxRemoteSyncPaths.sha256Hex(temporary) == MdbxRemoteSyncPaths.sha256Hex(source)
+                ) {
+                    return@withContext FileSourceWriteResult(
+                        versionToken = existing.versionToken,
+                        etag = existing.etag,
+                        lastModified = existing.lastModified,
+                        remoteId = existing.remoteId,
+                        driveId = existing.driveId
+                    )
+                }
+            } finally {
+                temporary.delete()
+            }
+            throw IOException("OneDrive 不可变对象已存在但内容不同")
+        }
+        if (mode == MdbxRemoteWriteMode.IF_MATCH) {
+            val requiredVersion = expectedVersion?.takeIf(String::isNotBlank)
+                ?: throw IllegalArgumentException(
+                    "OneDrive conditional replacement requires an ETag"
+                )
+            if (existing?.versionToken != requiredVersion && existing?.etag != requiredVersion) {
+                throw IOException("远端文件已变化，请先重新同步")
+            }
+        }
+        val token = accessToken()
+        val headers = when {
+            mode == MdbxRemoteWriteMode.IF_MATCH -> mapOf("If-Match" to expectedVersion!!)
+            else -> emptyMap()
+        }
+        if (source.length() > LARGE_UPLOAD_THRESHOLD_BYTES) {
+            return@withContext uploadLargeFileFrom(
+                accessToken = token,
+                source = source,
+                headers = headers,
+                createOnly = mode == MdbxRemoteWriteMode.CREATE_ONLY
+            )
+        }
+        val relativeUrl = if (mode == MdbxRemoteWriteMode.CREATE_ONLY) {
+            buildPathContentRelativeUrl(normalizedRemotePath, conflictBehavior = "fail")
+        } else {
+            buildItemContentRelativeUrl()
+        }
+        val payload = executeJsonRequest(
+            relativeUrl = relativeUrl,
+            accessToken = token,
+            method = "PUT",
+            body = source.readBytes(),
+            headers = headers,
+            expectedStatusCodes = setOf(200, 201)
+        )
+        json.decodeFromString<OneDriveDriveItemDto>(payload).toWriteResult()
     }
 
     override suspend fun write(
@@ -111,8 +295,7 @@ class OneDriveKeePassFileSource(
         expectedVersion: String?
     ): FileSourceWriteResult = withContext(Dispatchers.IO) {
         requireRemotePath()
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         val headers = expectedVersion
             ?.takeIf { it.isNotBlank() }
             ?.let { mapOf("If-Match" to it) }
@@ -151,8 +334,7 @@ class OneDriveKeePassFileSource(
 
     override suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-                ?: throw IOException("OneDrive 访问令牌为空")
+            val token = accessToken()
             val relativeUrl = if (normalizedRemotePath.isBlank()) {
                 "${driveBaseRelativeUrl()}/root/children"
             } else {
@@ -175,8 +357,7 @@ class OneDriveKeePassFileSource(
 
     suspend fun listDirectory(directoryPath: String? = null): List<FileSourceEntry> = withContext(Dispatchers.IO) {
         val normalizedDirectoryPath = normalizeOptionalRemotePath(directoryPath)
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         val items = mutableListOf<OneDriveDriveItemDto>()
         var nextUrl: String? = buildChildrenRelativeUrl(normalizedDirectoryPath)
         while (nextUrl != null) {
@@ -209,11 +390,10 @@ class OneDriveKeePassFileSource(
     suspend fun createDirectory(parentPath: String?, name: String): FileSourceEntry = withContext(Dispatchers.IO) {
         val normalizedParentPath = normalizeOptionalRemotePath(parentPath)
         val targetPath = buildChildPath(normalizedParentPath, name)
-        if (runCatching { resolveItemByPath(targetPath) }.getOrNull() != null) {
+        if (pathExists(targetPath)) {
             throw IOException("同名目录已存在")
         }
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         val payload = executeJsonRequest(
             relativeUrl = resolveCreateFolderRelativeUrl(normalizedParentPath),
             accessToken = token,
@@ -248,11 +428,10 @@ class OneDriveKeePassFileSource(
     ): FileSourceEntry = withContext(Dispatchers.IO) {
         val normalizedParentPath = normalizeOptionalRemotePath(parentPath)
         val targetPath = buildChildPath(normalizedParentPath, name)
-        if (runCatching { resolveItemByPath(targetPath) }.getOrNull() != null) {
+        if (pathExists(targetPath)) {
             throw IOException("同名文件已存在")
         }
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         val payload = executeJsonRequest(
             relativeUrl = buildPathContentRelativeUrl(
                 path = targetPath,
@@ -278,10 +457,9 @@ class OneDriveKeePassFileSource(
     suspend fun deleteEntry(targetPath: String) = withContext(Dispatchers.IO) {
         val normalizedTargetPath = normalizeRemotePath(targetPath)
         val item = resolveItemByPath(normalizedTargetPath)
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         executeJsonRequest(
-            relativeUrl = "${driveBaseRelativeUrl()}/items/${Uri.encode(item.id)}",
+            relativeUrl = "${driveBaseRelativeUrl()}/items/${encodePathSegment(item.id)}",
             accessToken = token,
             method = "DELETE",
             expectedStatusCodes = setOf(204)
@@ -295,10 +473,9 @@ class OneDriveKeePassFileSource(
         }
         require('/' !in sanitizedName) { "文件名不能包含路径分隔符" }
         val item = resolveItemByPath(normalizedTargetPath)
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         val payload = executeJsonRequest(
-            relativeUrl = "${driveBaseRelativeUrl()}/items/${Uri.encode(item.id)}",
+            relativeUrl = "${driveBaseRelativeUrl()}/items/${encodePathSegment(item.id)}",
             accessToken = token,
             method = "PATCH",
             body = json.encodeToString(
@@ -327,10 +504,9 @@ class OneDriveKeePassFileSource(
     }
 
     private suspend fun resolveItemById(resolvedItemId: String): OneDriveDriveItemDto {
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         val payload = executeJsonRequest(
-            relativeUrl = "${driveBaseRelativeUrl()}/items/${Uri.encode(resolvedItemId)}",
+            relativeUrl = "${driveBaseRelativeUrl()}/items/${encodePathSegment(resolvedItemId)}",
             accessToken = token
         )
         return json.decodeFromString(payload)
@@ -338,16 +514,14 @@ class OneDriveKeePassFileSource(
 
     private suspend fun resolveItemByPath(path: String): OneDriveDriveItemDto {
         if (path.isBlank()) {
-            val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-                ?: throw IOException("OneDrive 访问令牌为空")
+            val token = accessToken()
             val payload = executeJsonRequest(
                 relativeUrl = "${driveBaseRelativeUrl()}/root",
                 accessToken = token
             )
             return json.decodeFromString(payload)
         }
-        val token = authManager.acquireAccessToken(accountIdentifier).accessToken
-            ?: throw IOException("OneDrive 访问令牌为空")
+        val token = accessToken()
         val payload = executeJsonRequest(
             relativeUrl = buildPathMetadataRelativeUrl(path),
             accessToken = token
@@ -383,7 +557,7 @@ class OneDriveKeePassFileSource(
                 .header("Content-Length", chunk.size.toString())
                 .put(chunk.toRequestBody(KEEPASS_KDBX_MIME_TYPE.toMediaType()))
                 .build()
-            sharedHttpClient.newCall(request).execute().use { response ->
+            httpClient.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string().orEmpty()
                 when (response.code) {
                     200, 201 -> {
@@ -397,6 +571,66 @@ class OneDriveKeePassFileSource(
                     else -> throw IOException(
                         responseBody.ifBlank { "OneDrive 大文件上传失败: HTTP ${response.code}" }
                     )
+                }
+            }
+        }
+        throw IOException("OneDrive 大文件上传未返回最终结果")
+    }
+
+    private suspend fun uploadLargeFileFrom(
+        accessToken: String,
+        source: File,
+        headers: Map<String, String>,
+        createOnly: Boolean
+    ): FileSourceWriteResult {
+        val totalSize = source.length()
+        require(totalSize > 0L) { "OneDrive 大文件上传源不能为空" }
+        val sessionPayload = executeJsonRequest(
+            relativeUrl = buildUploadSessionRelativeUrl(),
+            accessToken = accessToken,
+            method = "POST",
+            body = json.encodeToString(
+                OneDriveUploadSessionRequestDto.serializer(),
+                OneDriveUploadSessionRequestDto(
+                    item = OneDriveUploadSessionItemDto(
+                        conflictBehavior = if (createOnly) "fail" else "replace"
+                    )
+                )
+            ).encodeToByteArray(),
+            contentType = "application/json; charset=utf-8",
+            headers = headers,
+            expectedStatusCodes = setOf(200)
+        )
+        val session = json.decodeFromString<OneDriveUploadSessionResponseDto>(sessionPayload)
+        RandomAccessFile(source, "r").use { input ->
+            var offset = 0L
+            while (offset < totalSize) {
+                val remaining = totalSize - offset
+                val chunkSize = minOf(remaining, UPLOAD_CHUNK_SIZE_BYTES.toLong()).toInt()
+                val chunk = ByteArray(chunkSize)
+                input.seek(offset)
+                input.readFully(chunk)
+                val endExclusive = offset + chunkSize
+                val request = Request.Builder()
+                    .url(session.uploadUrl)
+                    .header("Content-Range", "bytes $offset-${endExclusive - 1}/$totalSize")
+                    .header("Content-Length", chunk.size.toString())
+                    .put(chunk.toRequestBody(KEEPASS_KDBX_MIME_TYPE.toMediaType()))
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string().orEmpty()
+                    when (response.code) {
+                        200, 201 -> {
+                            val item = json.decodeFromString<OneDriveDriveItemDto>(responseBody)
+                            return item.toWriteResult()
+                        }
+                        202 -> offset = endExclusive
+                        409 -> throw IOException("OneDrive 不可变对象已存在")
+                        412 -> throw IOException("远端文件已变化，请先重新同步")
+                        else -> throw IOException(
+                            responseBody.ifBlank { "OneDrive 大文件上传失败: HTTP ${response.code}" }
+                        )
+                    }
                 }
             }
         }
@@ -421,25 +655,25 @@ class OneDriveKeePassFileSource(
             requestBuilder.header(name, value)
         }
         val request = requestBuilder.build()
-        sharedHttpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
             if (response.code !in expectedStatusCodes) {
                 if (response.code == 412) {
                     throw IOException("远端文件已变化，请先重新同步")
                 }
-                throw IOException(
-                    responseBody.ifBlank { "OneDrive 请求失败: HTTP ${response.code}" }
-                )
+                throw OneDriveHttpException(response.code, responseBody)
             }
             return responseBody
         }
     }
 
     private fun resolveGraphUrl(relativeOrAbsoluteUrl: String): String {
-        return if (relativeOrAbsoluteUrl.startsWith("https://", ignoreCase = true)) {
+        return if (relativeOrAbsoluteUrl.startsWith("https://", ignoreCase = true) ||
+            relativeOrAbsoluteUrl.startsWith("http://", ignoreCase = true)
+        ) {
             relativeOrAbsoluteUrl
         } else {
-            "$GRAPH_BASE_URL$relativeOrAbsoluteUrl"
+            "$graphBaseUrl$relativeOrAbsoluteUrl"
         }
     }
 
@@ -448,15 +682,13 @@ class OneDriveKeePassFileSource(
         accessToken: String
     ): ByteArray {
         val request = Request.Builder()
-            .url("$GRAPH_BASE_URL$relativeUrl")
+            .url(resolveGraphUrl(relativeUrl))
             .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
-        sharedHttpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IOException(response.body?.string().orEmpty().ifBlank {
-                    "OneDrive 下载失败: HTTP ${response.code}"
-                })
+                throw OneDriveHttpException(response.code, response.body?.string().orEmpty())
             }
             return response.body?.bytes() ?: throw IOException("OneDrive 返回了空内容")
         }
@@ -464,13 +696,13 @@ class OneDriveKeePassFileSource(
 
     private fun buildItemContentRelativeUrl(): String {
         return itemId?.takeIf { it.isNotBlank() }
-            ?.let { "${driveBaseRelativeUrl()}/items/${Uri.encode(it)}/content" }
+            ?.let { "${driveBaseRelativeUrl()}/items/${encodePathSegment(it)}/content" }
             ?: buildPathContentRelativeUrl(normalizedRemotePath)
     }
 
     private fun buildUploadSessionRelativeUrl(): String {
         return itemId?.takeIf { it.isNotBlank() }
-            ?.let { "${driveBaseRelativeUrl()}/items/${Uri.encode(it)}/createUploadSession" }
+            ?.let { "${driveBaseRelativeUrl()}/items/${encodePathSegment(it)}/createUploadSession" }
             ?: "${driveBaseRelativeUrl()}/root:/${encodePath(normalizedRemotePath)}:/createUploadSession"
     }
 
@@ -487,7 +719,7 @@ class OneDriveKeePassFileSource(
             "${driveBaseRelativeUrl()}/root/children"
         } else {
             val parentItem = resolveItemByPath(parentPath)
-            "${driveBaseRelativeUrl()}/items/${Uri.encode(parentItem.id)}/children"
+            "${driveBaseRelativeUrl()}/items/${encodePathSegment(parentItem.id)}/children"
         }
     }
 
@@ -501,14 +733,14 @@ class OneDriveKeePassFileSource(
     ): String {
         val base = "${driveBaseRelativeUrl()}/root:/${encodePath(path)}:/content"
         val behavior = conflictBehavior?.trim()?.takeIf { it.isNotBlank() } ?: return base
-        return "$base?@microsoft.graph.conflictBehavior=${Uri.encode(behavior)}"
+        return "$base?@microsoft.graph.conflictBehavior=${encodePathSegment(behavior)}"
     }
 
     private fun driveBaseRelativeUrl(): String {
         return if (driveId.isNullOrBlank()) {
             "/me/drive"
         } else {
-            "/drives/${Uri.encode(driveId)}"
+            "/drives/${encodePathSegment(driveId)}"
         }
     }
 
@@ -518,12 +750,25 @@ class OneDriveKeePassFileSource(
         }
     }
 
+    private suspend fun pathExists(path: String): Boolean {
+        return try {
+            resolveItemByPath(path)
+            true
+        } catch (error: OneDriveHttpException) {
+            if (error.statusCode == 404) false else throw error
+        }
+    }
+
     private fun encodePath(path: String): String {
         return normalizeRemotePath(path)
             .split('/')
             .filter { it.isNotBlank() }
-            .joinToString("/") { segment -> Uri.encode(segment) }
+            .joinToString("/") { segment -> encodePathSegment(segment) }
     }
+
+    private suspend fun accessToken(): String = accessTokenProvider.acquire()
+        .takeIf(String::isNotBlank)
+        ?: throw IOException("OneDrive 访问令牌为空")
 
     private fun OneDriveDriveItemDto.toStat(): FileSourceStat {
         return FileSourceStat(
@@ -553,6 +798,24 @@ class OneDriveKeePassFileSource(
         private const val LARGE_UPLOAD_THRESHOLD_BYTES = 2 * 1024 * 1024
         private const val UPLOAD_CHUNK_SIZE_BYTES = 320 * 1024 * 16
         private val sharedHttpClient = OkHttpClient()
+
+        internal fun encodePathSegment(value: String): String = buildString {
+            value.toByteArray(Charsets.UTF_8).forEach { byte ->
+                val unsigned = byte.toInt() and 0xff
+                val isUnreserved = unsigned in 'a'.code..'z'.code ||
+                    unsigned in 'A'.code..'Z'.code ||
+                    unsigned in '0'.code..'9'.code ||
+                    unsigned == '-'.code || unsigned == '.'.code ||
+                    unsigned == '_'.code || unsigned == '~'.code
+                if (isUnreserved) {
+                    append(unsigned.toChar())
+                } else {
+                    append('%')
+                    append(HEX[unsigned ushr 4])
+                    append(HEX[unsigned and 0x0f])
+                }
+            }
+        }
 
         fun normalizeRemotePath(remotePath: String): String {
             val normalized = remotePath
@@ -591,6 +854,8 @@ class OneDriveKeePassFileSource(
             require('/' !in sanitizedName) { "文件名不能包含路径分隔符" }
             return if (parentPath.isBlank()) sanitizedName else "$parentPath/$sanitizedName"
         }
+
+        private const val HEX = "0123456789ABCDEF"
     }
 }
 

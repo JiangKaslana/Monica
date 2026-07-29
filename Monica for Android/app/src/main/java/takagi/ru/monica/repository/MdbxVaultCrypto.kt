@@ -17,6 +17,7 @@ data class MdbxVaultCredential(
     val unlockMethod: MdbxUnlockMethod,
     val password: String? = null,
     val keyFileBytes: ByteArray? = null,
+    val deviceKeyBytes: ByteArray? = null,
     val keyFileName: String? = null,
     val keyFileFingerprint: String? = keyFileBytes?.let(MdbxVaultCrypto::fingerprint)
 ) {
@@ -43,12 +44,40 @@ object MdbxVaultCrypto {
     private const val AES_TRANSFORMATION = "AES/GCM/NoPadding"
     private const val VERIFIER_LABEL = "Monica Database eXtended credential verifier v1"
     private const val FIELD_PREFIX = "mdbx:v1:"
+    private const val DEVICE_KEY_PREFIX = "mdbx2-device-key:v1:"
 
     fun generateKeyFileBytes(): ByteArray {
         val random = ByteArray(64)
         SecureRandom().nextBytes(random)
         return "$KEY_FILE_MAGIC\n".toByteArray(Charsets.UTF_8) + random
     }
+
+    fun generateDeviceKeyBytes(): ByteArray {
+        return ByteArray(64).also { SecureRandom().nextBytes(it) }
+    }
+
+    fun encodeDeviceKey(
+        bytes: ByteArray,
+        encrypt: (String) -> String
+    ): String {
+        require(bytes.isNotEmpty()) { "Device key material cannot be empty" }
+        val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        return DEVICE_KEY_PREFIX + encrypt(encoded)
+    }
+
+    fun decodeDeviceKey(
+        value: String?,
+        decrypt: (String) -> String
+    ): ByteArray? {
+        val payload = value?.takeIf { it.startsWith(DEVICE_KEY_PREFIX) }
+            ?.removePrefix(DEVICE_KEY_PREFIX)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return Base64.decode(decrypt(payload), Base64.DEFAULT)
+    }
+
+    fun isEncodedDeviceKey(value: String?): Boolean =
+        value?.startsWith(DEVICE_KEY_PREFIX) == true
 
     fun fingerprint(bytes: ByteArray): String =
         sha256(bytes).joinToString("") { "%02x".format(it) }
@@ -155,6 +184,11 @@ object MdbxVaultCrypto {
         }
         if (credential.requiresKeyFile() && credential.keyFileBytes == null) {
             throw IllegalArgumentException("MDBX key file is required")
+        }
+        if (credential.unlockMethod == MdbxUnlockMethod.DEVICE_KEY &&
+            credential.deviceKeyBytes?.isEmpty() != false
+        ) {
+            throw IllegalArgumentException("MDBX device key is required")
         }
     }
 

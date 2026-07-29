@@ -1331,10 +1331,10 @@ class MdbxVaultStore(
         }
     }
 
-    suspend fun pruneAutomaticSnapshots(
+    override suspend fun pruneAutomaticSnapshots(
         databaseId: Long,
-        keepCount: Int? = null,
-        maxBytes: Long? = null
+        keepCount: Int?,
+        maxBytes: Long?
     ): Int = withContext(Dispatchers.IO) {
         val dbInfo = databaseDao.getDatabaseById(databaseId)
             ?: throw IllegalStateException("MDBX vault not found: $databaseId")

@@ -42,10 +42,11 @@ import takagi.ru.monica.keepass.KeePassPendingChangeDao
         // MDBX 数据库格式
         LocalMdbxDatabase::class,
         MdbxRemoteSource::class,
+        MdbxSyncStateEntity::class,
         // KeePass entry-level pending changes
         KeePassPendingChange::class
     ],
-    version = 74,
+    version = 76,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -62,6 +63,7 @@ abstract class PasswordDatabase : RoomDatabase() {
     abstract fun keepassGroupSyncConfigDao(): KeepassGroupSyncConfigDao
     abstract fun localMdbxDatabaseDao(): LocalMdbxDatabaseDao
     abstract fun mdbxRemoteSourceDao(): MdbxRemoteSourceDao
+    abstract fun mdbxSyncStateDao(): MdbxSyncStateDao
     abstract fun customFieldDao(): CustomFieldDao  // 自定义字段 DAO
     abstract fun passwordPageAggregateStackDao(): PasswordPageAggregateStackDao
     abstract fun passwordArchiveSyncMetaDao(): PasswordArchiveSyncMetaDao
@@ -2212,6 +2214,32 @@ abstract class PasswordDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_74_75 = object : androidx.room.migration.Migration(74, 75) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `mdbx_sync_states` (
+                        `database_id` INTEGER NOT NULL,
+                        `state_json` TEXT NOT NULL,
+                        `updated_at` INTEGER NOT NULL,
+                        PRIMARY KEY(`database_id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        internal val MIGRATION_75_76 = object : androidx.room.migration.Migration(75, 76) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                addColumnIfMissing(
+                    database = database,
+                    tableName = "local_mdbx_databases",
+                    columnName = "external_tree_uri",
+                    definition = "TEXT DEFAULT NULL"
+                )
+            }
+        }
+
         private fun addColumnIfMissing(
             database: androidx.sqlite.db.SupportSQLiteDatabase,
             tableName: String,
@@ -2314,7 +2342,9 @@ abstract class PasswordDatabase : RoomDatabase() {
                         MIGRATION_70_71,   // KeePass pending base snapshots
                         MIGRATION_71_72,   // KeePass sync state updated timestamp
                         MIGRATION_72_73,   // Encrypted timeline version snapshots
-                        MIGRATION_73_74    // Per-database MDBX engine selection
+                        MIGRATION_73_74,   // Per-database MDBX engine selection
+                        MIGRATION_74_75,   // MDBX2 durable remote sync cursors
+                        MIGRATION_75_76    // MDBX2 external SAF tree metadata
                     )
                     // 启用多进程失效通知：IME 跑在 :ime 独立进程，主进程需要
                     // 感知 IME 进程对数据库的修改（例如最近填充时间戳等）。

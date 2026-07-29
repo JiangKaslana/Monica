@@ -1,12 +1,16 @@
 package takagi.ru.monica.repository
 
+import android.app.Application
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.util.Date
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,9 +32,292 @@ import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasskeyEntry
 import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.security.SecurityManager
+import takagi.ru.monica.viewmodel.MdbxViewModel
 
 @RunWith(AndroidJUnit4::class)
 class Mdbx2RepositoryInstrumentedTest {
+    @Test
+    fun nestedFolderCrudAndReopenRoundTrip() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val room = PasswordDatabase.getDatabase(context)
+        val databaseDao = room.localMdbxDatabaseDao()
+        val securityManager = SecurityManager(context)
+        val repository = Mdbx2Repository(context, databaseDao, securityManager)
+        val password = "nested-folders-${System.currentTimeMillis()}"
+        val vaultFile = repository.createInitializedVaultFile(MdbxTigaMode.SKY, password)
+        var databaseId = 0L
+        try {
+            databaseId = databaseDao.insertDatabase(
+                LocalMdbxDatabase(
+                    name = "MDBX2 nested folder test",
+                    filePath = vaultFile.absolutePath,
+                    storageLocation = MdbxStorageLocation.INTERNAL.name,
+                    sourceType = MdbxSourceType.LOCAL_INTERNAL.name,
+                    engineType = MdbxEngineType.RUST_MDBX2.name,
+                    tigaMode = MdbxTigaMode.SKY.name,
+                    encryptedPassword = securityManager.encryptData(password),
+                    unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD.storedValue,
+                    kdfProfile = "argon2id-mdbx2",
+                    workingCopyPath = vaultFile.absolutePath,
+                    cacheCopyPath = vaultFile.absolutePath,
+                    isOfflineAvailable = true,
+                    lastSyncStatus = MdbxSyncStatus.LOCAL_ONLY.name
+                )
+            )
+
+            val parent = repository.createFolder(databaseId, "Parent", null)
+            val child = repository.createFolder(databaseId, "Child", parent.folderId)
+            val grandchild = repository.createFolder(databaseId, "Grandchild", child.folderId)
+            val initial = repository.listFolders(databaseId).associateBy { it.folderId }
+            assertEquals(null, initial.getValue(parent.folderId).parentFolderId)
+            assertEquals(parent.folderId, initial.getValue(child.folderId).parentFolderId)
+            assertEquals(child.folderId, initial.getValue(grandchild.folderId).parentFolderId)
+            assertEquals(
+                "/${parent.folderId}/${child.folderId}/${grandchild.folderId}",
+                initial.getValue(grandchild.folderId).pathKey
+            )
+
+            assertTrue(
+                runCatching {
+                    repository.moveFolder(databaseId, parent.folderId, grandchild.folderId)
+                }.isFailure
+            )
+            repository.moveFolder(databaseId, grandchild.folderId, parent.folderId)
+            repository.renameFolder(databaseId, child.folderId, "Renamed child")
+            repository.deleteFolder(databaseId, child.folderId)
+            assertTrue(repository.listFolders(databaseId).none { it.folderId == child.folderId })
+            repository.restoreFolder(databaseId, child.folderId, parent.folderId)
+
+            val reopened = MdbxRepositoryFactory.create(context, room, securityManager)
+            val restored = reopened.listFolders(databaseId).associateBy { it.folderId }
+            assertEquals("Renamed child", restored.getValue(child.folderId).name)
+            assertEquals(parent.folderId, restored.getValue(child.folderId).parentFolderId)
+            assertEquals(parent.folderId, restored.getValue(grandchild.folderId).parentFolderId)
+        } finally {
+            if (databaseId > 0L) databaseDao.deleteDatabaseById(databaseId)
+            repository.deleteOwnedVaultFile(vaultFile)
+        }
+    }
+
+    @Test
+    fun snapshotRestoreReconcilesRoomWithoutRestart() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val application = context.applicationContext as Application
+        val room = PasswordDatabase.getDatabase(context)
+        val databaseDao = room.localMdbxDatabaseDao()
+        val securityManager = SecurityManager(context)
+        val rawRepository = Mdbx2Repository(
+            context = context,
+            databaseDao = databaseDao,
+            securityManager = securityManager,
+            passwordEntryDao = room.passwordEntryDao(),
+            secureItemDao = room.secureItemDao(),
+            customFieldDao = room.customFieldDao()
+        )
+        val password = "room-history-${System.currentTimeMillis()}"
+        val vaultFile = rawRepository.createInitializedVaultFile(MdbxTigaMode.SKY, password)
+        var databaseId = 0L
+        var passwordId = 0L
+        var revertedCreatePasswordId = 0L
+        try {
+            databaseId = databaseDao.insertDatabase(
+                LocalMdbxDatabase(
+                    name = "MDBX2 Room history test",
+                    filePath = vaultFile.absolutePath,
+                    storageLocation = MdbxStorageLocation.INTERNAL.name,
+                    sourceType = MdbxSourceType.LOCAL_INTERNAL.name,
+                    engineType = MdbxEngineType.RUST_MDBX2.name,
+                    tigaMode = MdbxTigaMode.SKY.name,
+                    encryptedPassword = securityManager.encryptData(password),
+                    unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD.storedValue,
+                    kdfProfile = "argon2id-mdbx2",
+                    workingCopyPath = vaultFile.absolutePath,
+                    cacheCopyPath = vaultFile.absolutePath,
+                    isOfflineAvailable = true,
+                    lastSyncStatus = MdbxSyncStatus.LOCAL_ONLY.name
+                )
+            )
+            val passwordRepository = PasswordRepository(
+                passwordEntryDao = room.passwordEntryDao(),
+                mdbxRepository = rawRepository
+            )
+            passwordId = passwordRepository.insertPasswordEntry(
+                PasswordEntry(
+                    title = "Room before",
+                    website = "https://room-history.test",
+                    username = "room-before",
+                    password = "room-secret",
+                    mdbxDatabaseId = databaseId
+                )
+            )
+            val before = room.passwordEntryDao().getPasswordEntryById(passwordId)!!
+            val snapshot = rawRepository.createSnapshot(databaseId, "Room before update")
+            passwordRepository.updatePasswordEntry(before.copy(title = "Room after"))
+            assertEquals("Room after", room.passwordEntryDao().getPasswordEntryById(passwordId)?.title)
+
+            val viewModel = MdbxViewModel(
+                application = application,
+                databaseDao = databaseDao,
+                remoteSourceDao = room.mdbxRemoteSourceDao(),
+                passwordEntryDao = room.passwordEntryDao(),
+                secureItemDao = room.secureItemDao(),
+                passkeyDao = room.passkeyDao(),
+                attachmentDao = room.attachmentDao(),
+                customFieldDao = room.customFieldDao(),
+                securityManager = securityManager
+            )
+            viewModel.clearOperationState()
+            viewModel.revertToSnapshot(databaseId, snapshot.snapshotId)
+            val operation = withTimeout(30_000) {
+                viewModel.operationState.first { state ->
+                    state is MdbxViewModel.OperationState.Success ||
+                        state is MdbxViewModel.OperationState.Error
+                }
+            }
+            assertTrue(operation.toString(), operation is MdbxViewModel.OperationState.Success)
+            assertEquals("Room before", room.passwordEntryDao().getPasswordEntryById(passwordId)?.title)
+            assertEquals("room-before", room.passwordEntryDao().getPasswordEntryById(passwordId)?.username)
+
+            revertedCreatePasswordId = passwordRepository.insertPasswordEntry(
+                PasswordEntry(
+                    title = "Created for commit revert",
+                    website = "https://commit-revert.test",
+                    username = "commit-revert",
+                    password = "commit-secret",
+                    mdbxDatabaseId = databaseId
+                )
+            )
+            var createCommitId: String? = null
+            for (delta in rawRepository.listDeltaHistory(databaseId)) {
+                if (
+                    rawRepository.listCommitDiff(databaseId, delta.commitId)
+                        .any { it.currentTitle == "Created for commit revert" }
+                ) {
+                    createCommitId = delta.commitId
+                    break
+                }
+            }
+            assertNotNull(createCommitId)
+            viewModel.clearOperationState()
+            viewModel.revertCommit(databaseId, requireNotNull(createCommitId))
+            val revertOperation = withTimeout(30_000) {
+                viewModel.operationState.first { state ->
+                    state is MdbxViewModel.OperationState.Success ||
+                        state is MdbxViewModel.OperationState.Error
+                }
+            }
+            assertTrue(
+                revertOperation.toString(),
+                revertOperation is MdbxViewModel.OperationState.Success
+            )
+            assertTrue(
+                room.passwordEntryDao().getPasswordEntryById(revertedCreatePasswordId)?.isDeleted == true
+            )
+        } finally {
+            if (revertedCreatePasswordId > 0L) {
+                room.passwordEntryDao().deletePasswordEntryById(revertedCreatePasswordId)
+            }
+            if (passwordId > 0L) room.passwordEntryDao().deletePasswordEntryById(passwordId)
+            if (databaseId > 0L) databaseDao.deleteDatabaseById(databaseId)
+            rawRepository.deleteOwnedVaultFile(vaultFile)
+        }
+    }
+
+    @Test
+    fun historyDiffSnapshotRestoreAndDeleteRoundTrip() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val room = PasswordDatabase.getDatabase(context)
+        val databaseDao = room.localMdbxDatabaseDao()
+        val securityManager = SecurityManager(context)
+        val repository = Mdbx2Repository(
+            context = context,
+            databaseDao = databaseDao,
+            securityManager = securityManager,
+            passwordEntryDao = room.passwordEntryDao(),
+            secureItemDao = room.secureItemDao(),
+            customFieldDao = room.customFieldDao()
+        )
+        val password = "history-${System.currentTimeMillis()}"
+        val vaultFile = repository.createInitializedVaultFile(MdbxTigaMode.SKY, password)
+        var databaseId = 0L
+        try {
+            databaseId = databaseDao.insertDatabase(
+                LocalMdbxDatabase(
+                    name = "MDBX2 history test",
+                    filePath = vaultFile.absolutePath,
+                    storageLocation = MdbxStorageLocation.INTERNAL.name,
+                    sourceType = MdbxSourceType.LOCAL_INTERNAL.name,
+                    engineType = MdbxEngineType.RUST_MDBX2.name,
+                    tigaMode = MdbxTigaMode.SKY.name,
+                    encryptedPassword = securityManager.encryptData(password),
+                    unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD.storedValue,
+                    kdfProfile = "argon2id-mdbx2",
+                    workingCopyPath = vaultFile.absolutePath,
+                    cacheCopyPath = vaultFile.absolutePath,
+                    isOfflineAvailable = true,
+                    lastSyncStatus = MdbxSyncStatus.LOCAL_ONLY.name
+                )
+            )
+            val folder = repository.createFolder(databaseId, "History", null)
+            val before = PasswordEntry(
+                id = 701L,
+                title = "Before",
+                website = "https://history.test",
+                username = "before-user",
+                password = "before-password",
+                mdbxDatabaseId = databaseId,
+                mdbxFolderId = folder.folderId
+            )
+            repository.upsertPassword(before)
+            assertTrue(repository.listDeltaHistory(databaseId).isNotEmpty())
+
+            val snapshot = repository.createSnapshot(
+                databaseId = databaseId,
+                name = "Before update",
+                fullSnapshot = false
+            )
+            assertEquals("Before update", snapshot.name)
+            assertEquals("manual", snapshot.snapshotType)
+            assertTrue(snapshot.isFull)
+            assertTrue(snapshot.integrityOk)
+
+            repository.upsertPassword(before.copy(title = "After", username = "after-user"))
+            val history = repository.listDeltaHistory(databaseId)
+            assertTrue(history.size >= 2)
+            var diff: MdbxCommitDiff? = null
+            for (delta in history) {
+                diff = repository.listCommitDiff(databaseId, delta.commitId)
+                    .firstOrNull { it.currentTitle == "After" }
+                if (diff != null) break
+            }
+            assertNotNull(diff)
+            assertEquals("Before", diff?.previousTitle)
+
+            val preview = repository.getSnapshotStructurePreview(databaseId, snapshot.snapshotId)
+            assertEquals(snapshot.snapshotId, preview.snapshotId)
+            assertTrue(preview.snapshotNodes.any { it.name == "Before" })
+            assertTrue(preview.currentNodes.any { it.name == "After" })
+
+            assertEquals(
+                "After",
+                repository.readStoredEntries(databaseId)
+                    .single { it.entryId == "password:701" && !it.deleted }
+                    .title
+            )
+            repository.revertToSnapshot(databaseId, snapshot.snapshotId)
+            val restored = repository.readStoredEntries(databaseId)
+                .single { it.entryId == "password:701" && !it.deleted }
+            assertEquals("Before", restored.title)
+            assertEquals("before-user", JSONObject(restored.payloadJson).getString("username"))
+
+            repository.deleteSnapshot(databaseId, snapshot.snapshotId)
+            assertTrue(repository.listSnapshots(databaseId).none { it.snapshotId == snapshot.snapshotId })
+        } finally {
+            if (databaseId > 0L) databaseDao.deleteDatabaseById(databaseId)
+            repository.deleteOwnedVaultFile(vaultFile)
+        }
+    }
+
     @Test
     fun passwordAttachmentAndReopenRoundTrip() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

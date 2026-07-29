@@ -25,7 +25,7 @@ class MdbxMigrationPlannerTest {
     }
 
     @Test
-    fun nestedAndImplicitFoldersProduceDeterministicFlatPlan() {
+    fun nestedAndImplicitFoldersPreserveHierarchy() {
         val plan = MdbxMigrationPlanner.build(
             source = sourceDatabase(),
             folders = listOf(
@@ -40,10 +40,35 @@ class MdbxMigrationPlannerTest {
         )
 
         assertTrue(plan.isEligible)
-        assertEquals("Work / Servers", plan.folders.first { it.sourceFolderId == "child" }.targetDisplayName)
+        val child = plan.folders.first { it.sourceFolderId == "child" }
+        assertEquals("Servers", child.targetDisplayName)
+        assertEquals("parent", child.sourceParentFolderId)
+        assertFalse(child.flattened)
         assertEquals("Category 7", plan.folders.first { it.sourceFolderId == "category:7" }.targetDisplayName)
-        assertEquals(1, plan.warningCount(MdbxMigrationWarningKind.NESTED_FOLDERS_FLATTENED))
+        assertEquals(0, plan.warningCount(MdbxMigrationWarningKind.NESTED_FOLDERS_FLATTENED))
         assertEquals(1, plan.warningCount(MdbxMigrationWarningKind.IMPLICIT_FOLDERS_CREATED))
+    }
+
+    @Test
+    fun missingAndCyclicFolderParentsBlockMigration() {
+        val missing = MdbxMigrationPlanner.build(
+            source = sourceDatabase(),
+            folders = listOf(folder("child", "missing", "Child")),
+            entries = emptyList(),
+            attachments = emptyList()
+        )
+        assertTrue(missing.hasBlocker(MdbxMigrationBlockerKind.MISSING_FOLDER_PARENT))
+
+        val cyclic = MdbxMigrationPlanner.build(
+            source = sourceDatabase(),
+            folders = listOf(
+                folder("first", "second", "First"),
+                folder("second", "first", "Second")
+            ),
+            entries = emptyList(),
+            attachments = emptyList()
+        )
+        assertTrue(cyclic.hasBlocker(MdbxMigrationBlockerKind.FOLDER_CYCLE))
     }
 
     @Test

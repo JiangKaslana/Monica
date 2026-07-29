@@ -801,6 +801,7 @@ private fun migrationBlockerText(kind: MdbxMigrationBlockerKind, count: Int): St
     MdbxMigrationBlockerKind.SOURCE_ENGINE_UNSUPPORTED -> "仅支持从 MDBX1 迁移"
     MdbxMigrationBlockerKind.SOURCE_LOCATION_UNSUPPORTED -> "仅支持本地数据库"
     MdbxMigrationBlockerKind.DUPLICATE_FOLDER_ID -> "存在 $count 个重复文件夹标识"
+    MdbxMigrationBlockerKind.MISSING_FOLDER_PARENT -> "存在 $count 个找不到父级的文件夹"
     MdbxMigrationBlockerKind.FOLDER_CYCLE -> "存在 $count 个循环文件夹关系"
     MdbxMigrationBlockerKind.DUPLICATE_ENTRY_ID -> "存在 $count 个重复条目标识"
     MdbxMigrationBlockerKind.INVALID_ENTRY_PAYLOAD -> "存在 $count 个无效条目载荷"

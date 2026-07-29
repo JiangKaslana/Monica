@@ -83,6 +83,7 @@ class Mdbx2MigrationInstrumentedTest {
 
             val repository = MdbxRepositoryFactory.create(context, room, securityManager)
             val folder = repository.createFolder(sourceDatabaseId, "Work", null)
+            val nestedFolder = repository.createFolder(sourceDatabaseId, "Servers", folder.folderId)
             val passwordId = room.passwordEntryDao().insertPasswordEntry(
                 PasswordEntry(
                     title = "Migration login",
@@ -91,7 +92,7 @@ class Mdbx2MigrationInstrumentedTest {
                     password = "migration-secret",
                     notes = "portable note",
                     mdbxDatabaseId = sourceDatabaseId,
-                    mdbxFolderId = folder.folderId
+                    mdbxFolderId = nestedFolder.folderId
                 )
             )
             val passwordEntry = room.passwordEntryDao().getPasswordEntryById(passwordId)!!
@@ -169,6 +170,7 @@ class Mdbx2MigrationInstrumentedTest {
             assertTrue(ready.toString(), ready is MdbxViewModel.MdbxMigrationState.Ready)
             ready as MdbxViewModel.MdbxMigrationState.Ready
             assertTrue(ready.preview.isEligible)
+            assertEquals(2, ready.preview.folderCount)
             assertEquals(4, ready.preview.activeEntryCount)
             assertEquals(1, ready.preview.attachmentCount)
 
@@ -182,6 +184,7 @@ class Mdbx2MigrationInstrumentedTest {
             assertTrue(migrated.toString(), migrated is MdbxViewModel.MdbxMigrationState.Success)
             migrated as MdbxViewModel.MdbxMigrationState.Success
             targetDatabaseId = migrated.targetDatabaseId
+            assertEquals(2, migrated.verification.folderCount)
             assertEquals(4, migrated.verification.entryCount)
             assertEquals(1, migrated.verification.attachmentCount)
             assertTrue(sourceHashBefore.contentEquals(sha256(sourceFile)))
@@ -193,6 +196,10 @@ class Mdbx2MigrationInstrumentedTest {
             assertTrue(File("${targetFile.absolutePath}.blobs").isDirectory)
 
             val reopenedRepository = MdbxRepositoryFactory.create(context, room, securityManager)
+            val migratedFolders = reopenedRepository.listFolders(targetDatabaseId)
+            val migratedParent = migratedFolders.single { it.name == "Work" }
+            val migratedChild = migratedFolders.single { it.name == "Servers" }
+            assertEquals(migratedParent.folderId, migratedChild.parentFolderId)
             val targetEntries = reopenedRepository.readStoredEntries(targetDatabaseId)
             assertEquals(
                 setOf("login", "totp", "passkey", "steam-mafile"),

@@ -96,6 +96,7 @@ enum class MdbxMigrationBlockerKind {
     SOURCE_ENGINE_UNSUPPORTED,
     SOURCE_LOCATION_UNSUPPORTED,
     DUPLICATE_FOLDER_ID,
+    MISSING_FOLDER_PARENT,
     FOLDER_CYCLE,
     DUPLICATE_ENTRY_ID,
     INVALID_ENTRY_PAYLOAD,
@@ -182,32 +183,46 @@ object MdbxMigrationPlanner {
         }
 
         val folderById = folders.distinctBy { it.folderId }.associateBy { it.folderId }
-        val cycleIds = linkedSetOf<String>()
-        fun folderPath(folderId: String, visiting: Set<String> = emptySet()): List<String> {
-            if (folderId in visiting) {
-                cycleIds += folderId
-                return listOf(folderById[folderId]?.name.orEmpty().ifBlank { folderId })
+        val plannedFolderIds = folderById.keys + implicitFolderIds
+        val parentById = buildMap {
+            folderById.forEach { (folderId, folder) ->
+                put(folderId, folder.parentFolderId.normalizedMigrationParentId())
             }
-            val folder = folderById[folderId]
-                ?: return listOf(implicitFolderName(folderId))
-            val name = folder.name.trim().ifBlank { folder.folderId }
-            val parent = folder.parentFolderId
-                ?.takeIf { it.isNotBlank() && !it.equals("root", ignoreCase = true) }
-                ?: return listOf(name)
-            return folderPath(parent, visiting + folderId) + name
+            implicitFolderIds.forEach { put(it, null) }
         }
+        val missingParentCount = parentById.values.count { parentId ->
+            parentId != null && parentId !in plannedFolderIds
+        }
+        if (missingParentCount > 0) {
+            block(MdbxMigrationBlockerKind.MISSING_FOLDER_PARENT, missingParentCount)
+        }
+
+        val cycleIds = linkedSetOf<String>()
+        val visitState = mutableMapOf<String, Int>()
+        fun visitFolder(folderId: String) {
+            when (visitState[folderId]) {
+                1 -> {
+                    cycleIds += folderId
+                    return
+                }
+                2 -> return
+            }
+            visitState[folderId] = 1
+            parentById[folderId]
+                ?.takeIf { it in plannedFolderIds }
+                ?.let(::visitFolder)
+            visitState[folderId] = 2
+        }
+        plannedFolderIds.forEach(::visitFolder)
 
         val folderPlans = buildList {
             folders.distinctBy { it.folderId }.forEach { folder ->
-                val path = folderPath(folder.folderId)
-                val nested = path.size > 1
-                if (nested) warn(MdbxMigrationWarningKind.NESTED_FOLDERS_FLATTENED)
                 add(
                     MdbxMigrationFolderPlan(
                         sourceFolderId = folder.folderId,
                         sourceParentFolderId = folder.parentFolderId,
-                        targetDisplayName = path.joinToString(" / "),
-                        flattened = nested,
+                        targetDisplayName = folder.name.trim().ifBlank { folder.folderId },
+                        flattened = false,
                         implicit = false
                     )
                 )
@@ -283,6 +298,11 @@ object MdbxMigrationPlanner {
     private fun implicitFolderName(folderId: String): String = when {
         folderId.startsWith("category:") -> "Category ${folderId.substringAfter(':')}"
         else -> folderId.substringAfterLast(':').ifBlank { folderId }
+    }
+
+    private fun String?.normalizedMigrationParentId(): String? {
+        val value = this?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return value.takeUnless { it.equals("root", ignoreCase = true) }
     }
 
     private fun <T> List<T>.duplicateCountBy(selector: (T) -> String): Int =

@@ -26,8 +26,8 @@ object WebDavGateway {
      * [PreemptiveBasicAuthInterceptor] 预置到每个请求中；双重设置反而会让
      * sardine 走 challenge-response 逻辑，与 OpenList 的速率策略冲突。
      */
-    fun buildClient(credentials: WebDavCredentials): OkHttpSardine {
-        val okHttp = OkHttpClient.Builder()
+    fun buildHttpClient(credentials: WebDavCredentials): OkHttpClient =
+        OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -36,8 +36,9 @@ object WebDavGateway {
             .addInterceptor(RateLimitInterceptor())
             .addInterceptor(UserAgentInterceptor())
             .build()
-        return OkHttpSardine(okHttp)
-    }
+
+    fun buildClient(credentials: WebDavCredentials): OkHttpSardine =
+        OkHttpSardine(buildHttpClient(credentials))
 
     /** 从任意 URL 字符串中提取 host；若无法解析返回空串。 */
     fun hostOf(url: String): String = WebDavUrlBuilder.hostOf(url)

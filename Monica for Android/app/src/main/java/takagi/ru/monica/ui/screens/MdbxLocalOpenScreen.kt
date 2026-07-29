@@ -183,7 +183,8 @@ fun MdbxLocalOpenScreen(
 
             MdbxUnlockMethodSection(
                 unlockMethod = unlockMethod,
-                onUnlockMethodChange = { unlockMethod = it }
+                onUnlockMethodChange = { unlockMethod = it },
+                includeDeviceKey = true
             )
 
             MdbxKeyFileSection(

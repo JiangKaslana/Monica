@@ -31,10 +31,22 @@ class MdbxEngineMetadataTest {
     }
 
     @Test
-    fun engineCapabilitiesKeepMdbx1CompleteAndMdbx2LocalOnly() {
+    fun engineCapabilitiesKeepMdbx1CompleteAndExposeVerifiedMdbx2Features() {
         assertEquals(MdbxCapability.entries.toSet(), MdbxEngineType.KOTLIN_MDBX1.capabilities)
         assertEquals(
-            setOf(MdbxCapability.LOCAL_CRUD, MdbxCapability.EMBEDDED_ATTACHMENTS),
+            setOf(
+                MdbxCapability.LOCAL_CRUD,
+                MdbxCapability.EMBEDDED_ATTACHMENTS,
+                MdbxCapability.EXTERNAL_STORAGE,
+                MdbxCapability.REMOTE_SYNC,
+                MdbxCapability.NESTED_FOLDERS,
+                MdbxCapability.PROJECT_TAGS,
+                MdbxCapability.DELTA_HISTORY,
+                MdbxCapability.SNAPSHOTS,
+                MdbxCapability.CONFLICTS,
+                MdbxCapability.SYNC_BUNDLES,
+                MdbxCapability.BENCHMARK
+            ),
             MdbxEngineType.RUST_MDBX2.capabilities
         )
         val rustDatabase = LocalMdbxDatabase(
@@ -43,7 +55,15 @@ class MdbxEngineMetadataTest {
             engineType = MdbxEngineType.RUST_MDBX2.name
         )
         assertEquals(true, rustDatabase.supports(MdbxCapability.LOCAL_CRUD))
-        assertEquals(false, rustDatabase.supports(MdbxCapability.REMOTE_SYNC))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.EXTERNAL_STORAGE))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.NESTED_FOLDERS))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.PROJECT_TAGS))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.DELTA_HISTORY))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.SNAPSHOTS))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.CONFLICTS))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.SYNC_BUNDLES))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.BENCHMARK))
+        assertEquals(true, rustDatabase.supports(MdbxCapability.REMOTE_SYNC))
     }
 
     @Test

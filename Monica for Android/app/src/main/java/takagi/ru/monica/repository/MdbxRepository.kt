@@ -30,6 +30,28 @@ interface MdbxRepository {
 
     suspend fun listFolders(databaseId: Long): List<MdbxStoredFolderEntry>
 
+    suspend fun renameFolder(
+        databaseId: Long,
+        folderId: String,
+        name: String
+    ): MdbxStoredFolderEntry = throw UnsupportedOperationException("MDBX folder rename is unavailable")
+
+    suspend fun moveFolder(
+        databaseId: Long,
+        folderId: String,
+        parentFolderId: String?
+    ): MdbxStoredFolderEntry = throw UnsupportedOperationException("MDBX folder move is unavailable")
+
+    suspend fun deleteFolder(databaseId: Long, folderId: String) {
+        throw UnsupportedOperationException("MDBX folder deletion is unavailable")
+    }
+
+    suspend fun restoreFolder(
+        databaseId: Long,
+        folderId: String,
+        parentFolderId: String?
+    ): MdbxStoredFolderEntry = throw UnsupportedOperationException("MDBX folder restore is unavailable")
+
     suspend fun upsertPassword(entry: PasswordEntry)
     suspend fun deletePassword(entry: PasswordEntry)
     suspend fun upsertPasswords(entries: List<PasswordEntry>) {
@@ -91,6 +113,11 @@ interface MdbxRepository {
     ): MdbxSnapshotSummary
     suspend fun deleteSnapshot(databaseId: Long, snapshotId: String)
     suspend fun revertToSnapshot(databaseId: Long, snapshotId: String): Int
+    suspend fun pruneAutomaticSnapshots(
+        databaseId: Long,
+        keepCount: Int? = null,
+        maxBytes: Long? = null
+    ): Int
     suspend fun getSnapshotStructurePreview(
         databaseId: Long,
         snapshotId: String

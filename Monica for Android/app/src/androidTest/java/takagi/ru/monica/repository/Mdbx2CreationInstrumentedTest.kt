@@ -27,7 +27,7 @@ import takagi.ru.monica.viewmodel.MdbxViewModel
 @RunWith(AndroidJUnit4::class)
 class Mdbx2CreationInstrumentedTest {
     @Test
-    fun viewModelCreatesRoutedLocalVault() = runBlocking {
+    fun defaultEngineCreatesRoutedMdbx2Vault() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val application = context.applicationContext as Application
         val room = PasswordDatabase.getDatabase(context)
@@ -56,8 +56,7 @@ class Mdbx2CreationInstrumentedTest {
                 unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD,
                 keyFile = null,
                 tigaMode = MdbxTigaMode.SKY,
-                description = "creation test",
-                engineType = MdbxEngineType.RUST_MDBX2
+                description = "default creation test"
             )
             val operation = withTimeout(20_000) {
                 viewModel.operationState.first {
@@ -142,7 +141,7 @@ class Mdbx2CreationInstrumentedTest {
     }
 
     @Test
-    fun defaultEngineKeepsLegacyMdbx1Routing() = runBlocking {
+    fun explicitLegacyEngineKeepsMdbx1Routing() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val application = context.applicationContext as Application
         val room = PasswordDatabase.getDatabase(context)
@@ -170,7 +169,8 @@ class Mdbx2CreationInstrumentedTest {
                 unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD,
                 keyFile = null,
                 tigaMode = MdbxTigaMode.MULTI,
-                description = "legacy compatibility test"
+                description = "legacy compatibility test",
+                engineType = MdbxEngineType.KOTLIN_MDBX1
             )
             val operation = withTimeout(20_000) {
                 viewModel.operationState.first {

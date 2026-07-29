@@ -36,14 +36,16 @@ class BackupContentPolicyTest {
     @Test
     fun localOnlyScopeKeepsLegacyDetachedKeePassRepairBehavior() {
         val local = password("local")
+        val mdbx = password("mdbx", mdbxDatabaseId = 2L, mdbxFolderId = "folder")
         val detachedKeePass = password("detached", keepassDatabaseId = 3L, categoryId = 7L)
         val activeKeePass = password("keepass", keepassDatabaseId = 3L, keepassEntryUuid = "entry")
         val bitwarden = password("bitwarden", bitwardenVaultId = 1L, bitwardenCipherId = "cipher")
 
-        val included = listOf(local, detachedKeePass, activeKeePass, bitwarden)
+        val included = listOf(local, mdbx, detachedKeePass, activeKeePass, bitwarden)
             .filter { BackupContentPolicy.shouldIncludePassword(it, BackupContentScope.MONICA_LOCAL_ONLY) }
 
-        assertEquals(listOf("local", "detached"), included.map { it.title })
+        assertEquals(listOf("local", "mdbx", "detached"), included.map { it.title })
+        assertTrue(BackupContentPolicy.sanitizePasswordForMonicaBackup(mdbx).isLocalOnlyEntry())
     }
 
     @Test
@@ -70,7 +72,22 @@ class BackupContentPolicyTest {
     }
 
     @Test
-    fun localOnlyScopeExcludesExternalPasskeys() {
+    fun localOnlyScopeIncludesMdbxSecureItemsAndSanitizesOwnershipOnRestore() {
+        val mdbx = secureItem("mdbx", mdbxDatabaseId = 2L, mdbxFolderId = "folder")
+
+        assertTrue(
+            BackupContentPolicy.shouldIncludeSecureItem(
+                mdbx,
+                BackupContentScope.MONICA_LOCAL_ONLY
+            )
+        )
+        assertTrue(
+            BackupContentPolicy.sanitizeSecureItemForMonicaBackup(mdbx).isLocalOnlyItem()
+        )
+    }
+
+    @Test
+    fun localOnlyScopeIncludesMdbxButExcludesOtherExternalPasskeys() {
         val passkeys = listOf(
             passkey("local"),
             passkey("keepass", keepassDatabaseId = 1L),
@@ -81,7 +98,7 @@ class BackupContentPolicyTest {
         val included = passkeys
             .filter { BackupContentPolicy.shouldIncludePasskey(it, BackupContentScope.MONICA_LOCAL_ONLY) }
 
-        assertEquals(listOf("local"), included.map { it.rpName })
+        assertEquals(listOf("local", "mdbx"), included.map { it.rpName })
     }
 
     private fun password(

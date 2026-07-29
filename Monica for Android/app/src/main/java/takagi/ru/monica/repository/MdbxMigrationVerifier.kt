@@ -34,9 +34,19 @@ internal object MdbxMigrationVerifier {
         actualFolders: List<MdbxStoredFolderEntry>
     ): List<String> {
         val expected = plan.folders.associate { folder ->
-            targetFolderIds.getValue(folder.sourceFolderId) to folder.targetDisplayName
+            targetFolderIds.getValue(folder.sourceFolderId) to ComparableFolder(
+                name = folder.targetDisplayName,
+                parentFolderId = folder.sourceParentFolderId
+                    .normalizedMigrationParentId()
+                    ?.let(targetFolderIds::get)
+            )
         }
-        val actual = actualFolders.associate { it.folderId to it.name }
+        val actual = actualFolders.associate { folder ->
+            folder.folderId to ComparableFolder(
+                name = folder.name,
+                parentFolderId = folder.parentFolderId.normalizedMigrationParentId()
+            )
+        }
         return buildList {
             (expected.keys - actual.keys).sorted().forEach { add("missing folder:$it") }
             (actual.keys - expected.keys).sorted().forEach { add("unexpected folder:$it") }
@@ -44,6 +54,16 @@ internal object MdbxMigrationVerifier {
                 if (expected[folderId] != actual[folderId]) add("folder mismatch:$folderId")
             }
         }
+    }
+
+    private data class ComparableFolder(
+        val name: String,
+        val parentFolderId: String?
+    )
+
+    private fun String?.normalizedMigrationParentId(): String? {
+        val value = this?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return value.takeUnless { it.equals("root", ignoreCase = true) }
     }
 
     private data class ComparableEntry(

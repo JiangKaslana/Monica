@@ -143,9 +143,8 @@ class Mdbx2HardeningInstrumentedTest {
         try {
             viewModel.clearOperationState()
             viewModel.syncVault(databaseId)
-            val unsupported = awaitTerminalOperation(viewModel)
-            assertTrue(unsupported.toString(), unsupported is MdbxViewModel.OperationState.Error)
-            assertTrue(unsupported.toString(), unsupported.toString().contains("not available"))
+            val sync = awaitTerminalOperation(viewModel)
+            assertTrue(sync.toString(), sync is MdbxViewModel.OperationState.Success)
 
             viewModel.clearOperationState()
             viewModel.deleteVault(databaseId)
@@ -181,6 +180,45 @@ class Mdbx2HardeningInstrumentedTest {
             assertTrue(outsideFile.isFile)
         } finally {
             outsideFile.delete()
+        }
+    }
+
+    @Test
+    fun ownedFileDeletionRemovesSqliteAndBlobStoreSidecars() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val room = PasswordDatabase.getDatabase(context)
+        val repository = Mdbx2Repository(
+            context,
+            room.localMdbxDatabaseDao(),
+            SecurityManager(context)
+        )
+        val vaultFile = repository.createInitializedVaultFile(
+            MdbxTigaMode.SKY,
+            "sidecar-cleanup-${UUID.randomUUID()}"
+        )
+        val wal = File("${vaultFile.absolutePath}-wal").apply { writeText("stale wal") }
+        val shm = File("${vaultFile.absolutePath}-shm").apply { writeText("stale shm") }
+        val blobSidecars = listOf("blobs", "leases", "transfers").map { suffix ->
+            File("${vaultFile.absolutePath}.$suffix").apply {
+                mkdirs()
+                File(this, "stale").writeText("stale $suffix")
+            }
+        }
+        try {
+            assertTrue(vaultFile.isFile)
+            assertTrue(wal.isFile)
+            assertTrue(shm.isFile)
+            assertTrue(blobSidecars.all(File::isDirectory))
+            assertTrue(repository.deleteOwnedVaultFile(vaultFile))
+            assertFalse(vaultFile.exists())
+            assertFalse(wal.exists())
+            assertFalse(shm.exists())
+            assertTrue(blobSidecars.none(File::exists))
+        } finally {
+            vaultFile.delete()
+            wal.delete()
+            shm.delete()
+            blobSidecars.forEach(File::deleteRecursively)
         }
     }
 

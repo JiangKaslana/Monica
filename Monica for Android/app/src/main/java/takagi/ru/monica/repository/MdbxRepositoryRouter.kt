@@ -30,6 +30,29 @@ class MdbxRepositoryRouter(
     override suspend fun listFolders(databaseId: Long): List<MdbxStoredFolderEntry> =
         repositoryFor(databaseId).listFolders(databaseId)
 
+    override suspend fun renameFolder(
+        databaseId: Long,
+        folderId: String,
+        name: String
+    ): MdbxStoredFolderEntry = repositoryFor(databaseId).renameFolder(databaseId, folderId, name)
+
+    override suspend fun moveFolder(
+        databaseId: Long,
+        folderId: String,
+        parentFolderId: String?
+    ): MdbxStoredFolderEntry =
+        repositoryFor(databaseId).moveFolder(databaseId, folderId, parentFolderId)
+
+    override suspend fun deleteFolder(databaseId: Long, folderId: String) =
+        repositoryFor(databaseId).deleteFolder(databaseId, folderId)
+
+    override suspend fun restoreFolder(
+        databaseId: Long,
+        folderId: String,
+        parentFolderId: String?
+    ): MdbxStoredFolderEntry =
+        repositoryFor(databaseId).restoreFolder(databaseId, folderId, parentFolderId)
+
     override suspend fun upsertPassword(entry: PasswordEntry) =
         repositoryForEntry(entry.mdbxDatabaseId).upsertPassword(entry)
 
@@ -153,6 +176,12 @@ class MdbxRepositoryRouter(
 
     override suspend fun revertToSnapshot(databaseId: Long, snapshotId: String): Int =
         repositoryFor(databaseId).revertToSnapshot(databaseId, snapshotId)
+
+    override suspend fun pruneAutomaticSnapshots(
+        databaseId: Long,
+        keepCount: Int?,
+        maxBytes: Long?
+    ): Int = repositoryFor(databaseId).pruneAutomaticSnapshots(databaseId, keepCount, maxBytes)
 
     override suspend fun getSnapshotStructurePreview(
         databaseId: Long,

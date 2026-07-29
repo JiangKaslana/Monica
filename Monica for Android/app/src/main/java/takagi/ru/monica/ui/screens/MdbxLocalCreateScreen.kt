@@ -47,16 +47,14 @@ fun MdbxLocalCreateScreen(
     var keyFile by remember { mutableStateOf<MdbxKeyFileSelection?>(null) }
     var keyFileError by remember { mutableStateOf<String?>(null) }
     var selectedTigaMode by remember { mutableStateOf(MdbxTigaMode.MULTI) }
-    var selectedEngine by remember { mutableStateOf(MdbxEngineType.KOTLIN_MDBX1) }
+    var selectedEngine by remember { mutableStateOf(MdbxEngineType.RUST_MDBX2) }
     var useCustomDirectory by remember { mutableStateOf(false) }
     var customDirectoryUri by remember { mutableStateOf<Uri?>(null) }
 
-    val passwordRequired = selectedEngine == MdbxEngineType.RUST_MDBX2 ||
-        unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
+    val passwordRequired = unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
-    val keyFileRequired = selectedEngine == MdbxEngineType.KOTLIN_MDBX1 &&
-        (unlockMethod == MdbxUnlockMethod.KEY_FILE ||
-            unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE)
+    val keyFileRequired = unlockMethod == MdbxUnlockMethod.KEY_FILE ||
+        unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
 
     val normalizedMasterPassword = remember(masterPassword) {
         Normalizer.normalize(masterPassword, Normalizer.Form.NFC)
@@ -104,8 +102,6 @@ fun MdbxLocalCreateScreen(
         if (selectedEngine == MdbxEngineType.RUST_MDBX2) {
             unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD
             keyFile = null
-            useCustomDirectory = false
-            customDirectoryUri = null
         }
     }
     LaunchedEffect(operationState) {
@@ -163,9 +159,9 @@ fun MdbxLocalCreateScreen(
                     }
                     Text(
                         text = if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
-                            "兼容现有数据库与远端同步功能"
+                            "MDBX 1 用于创建兼容旧版本的数据库"
                         } else {
-                            "Rust 引擎预览版，当前支持本地数据库"
+                            "MDBX 2 是新建数据库的默认 Rust 引擎"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -175,7 +171,7 @@ fun MdbxLocalCreateScreen(
 
             // === Card: Storage Location ===
             AnimatedVisibility(
-                visible = selectedEngine == MdbxEngineType.KOTLIN_MDBX1,
+                visible = true,
                 enter = expandVertically() + fadeIn()
             ) {
                 Card(
@@ -265,11 +261,12 @@ fun MdbxLocalCreateScreen(
                 }
             }
 
-            AnimatedVisibility(selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
+            AnimatedVisibility(visible = true) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     MdbxUnlockMethodSection(
                         unlockMethod = unlockMethod,
-                        onUnlockMethodChange = { unlockMethod = it }
+                        onUnlockMethodChange = { unlockMethod = it },
+                        includeDeviceKey = selectedEngine == MdbxEngineType.RUST_MDBX2
                     )
 
                     MdbxKeyFileSection(

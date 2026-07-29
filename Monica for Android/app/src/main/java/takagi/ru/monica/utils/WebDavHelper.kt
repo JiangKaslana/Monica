@@ -28,6 +28,7 @@ import takagi.ru.monica.data.RestoreReport
 import takagi.ru.monica.data.ItemCounts
 import takagi.ru.monica.data.FailedItem
 import takagi.ru.monica.data.isLocalOnlyItem
+import takagi.ru.monica.data.isMdbxOwned
 import takagi.ru.monica.data.resolveOwnership
 import takagi.ru.monica.data.model.OtpType
 import takagi.ru.monica.data.model.TotpData
@@ -1117,6 +1118,7 @@ class WebDavHelper(
             var successNoteCount = 0
             var successImageCount = 0
             var successSteamMaFileCount = 0
+            var mdbxFallbackItemCount = 0
             val securityManager = SecurityManager(context)
             val steamMaFileBackups = if (preferences.includeAuthenticators) {
                 runCatching { createSteamMaFileBackups(securityManager) }
@@ -1156,10 +1158,15 @@ class WebDavHelper(
             try {
                 // 2. 根据偏好设置过滤密码数据
                 val backupPasswordCandidates = if (preferences.includePasswords) passwords else emptyList()
+                val includedMdbxPasswordCount = backupPasswordCandidates.count { entry ->
+                    entry.isMdbxEntry() &&
+                        BackupContentPolicy.shouldIncludePassword(entry, contentScope)
+                }
                 val filteredPasswords = backupPasswordCandidates
                     .filter { BackupContentPolicy.shouldIncludePassword(it, contentScope) }
                     .map(BackupContentPolicy::sanitizePasswordForMonicaBackup)
                     .map { portablePasswordForBackup(it, securityManager) }
+                mdbxFallbackItemCount += includedMdbxPasswordCount
                 val skippedExternalPasswordCount = backupPasswordCandidates.size - filteredPasswords.size
                 val repairedDetachedPasswordCount =
                     backupPasswordCandidates.count(BackupContentPolicy::isLikelyDetachedKeePassPassword)
@@ -1187,10 +1194,15 @@ class WebDavHelper(
                         else -> true
                     }
                 }
+                val includedMdbxSecureItemCount = backupSecureItemCandidates.count { item ->
+                    item.isMdbxOwned() &&
+                        BackupContentPolicy.shouldIncludeSecureItem(item, contentScope)
+                }
                 val filteredSecureItems = backupSecureItemCandidates
                     .filter { BackupContentPolicy.shouldIncludeSecureItem(it, contentScope) }
                     .map(BackupContentPolicy::sanitizeSecureItemForMonicaBackup)
                     .map { portableSecureItemForBackup(it, securityManager) }
+                mdbxFallbackItemCount += includedMdbxSecureItemCount
                 val skippedExternalSecureItemCount =
                     backupSecureItemCandidates.size - filteredSecureItems.size
                 val repairedDetachedSecureItemCount =
@@ -1524,6 +1536,7 @@ class WebDavHelper(
                         val passkeyCandidates = passkeyDao.getAllPasskeysSync()
                         val passkeys = passkeyCandidates
                             .filter { BackupContentPolicy.shouldIncludePasskey(it, contentScope) }
+                        mdbxFallbackItemCount += passkeys.count { it.isMdbxOwned() }
                         val skippedExternalPasskeyCount = passkeyCandidates.size - passkeys.size
                         if (skippedExternalPasskeyCount > 0) {
                             warnings.add("已跳过 $skippedExternalPasskeyCount 条非 Monica 本地通行密钥")
@@ -1576,6 +1589,12 @@ class WebDavHelper(
                         android.util.Log.w("WebDavHelper", "Failed to backup passkeys: ${e.message}")
                         warnings.add("通行密钥备份失败: ${e.message}")
                     }
+                }
+
+                if (mdbxFallbackItemCount > 0) {
+                    warnings.add(
+                        "已备份 $mdbxFallbackItemCount 条 MDBX2 内容；通用备份恢复时会转换为 Monica 本地条目，不会重建 MDBX2 数据库文件"
+                    )
                 }
 
                 ZipOutputStream(FileOutputStream(zipFile)).use { zipOut ->

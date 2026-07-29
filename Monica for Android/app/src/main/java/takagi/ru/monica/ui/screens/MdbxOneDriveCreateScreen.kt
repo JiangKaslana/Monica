@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
+import takagi.ru.monica.data.MdbxEngineType
 import takagi.ru.monica.data.MdbxTigaMode
 import takagi.ru.monica.data.MdbxUnlockMethod
 import takagi.ru.monica.utils.FileSourceEntry
@@ -73,11 +74,15 @@ fun MdbxOneDriveCreateScreen(
     var keyFile by remember { mutableStateOf<MdbxKeyFileSelection?>(null) }
     var keyFileError by remember { mutableStateOf<String?>(null) }
     var selectedTigaMode by remember { mutableStateOf(MdbxTigaMode.MULTI) }
+    var selectedEngine by remember { mutableStateOf(MdbxEngineType.RUST_MDBX2) }
 
-    val passwordRequired = unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
+    val passwordRequired = selectedEngine == MdbxEngineType.RUST_MDBX2 ||
+        unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
-    val keyFileRequired = unlockMethod == MdbxUnlockMethod.KEY_FILE ||
+    val keyFileRequired = selectedEngine == MdbxEngineType.KOTLIN_MDBX1 &&
+        (unlockMethod == MdbxUnlockMethod.KEY_FILE ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
+        )
 
     val keyFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -134,6 +139,12 @@ fun MdbxOneDriveCreateScreen(
                 session = cached
                 loadDirectory("")
             }
+    }
+    LaunchedEffect(selectedEngine) {
+        if (selectedEngine == MdbxEngineType.RUST_MDBX2) {
+            unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD
+            keyFile = null
+        }
     }
     LaunchedEffect(operationState) {
         if (operationState is MdbxViewModel.OperationState.Success) {
@@ -392,6 +403,12 @@ fun MdbxOneDriveCreateScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    MdbxEngineTypeSection(
+                        selectedEngine = selectedEngine,
+                        onEngineChange = { selectedEngine = it },
+                        remote = true
+                    )
+
                     MdbxTigaModeSection(
                         selectedTigaMode = selectedTigaMode,
                         onTigaModeChange = { selectedTigaMode = it }
@@ -423,18 +440,20 @@ fun MdbxOneDriveCreateScreen(
                         }
                     }
 
-                    MdbxUnlockMethodSection(
-                        unlockMethod = unlockMethod,
-                        onUnlockMethodChange = { unlockMethod = it }
-                    )
+                    if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
+                        MdbxUnlockMethodSection(
+                            unlockMethod = unlockMethod,
+                            onUnlockMethodChange = { unlockMethod = it }
+                        )
 
-                    MdbxKeyFileSection(
-                        keyFile = keyFile,
-                        keyFileError = keyFileError,
-                        keyFileRequired = keyFileRequired,
-                        onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                        onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
-                    )
+                        MdbxKeyFileSection(
+                            keyFile = keyFile,
+                            keyFileError = keyFileError,
+                            keyFileRequired = keyFileRequired,
+                            onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                            onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
+                        )
+                    }
                 }
             }
 
@@ -461,7 +480,8 @@ fun MdbxOneDriveCreateScreen(
                             accountId = s.accountId,
                             accountLabel = s.displayName.ifBlank { s.username },
                             directoryPath = selectedDirectory.ifBlank { null },
-                            description = null
+                            description = null,
+                            engineType = selectedEngine
                         )
                     }
                 },

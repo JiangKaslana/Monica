@@ -8,6 +8,178 @@ import org.junit.Test
 class MdbxAndroidIntegrationGuardTest {
 
     @Test
+    fun newVaultCreationDefaultsToMdbx2WhileLegacyOpenPathsStayCompatible() {
+        val localCreateSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxLocalCreateScreen.kt"
+        ).readText()
+        val webDavCreateSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxWebDavCreateScreen.kt"
+        ).readText()
+        val oneDriveCreateSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveCreateScreen.kt"
+        ).readText()
+        val webDavOpenSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxWebDavOpenScreen.kt"
+        ).readText()
+        val oneDriveOpenSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveOpenScreen.kt"
+        ).readText()
+        val viewModelSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/viewmodel/MdbxViewModel.kt"
+        ).readText()
+        val databaseSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/data/LocalMdbxDatabase.kt"
+        ).readText()
+
+        val createLocalBlock = viewModelSource
+            .substringAfter("fun createLocalVault(")
+            .substringBefore("fun importLocalVault(")
+        val createWebDavBlock = viewModelSource
+            .substringAfter("fun createWebDavVault(")
+            .substringBefore("fun connectToExistingWebDavVault(")
+        val connectWebDavBlock = viewModelSource
+            .substringAfter("fun connectToExistingWebDavVault(")
+            .substringBefore("fun createOneDriveVault(")
+        val createOneDriveBlock = viewModelSource
+            .substringAfter("fun createOneDriveVault(")
+            .substringBefore("fun connectToOneDriveVault(")
+        val connectOneDriveBlock = viewModelSource
+            .substringAfter("fun connectToOneDriveVault(")
+            .substringBefore("private suspend fun createMdbx2WebDavVault(")
+
+        assertTrue(
+            "Every new-vault screen must initially select MDBX2.",
+            localCreateSource.contains("mutableStateOf(MdbxEngineType.RUST_MDBX2)") &&
+                webDavCreateSource.contains("mutableStateOf(MdbxEngineType.RUST_MDBX2)") &&
+                oneDriveCreateSource.contains("mutableStateOf(MdbxEngineType.RUST_MDBX2)")
+        )
+        assertTrue(
+            "Every programmatic new-vault entry point must default to MDBX2.",
+            createLocalBlock.contains("engineType: MdbxEngineType = MdbxEngineType.RUST_MDBX2") &&
+                createWebDavBlock.contains("engineType: MdbxEngineType = MdbxEngineType.RUST_MDBX2") &&
+                createOneDriveBlock.contains("engineType: MdbxEngineType = MdbxEngineType.RUST_MDBX2")
+        )
+        assertTrue(
+            "Existing remote-open entry points must keep MDBX1 as the compatibility default.",
+            webDavOpenSource.contains("mutableStateOf(MdbxEngineType.KOTLIN_MDBX1)") &&
+                oneDriveOpenSource.contains("mutableStateOf(MdbxEngineType.KOTLIN_MDBX1)") &&
+                connectWebDavBlock.contains("engineType: MdbxEngineType = MdbxEngineType.KOTLIN_MDBX1") &&
+                connectOneDriveBlock.contains("engineType: MdbxEngineType = MdbxEngineType.KOTLIN_MDBX1")
+        )
+        assertTrue(
+            "Missing or unknown legacy metadata must continue to resolve to MDBX1.",
+            databaseSource.contains("val engineType: String = MdbxEngineType.KOTLIN_MDBX1.name") &&
+                databaseSource.contains("?: KOTLIN_MDBX1")
+        )
+    }
+
+    @Test
+    fun rustMdbx2CompleteParityIsEnabledEndToEnd() {
+        val engineSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/data/LocalMdbxDatabase.kt"
+        ).readText()
+        val repositorySource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2Repository.kt"
+        ).readText()
+        val viewModelSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/viewmodel/MdbxViewModel.kt"
+        ).readText()
+        val bindingSource = projectFile(
+            "mdbx-engine/src/main/java/uniffi/mdbx_ffi/mdbx_ffi.kt"
+        ).readText()
+        val rustCapabilities = engineSource
+            .substringAfter("MdbxEngineType.RUST_MDBX2 -> setOf(")
+            .substringBefore(")\n        }")
+
+        assertTrue(
+            "MDBX2 must expose every verified local and remote capability.",
+            rustCapabilities.contains("MdbxCapability.EXTERNAL_STORAGE") &&
+                rustCapabilities.contains("MdbxCapability.PROJECT_TAGS") &&
+                rustCapabilities.contains("MdbxCapability.SYNC_BUNDLES") &&
+                rustCapabilities.contains("MdbxCapability.BENCHMARK") &&
+                rustCapabilities.contains("MdbxCapability.REMOTE_SYNC")
+        )
+        assertTrue(
+            "The Android repository must use the Rust authenticated bundle and metadata benchmark APIs.",
+            repositorySource.contains("vault.exportManualSyncBundle(") &&
+                repositorySource.contains("vault.applyManualSyncBundle(") &&
+                repositorySource.contains("vault.runMetadataBenchmark(") &&
+                repositorySource.contains("sessions.flushExternalWorkingCopy(")
+        )
+        assertTrue(
+            "The advanced tools benchmark must select the repository that owns the database engine.",
+            viewModelSource.contains("MdbxEngineType.KOTLIN_MDBX1 -> legacyVaultStore.runBenchmark(") &&
+                viewModelSource.contains("MdbxEngineType.RUST_MDBX2 -> mdbx2Repository.runBenchmark(")
+        )
+        assertTrue(
+            "Generated UniFFI bindings must contain the manual synchronization and benchmark APIs.",
+            bindingSource.contains("fun `exportManualSyncBundle`") &&
+                bindingSource.contains("fun `applyManualSyncBundle`") &&
+                bindingSource.contains("fun `runMetadataBenchmark`")
+        )
+    }
+
+    @Test
+    fun rustMdbx2HistorySnapshotAndConflictBoundaryIsEnabledEndToEnd() {
+        val engineSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/data/LocalMdbxDatabase.kt"
+        ).readText()
+        val repositorySource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2Repository.kt"
+        ).readText()
+        val viewModelSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/viewmodel/MdbxViewModel.kt"
+        ).readText()
+        val bindingSource = projectFile(
+            "mdbx-engine/src/main/java/uniffi/mdbx_ffi/mdbx_ffi.kt"
+        ).readText()
+
+        assertTrue(
+            "MDBX2 must advertise only the advanced capabilities backed by the Rust integration.",
+            engineSource.contains("MdbxCapability.DELTA_HISTORY") &&
+                engineSource.contains("MdbxCapability.SNAPSHOTS") &&
+                engineSource.contains("MdbxCapability.CONFLICTS") &&
+                engineSource.substringAfter("MdbxEngineType.RUST_MDBX2 -> setOf(")
+                    .substringBefore(")\n        }")
+                    .contains("MdbxCapability.REMOTE_SYNC")
+        )
+        assertTrue(
+            "The Android repository must map the complete history and managed-snapshot action boundary.",
+            repositorySource.contains("override suspend fun listDeltaHistory(") &&
+                repositorySource.contains("override suspend fun listCommitDiff(") &&
+                repositorySource.contains("override suspend fun revertCommit(") &&
+                repositorySource.contains("override suspend fun createSnapshot(") &&
+                repositorySource.contains("override suspend fun deleteSnapshot(") &&
+                repositorySource.contains("override suspend fun revertToSnapshot(") &&
+                repositorySource.contains("override suspend fun getSnapshotStructurePreview(") &&
+                repositorySource.contains("override suspend fun listConflicts(") &&
+                repositorySource.contains("page.nextCursor")
+        )
+        assertTrue(
+            "Generated UniFFI bindings must contain every native action used by the Android repository.",
+            bindingSource.contains("fun `listCommitDiff`") &&
+                bindingSource.contains("fun `revertCommit`") &&
+                bindingSource.contains("fun `listManagedSnapshots`") &&
+                bindingSource.contains("fun `createManualSnapshot`") &&
+                bindingSource.contains("fun `deleteSnapshot`") &&
+                bindingSource.contains("fun `restoreSnapshot`") &&
+                bindingSource.contains("fun `getSnapshotStructurePreview`")
+        )
+        assertTrue(
+            "Restore and conflict resolution must rebuild Room mirrors before reporting completion.",
+            viewModelSource.countOccurrences(
+                "orphanPolicy = MdbxImportOrphanPolicy.APPLY_REMOTE_STATE"
+            ) >= 2 &&
+                viewModelSource.substringAfter("fun revertCommit(")
+                    .substringBefore("fun createSnapshot(")
+                    .contains("orphanPolicy = MdbxImportOrphanPolicy.APPLY_REMOTE_STATE") &&
+                viewModelSource.substringAfter("fun resolveConflict(")
+                    .substringBefore("fun dismissConflictDialog()")
+                    .contains("importEntriesFromVault(databaseId)")
+        )
+    }
+
+    @Test
     fun vaultStoreKeepsMdbxOneOfficialMetadataAndLegacyReadableFormats() {
         val source = projectFile(
             "app/src/main/java/takagi/ru/monica/repository/MdbxVaultStore.kt"
@@ -68,8 +240,8 @@ class MdbxAndroidIntegrationGuardTest {
 
         assertTrue(
             "Local, WebDAV, and OneDrive old-vault open paths should all validate credentials, prepare MDBX 1.0 metadata, flush the working copy, and import entries.",
-            source.countOccurrences("vaultStore.validateVaultCredentialFile(") >= 3 &&
-                source.countOccurrences("vaultStore.prepareVaultForOfficialMdbx1(") >= 3 &&
+            source.countOccurrences("legacyVaultStore.validateVaultCredentialFile(") >= 3 &&
+                source.countOccurrences("legacyVaultStore.prepareVaultForOfficialMdbx1(") >= 3 &&
                 source.countOccurrences("vaultStore.flushWorkingCopy(databaseId)") >= 3 &&
                 source.countOccurrences("importEntriesFromVault(databaseId)") >= 3
         )
@@ -144,7 +316,8 @@ class MdbxAndroidIntegrationGuardTest {
             repositorySource.contains("folderId: String? = null") &&
                 repositorySource.contains("categoryId = null") &&
                 repositorySource.contains("mdbxFolderId = folderId") &&
-                repositorySource.contains("passkeyDao.updateMdbxDatabaseForPasskeys(recordIds, databaseId, folderId.takeIf { databaseId != null })")
+                repositorySource.contains("passkeyDao.updateMdbxDatabaseForPasskeys(") &&
+                repositorySource.contains("folderId.takeIf { databaseId != null }")
         )
     }
 
@@ -175,9 +348,10 @@ class MdbxAndroidIntegrationGuardTest {
         assertTrue(
             "Passkey list moves to MDBX must call the MDBX-aware persistence path instead of only mutating an in-memory copy.",
             listSource.contains("suspend fun persistStorageTarget(") &&
-                listSource.contains("is UnifiedMoveCategoryTarget.MdbxDatabaseTarget -> target.databaseId to null") &&
-                listSource.contains("is UnifiedMoveCategoryTarget.MdbxFolderTarget -> target.databaseId to target.folderId") &&
-                listSource.contains("viewModel.updateMdbxDatabaseForPasskeys(")
+                listSource.contains("is UnifiedMoveCategoryTarget.MdbxDatabaseTarget -> passkey.copy(") &&
+                listSource.contains("is UnifiedMoveCategoryTarget.MdbxFolderTarget -> passkey.copy(") &&
+                listSource.contains("mdbxFolderId = target.folderId") &&
+                listSource.contains("val persisted = viewModel.updatePasskey(moved)")
         )
     }
 
@@ -371,7 +545,7 @@ class MdbxAndroidIntegrationGuardTest {
             "TOTP writes must preserve explicit MDBX folder targets and inherit the bound password folder when following a password into MDBX.",
             totpViewModelSource.contains("mdbxFolderId = resolvedMdbxFolderId") &&
                 totpViewModelSource.contains("mdbxFolderId = boundPassword.mdbxFolderId") &&
-                totpViewModelSource.contains("mdbxFolderId = boundPassword?.mdbxFolderId")
+                totpViewModelSource.contains("boundPassword?.mdbxFolderId ?: mdbxFolderId")
         )
     }
 

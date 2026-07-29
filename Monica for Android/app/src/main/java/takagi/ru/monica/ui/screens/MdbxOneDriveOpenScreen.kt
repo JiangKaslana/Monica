@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
+import takagi.ru.monica.data.MdbxEngineType
 import takagi.ru.monica.data.MdbxUnlockMethod
 import takagi.ru.monica.data.MdbxTigaMode
 import takagi.ru.monica.utils.FileSourceEntry
@@ -73,11 +74,15 @@ fun MdbxOneDriveOpenScreen(
     var unlockMethod by remember { mutableStateOf(MdbxUnlockMethod.MASTER_PASSWORD) }
     var keyFile by remember { mutableStateOf<MdbxKeyFileSelection?>(null) }
     var keyFileError by remember { mutableStateOf<String?>(null) }
+    var selectedEngine by remember { mutableStateOf(MdbxEngineType.KOTLIN_MDBX1) }
 
-    val passwordRequired = unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
+    val passwordRequired = selectedEngine == MdbxEngineType.RUST_MDBX2 ||
+        unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
-    val keyFileRequired = unlockMethod == MdbxUnlockMethod.KEY_FILE ||
+    val keyFileRequired = selectedEngine == MdbxEngineType.KOTLIN_MDBX1 &&
+        (unlockMethod == MdbxUnlockMethod.KEY_FILE ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
+        )
 
     val normalizedMasterPassword = remember(masterPassword) {
         Normalizer.normalize(masterPassword, Normalizer.Form.NFC)
@@ -141,6 +146,12 @@ fun MdbxOneDriveOpenScreen(
                 session = cached
                 loadDirectory("")
             }
+    }
+    LaunchedEffect(selectedEngine) {
+        if (selectedEngine == MdbxEngineType.RUST_MDBX2) {
+            unlockMethod = MdbxUnlockMethod.MASTER_PASSWORD
+            keyFile = null
+        }
     }
 
     Scaffold(
@@ -429,6 +440,12 @@ fun MdbxOneDriveOpenScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    MdbxEngineTypeSection(
+                        selectedEngine = selectedEngine,
+                        onEngineChange = { selectedEngine = it },
+                        remote = true
+                    )
+
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
@@ -455,18 +472,20 @@ fun MdbxOneDriveOpenScreen(
                         }
                     }
 
-                    MdbxUnlockMethodSection(
-                        unlockMethod = unlockMethod,
-                        onUnlockMethodChange = { unlockMethod = it }
-                    )
+                    if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
+                        MdbxUnlockMethodSection(
+                            unlockMethod = unlockMethod,
+                            onUnlockMethodChange = { unlockMethod = it }
+                        )
 
-                    MdbxKeyFileSection(
-                        keyFile = keyFile,
-                        keyFileError = keyFileError,
-                        keyFileRequired = keyFileRequired,
-                        onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                        onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
-                    )
+                        MdbxKeyFileSection(
+                            keyFile = keyFile,
+                            keyFileError = keyFileError,
+                            keyFileRequired = keyFileRequired,
+                            onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                            onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
+                        )
+                    }
                 }
             }
 
@@ -494,7 +513,8 @@ fun MdbxOneDriveOpenScreen(
                         accountId = s.accountId,
                         accountLabel = s.displayName.ifBlank { s.username },
                         remoteFilePath = file.path,
-                        description = null
+                        description = null,
+                        engineType = selectedEngine
                     )
                 },
                 enabled = isFormValid,
