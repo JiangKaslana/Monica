@@ -336,6 +336,11 @@ fun SettingsScreen(
     val appearanceTitle = context.getString(R.string.theme)
     val aboutTitle = context.getString(R.string.about)
     val developerTitle = context.getString(R.string.developer_settings)
+    val installedVersion = BuildConfig.VERSION_NAME
+        .ifBlank { BuildConfig.FULL_VERSION_NAME }
+        .let { version ->
+            if (version.startsWith("v", ignoreCase = true)) version else "V$version"
+        }
 
     val biometricSubtitle = if (isBiometricAvailable) {
         if (biometricSwitchState) context.getString(R.string.biometric_unlock_enabled)
@@ -694,7 +699,7 @@ fun SettingsScreen(
     val showVersionItem = matchesSettingsItem(
         aboutTitle,
         context.getString(R.string.version),
-        context.getString(R.string.settings_version_number)
+        installedVersion
     )
     val showUpdateCheckItem = matchesSettingsItem(
         aboutTitle,
@@ -996,7 +1001,7 @@ fun SettingsScreen(
                         SettingsItem(
                             icon = Icons.Default.Info,
                             title = context.getString(R.string.version),
-                            subtitle = context.getString(R.string.settings_version_number),
+                            subtitle = installedVersion,
                             onClick = { showVersionInfoDialog = true }
                         )
                     }
