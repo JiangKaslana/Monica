@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -238,40 +239,42 @@ fun NoteDetailScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                MarkdownPreviewText(
-                    markdown = markdownSource,
-                    imageBitmaps = imageBitmaps,
-                    codeBlockCollapseMode = NoteCodeBlockCollapseMode.COMPACT,
-                    searchHighlightQuery = highlightQuery,
-                    showSearchHighlight = showSearchHighlight,
-                    autoBringSearchHighlightIntoView = highlightQuery.isNotBlank(),
-                    onInlineImageClick = { imageId -> showNoteImageDialog = imageId },
-                    onTaskItemToggle = { lineIndex, checked ->
-                        val updatedContent = toggleTaskLine(
-                            content = decodedNote.content,
-                            lineIndex = lineIndex,
-                            checked = checked
-                        )
-                        if (updatedContent != null && updatedContent != decodedNote.content) {
-                            viewModel.updateNote(
-                                id = currentNote.id,
-                                content = updatedContent,
-                                title = currentNote.title,
-                                tags = decodedNote.tags,
-                                isMarkdown = decodedNote.isMarkdown,
-                                isFavorite = currentNote.isFavorite,
-                                createdAt = currentNote.createdAt,
-                                categoryId = currentNote.categoryId,
-                                imagePaths = currentNote.imagePaths,
-                                keepassDatabaseId = currentNote.keepassDatabaseId,
-                                keepassGroupPath = currentNote.keepassGroupPath,
-                                bitwardenVaultId = currentNote.bitwardenVaultId,
-                                bitwardenFolderId = currentNote.bitwardenFolderId
+                SelectionContainer {
+                    MarkdownPreviewText(
+                        markdown = markdownSource,
+                        imageBitmaps = imageBitmaps,
+                        codeBlockCollapseMode = NoteCodeBlockCollapseMode.COMPACT,
+                        searchHighlightQuery = highlightQuery,
+                        showSearchHighlight = showSearchHighlight,
+                        autoBringSearchHighlightIntoView = highlightQuery.isNotBlank(),
+                        onInlineImageClick = { imageId -> showNoteImageDialog = imageId },
+                        onTaskItemToggle = { lineIndex, checked ->
+                            val updatedContent = toggleTaskLine(
+                                content = decodedNote.content,
+                                lineIndex = lineIndex,
+                                checked = checked
                             )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                            if (updatedContent != null && updatedContent != decodedNote.content) {
+                                viewModel.updateNote(
+                                    id = currentNote.id,
+                                    content = updatedContent,
+                                    title = currentNote.title,
+                                    tags = decodedNote.tags,
+                                    isMarkdown = decodedNote.isMarkdown,
+                                    isFavorite = currentNote.isFavorite,
+                                    createdAt = currentNote.createdAt,
+                                    categoryId = currentNote.categoryId,
+                                    imagePaths = currentNote.imagePaths,
+                                    keepassDatabaseId = currentNote.keepassDatabaseId,
+                                    keepassGroupPath = currentNote.keepassGroupPath,
+                                    bitwardenVaultId = currentNote.bitwardenVaultId,
+                                    bitwardenFolderId = currentNote.bitwardenFolderId
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
             if (decodedNote.tags.isNotEmpty()) {
