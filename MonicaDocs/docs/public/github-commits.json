@@ -1,16 +1,12 @@
 {
   "repo": "Monica-Pass/Monica",
   "repoUrl": "https://github.com/Monica-Pass/Monica",
-  "generatedAt": "2026-07-28T21:31:03.978Z",
+  "generatedAt": "2026-07-29T21:11:59.434Z",
   "range": {
-    "from": "2025-07-29",
-    "to": "2026-07-28"
+    "from": "2025-07-30",
+    "to": "2026-07-29"
   },
   "activity": [
-    {
-      "date": "2025-07-29",
-      "count": 0
-    },
     {
       "date": "2025-07-30",
       "count": 0
@@ -1461,14 +1457,63 @@
     },
     {
       "date": "2026-07-27",
-      "count": 3
+      "count": 4
     },
     {
       "date": "2026-07-28",
       "count": 1
+    },
+    {
+      "date": "2026-07-29",
+      "count": 5
     }
   ],
   "latest": [
+    {
+      "sha": "1081d3a1b6012621fda03c6025a1d4e45b224768",
+      "shortSha": "1081d3a",
+      "message": "Merge remote-tracking branch 'origin/main'",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-29T07:58:40Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/1081d3a1b6012621fda03c6025a1d4e45b224768"
+    },
+    {
+      "sha": "6eff206ea92b0bb5b5809348b7ca4c483b06f9be",
+      "shortSha": "6eff206",
+      "message": "feat(android): enable note text selection in view mode (#82)",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-29T07:56:45Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/6eff206ea92b0bb5b5809348b7ca4c483b06f9be"
+    },
+    {
+      "sha": "2b791ac3f6b182015545248201fcdbb6c4067b0e",
+      "shortSha": "2b791ac",
+      "message": "fix(android): use installed version across settings",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-29T07:56:31Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/2b791ac3f6b182015545248201fcdbb6c4067b0e"
+    },
+    {
+      "sha": "81ef058b034bfffd381c3d8d65b18ff9a684dfc3",
+      "shortSha": "81ef058",
+      "message": "feat(android): complete MDBX2 remote sync and hardening",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-29T07:56:17Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/81ef058b034bfffd381c3d8d65b18ff9a684dfc3"
+    },
+    {
+      "sha": "47d66c23fdfce29f9288e634c30dd6224305523d",
+      "shortSha": "47d66c2",
+      "message": "docs: update Afdian sponsor list",
+      "authorName": "github-actions[bot]",
+      "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "date": "2026-07-29T05:32:39Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/47d66c23fdfce29f9288e634c30dd6224305523d"
+    },
     {
       "sha": "0174c9466fddeaa9ef49f5d0f21d056912eeb449",
       "shortSha": "0174c94",
@@ -1477,6 +1522,15 @@
       "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
       "date": "2026-07-28T05:26:30Z",
       "url": "https://github.com/Monica-Pass/Monica/commit/0174c9466fddeaa9ef49f5d0f21d056912eeb449"
+    },
+    {
+      "sha": "3a3086b6d8e8762ecbeb4dc5997f234511bcbb40",
+      "shortSha": "3a3086b",
+      "message": "feat(android): integrate MDBX2 with safe migration",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-07-27T16:44:40Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/3a3086b6d8e8762ecbeb4dc5997f234511bcbb40"
     },
     {
       "sha": "1496f06dd1ac665236d4e60471e536c619f9d1e4",
@@ -1504,60 +1558,6 @@
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
       "date": "2026-07-27T03:03:40Z",
       "url": "https://github.com/Monica-Pass/Monica/commit/70d2bd335c29714960c7018f6f65fd59521da6ab"
-    },
-    {
-      "sha": "63fe5473272d1607d0659e41149f7fbd29931d29",
-      "shortSha": "63fe547",
-      "message": "fixdocs): add localized Monica Cloud landing page",
-      "authorName": "Mrmiaomrzh",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
-      "date": "2026-07-26T18:55:03Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/63fe5473272d1607d0659e41149f7fbd29931d29"
-    },
-    {
-      "sha": "7c298e8aae6d20271adc2f65f77610efc874db52",
-      "shortSha": "7c298e8",
-      "message": "feat(docs): refresh cloud entry and ecosystem pages",
-      "authorName": "Mrmiaomrzh",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
-      "date": "2026-07-26T18:40:07Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/7c298e8aae6d20271adc2f65f77610efc874db52"
-    },
-    {
-      "sha": "76087c9bb819d5a4374f4babf5659d71bfd2bd25",
-      "shortSha": "76087c9",
-      "message": "feat(mdbx): add Rust MDBX2 engine module",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-26T18:16:15Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/76087c9bb819d5a4374f4babf5659d71bfd2bd25"
-    },
-    {
-      "sha": "aa9cb0082ac76e9b6d46c22bf1cbff3e06c501fb",
-      "shortSha": "aa9cb00",
-      "message": "Merge remote-tracking branch 'origin/main'",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-26T17:34:26Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/aa9cb0082ac76e9b6d46c22bf1cbff3e06c501fb"
-    },
-    {
-      "sha": "06529d1a52bd6b1b17b76e86b454369037679f66",
-      "shortSha": "06529d1",
-      "message": "Merge pull request #80 from Chaniug/pr/search-box-exclusion",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-26T17:30:04Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/06529d1a52bd6b1b17b76e86b454369037679f66"
-    },
-    {
-      "sha": "bff24388f6032aecc6bc3e66b32b32221c5c53d5",
-      "shortSha": "bff2438",
-      "message": "fix(autofill): 排除搜索框误弹密码条目（Edge/GitHub 等网页搜索框被当作登录字段）",
-      "authorName": "Chaniug",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/35595273?v=4",
-      "date": "2026-07-26T15:18:46Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/bff24388f6032aecc6bc3e66b32b32221c5c53d5"
     }
   ]
 }
