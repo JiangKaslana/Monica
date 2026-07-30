@@ -1,16 +1,12 @@
 {
   "repo": "Monica-Pass/Monica",
   "repoUrl": "https://github.com/Monica-Pass/Monica",
-  "generatedAt": "2026-07-29T21:11:59.434Z",
+  "generatedAt": "2026-07-30T21:30:43.075Z",
   "range": {
-    "from": "2025-07-30",
-    "to": "2026-07-29"
+    "from": "2025-07-31",
+    "to": "2026-07-30"
   },
   "activity": [
-    {
-      "date": "2025-07-30",
-      "count": 0
-    },
     {
       "date": "2025-07-31",
       "count": 0
@@ -1466,9 +1462,22 @@
     {
       "date": "2026-07-29",
       "count": 5
+    },
+    {
+      "date": "2026-07-30",
+      "count": 1
     }
   ],
   "latest": [
+    {
+      "sha": "e619c6f32f2a9242b8566878c26aa9bd9ffbd627",
+      "shortSha": "e619c6f",
+      "message": "docs: update Afdian sponsor list",
+      "authorName": "github-actions[bot]",
+      "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "date": "2026-07-30T05:20:27Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/e619c6f32f2a9242b8566878c26aa9bd9ffbd627"
+    },
     {
       "sha": "1081d3a1b6012621fda03c6025a1d4e45b224768",
       "shortSha": "1081d3a",
@@ -1549,15 +1558,6 @@
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
       "date": "2026-07-27T05:29:01Z",
       "url": "https://github.com/Monica-Pass/Monica/commit/37dc2c1b1e26f737ad44b400e245e08a2c7c91e1"
-    },
-    {
-      "sha": "70d2bd335c29714960c7018f6f65fd59521da6ab",
-      "shortSha": "70d2bd3",
-      "message": "Merge pull request #81 from Mrmiaomrzh/main",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-27T03:03:40Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/70d2bd335c29714960c7018f6f65fd59521da6ab"
     }
   ]
 }
