@@ -68,13 +68,13 @@ fun MdbxOneDriveOpenScreen(
     var isLoadingEntries by remember { mutableStateOf(false) }
     var selectedFile by remember { mutableStateOf<FileSourceEntry?>(null) }
 
-    var vaultName by remember { mutableStateOf("") }
     var masterPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var unlockMethod by remember { mutableStateOf(MdbxUnlockMethod.MASTER_PASSWORD) }
     var keyFile by remember { mutableStateOf<MdbxKeyFileSelection?>(null) }
     var keyFileError by remember { mutableStateOf<String?>(null) }
     var selectedEngine by remember { mutableStateOf(MdbxEngineType.KOTLIN_MDBX1) }
+    var submitted by remember { mutableStateOf(false) }
 
     val passwordRequired = selectedEngine == MdbxEngineType.RUST_MDBX2 ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
@@ -153,6 +153,31 @@ fun MdbxOneDriveOpenScreen(
             keyFile = null
         }
     }
+    LaunchedEffect(operationState, submitted) {
+        if (submitted && operationState is MdbxViewModel.OperationState.Success) {
+            submitted = false
+            viewModel.clearOperationState()
+            onNavigateBack()
+        }
+    }
+
+    fun signInOrSwitchAccount() {
+        if (activity == null) return
+        isConnecting = true
+        authError = null
+        scope.launch {
+            runCatching { authManager.signIn(activity) }
+                .onSuccess { activeSession ->
+                    session = activeSession
+                    selectedFile = null
+                    loadDirectory("")
+                }
+                .onFailure { error ->
+                    authError = error.toOneDriveUserMessage("OneDrive 登录失败")
+                }
+            isConnecting = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -170,266 +195,53 @@ fun MdbxOneDriveOpenScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // === Card: OneDrive Auth ===
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        "OneDrive 连接",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    if (session != null) {
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    session!!.displayName.ifBlank { session!!.username },
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            },
-                            supportingContent = { Text(session!!.username) },
-                            leadingContent = {
-                                Icon(
-                                    Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            },
-                            trailingContent = {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            },
-                            colors = ListItemDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
+            OneDriveLocationPanel(
+                session = session,
+                isConnecting = isConnecting,
+                accountActionLabel = if (session == null) {
+                    stringResource(R.string.keepass_onedrive_sign_in_action)
+                } else {
+                    stringResource(R.string.keepass_onedrive_switch_account)
+                },
+                connectionLabel = when {
+                    isConnecting -> stringResource(R.string.keepass_webdav_status_connecting)
+                    authError != null -> stringResource(R.string.keepass_webdav_status_failed)
+                    session != null -> stringResource(R.string.keepass_webdav_status_connected)
+                    else -> stringResource(R.string.keepass_webdav_status_not_connected)
+                },
+                connectionFailed = authError != null,
+                errorMessage = authError,
+                onAccountAction = ::signInOrSwitchAccount,
+                browserTitle = stringResource(R.string.mdbx_select_remote_file),
+                currentPath = currentPath,
+                isLoadingEntries = isLoadingEntries,
+                entries = entries,
+                emptyMessage = stringResource(R.string.mdbx_no_mdbx_files),
+                onNavigateUp = {
+                    loadDirectory(OneDriveKeePassFileSource.parentPathOf(currentPath))
+                    selectedFile = null
+                },
+                onRefresh = { loadDirectory(currentPath) },
+                entryEnabled = { entry ->
+                    entry.isDirectory || entry.name.endsWith(".mdbx", ignoreCase = true)
+                },
+                entrySelected = { entry -> selectedFile?.path == entry.path },
+                entryIcon = { entry -> if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Key },
+                entrySupportingText = { entry -> entry.path.toOneDriveDisplayPath() },
+                onEntryClick = { entry ->
+                    if (entry.isDirectory) {
+                        loadDirectory(entry.path)
+                        selectedFile = null
                     } else {
-                        Button(
-                            onClick = {
-                                if (activity == null) return@Button
-                                isConnecting = true
-                                authError = null
-                                scope.launch {
-                                    runCatching { authManager.signIn(activity) }
-                                        .onSuccess { s ->
-                                            session = s
-                                            loadDirectory("")
-                                        }
-                                        .onFailure { e ->
-                                            authError = e.toOneDriveUserMessage("OneDrive 登录失败")
-                                        }
-                                    isConnecting = false
-                                }
-                            },
-                            enabled = !isConnecting,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (isConnecting) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            Icon(Icons.Default.Cloud, null, Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("登录 Microsoft 账户")
-                        }
-                        authError?.let {
-                            Text(
-                                it,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+                        selectedFile = entry
                     }
                 }
-            }
-
-            // === Card: Browse Files (shown after auth) ===
-            AnimatedVisibility(
-                visible = session != null,
-                enter = expandVertically() + fadeIn()
-            ) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                stringResource(R.string.mdbx_select_remote_file),
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Row {
-                                IconButton(
-                                    onClick = {
-                                        val parent = OneDriveKeePassFileSource.parentPathOf(currentPath)
-                                        loadDirectory(parent)
-                                        selectedFile = null
-                                    },
-                                    enabled = currentPath.isNotBlank()
-                                ) {
-                                    Icon(Icons.Default.ArrowUpward, "上级目录")
-                                }
-                                IconButton(onClick = { loadDirectory(currentPath) }) {
-                                    Icon(Icons.Default.Refresh, "刷新")
-                                }
-                            }
-                        }
-
-                        if (currentPath.isNotBlank()) {
-                            Text(
-                                "/$currentPath",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 320.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
-                        ) {
-                            if (isLoadingEntries) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                }
-                            } else if (entries.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        stringResource(R.string.mdbx_no_mdbx_files),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            } else {
-                                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                                    items(entries, key = { it.path }) { entry ->
-                                        val isMdbxFile = !entry.isDirectory &&
-                                            entry.name.endsWith(".mdbx", ignoreCase = true)
-                                        val isSelected = selectedFile?.path == entry.path
-
-                                        ListItem(
-                                            headlineContent = {
-                                                Text(
-                                                    entry.name,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = when {
-                                                        isSelected -> MaterialTheme.colorScheme.primary
-                                                        entry.isDirectory || isMdbxFile -> MaterialTheme.colorScheme.onSurface
-                                                        else -> MaterialTheme.colorScheme.outlineVariant
-                                                    }
-                                                )
-                                            },
-                                            leadingContent = {
-                                                Icon(
-                                                    if (entry.isDirectory) Icons.Default.Folder
-                                                    else Icons.Default.Key,
-                                                    contentDescription = null,
-                                                    tint = when {
-                                                        isSelected -> MaterialTheme.colorScheme.primary
-                                                        entry.isDirectory -> MaterialTheme.colorScheme.onSurfaceVariant
-                                                        isMdbxFile -> MaterialTheme.colorScheme.onSurfaceVariant
-                                                        else -> MaterialTheme.colorScheme.outlineVariant
-                                                    },
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            },
-                                            trailingContent = {
-                                                when {
-                                                    entry.isDirectory -> Icon(
-                                                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                    isSelected -> Icon(
-                                                        Icons.Default.CheckCircle,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                            },
-                                            colors = ListItemDefaults.colors(
-                                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                            ),
-                                            modifier = Modifier.clickable(
-                                                enabled = entry.isDirectory || isMdbxFile
-                                            ) {
-                                                if (entry.isDirectory) {
-                                                    loadDirectory(entry.path)
-                                                    selectedFile = null
-                                                } else if (isMdbxFile) {
-                                                    selectedFile = entry
-                                                    if (vaultName.isBlank()) {
-                                                        vaultName = entry.name.removeSuffix(".mdbx")
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        selectedFile?.let { file ->
-                            ListItem(
-                                headlineContent = {
-                                    Text(
-                                        "${stringResource(R.string.mdbx_webdav_selected_file)}: ${file.name}",
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                },
-                                leadingContent = {
-                                    Icon(
-                                        Icons.Default.CheckCircle,
-                                        null,
-                                        Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                },
-                                colors = ListItemDefaults.colors(
-                                    containerColor = MaterialTheme.colorScheme.surface
-                                )
-                            )
-                        }
-                    }
-                }
-            }
+            )
 
             // === Vault settings (only after file selected) ===
             AnimatedVisibility(
@@ -455,12 +267,8 @@ fun MdbxOneDriveOpenScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Text(
-                                stringResource(R.string.mdbx_vault_settings),
+                                stringResource(R.string.mdbx_unlock_existing_vault),
                                 style = MaterialTheme.typography.titleMedium
-                            )
-                            MdbxVaultNameField(
-                                vaultName = vaultName,
-                                onVaultNameChange = { vaultName = it }
                             )
                             MdbxPasswordFieldSection(
                                 masterPassword = masterPassword,
@@ -469,22 +277,22 @@ fun MdbxOneDriveOpenScreen(
                                 onConfirmPasswordChange = { confirmPassword = it },
                                 passwordRequired = passwordRequired
                             )
+                            if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
+                                MdbxUnlockMethodSection(
+                                    unlockMethod = unlockMethod,
+                                    onUnlockMethodChange = { unlockMethod = it },
+                                    embedded = true
+                                )
+                                MdbxKeyFileSection(
+                                    keyFile = keyFile,
+                                    keyFileError = keyFileError,
+                                    keyFileRequired = keyFileRequired,
+                                    onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                                    onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") },
+                                    embedded = true
+                                )
+                            }
                         }
-                    }
-
-                    if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
-                        MdbxUnlockMethodSection(
-                            unlockMethod = unlockMethod,
-                            onUnlockMethodChange = { unlockMethod = it }
-                        )
-
-                        MdbxKeyFileSection(
-                            keyFile = keyFile,
-                            keyFileError = keyFileError,
-                            keyFileRequired = keyFileRequired,
-                            onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                            onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
-                        )
                     }
                 }
             }
@@ -492,7 +300,6 @@ fun MdbxOneDriveOpenScreen(
             // === Submit Button ===
             val isFormValid = session != null &&
                 selectedFile != null &&
-                vaultName.isNotBlank() &&
                 (!passwordRequired || (
                     normalizedMasterPassword.isNotBlank() &&
                         normalizedMasterPassword == normalizedConfirmPassword
@@ -504,8 +311,8 @@ fun MdbxOneDriveOpenScreen(
                 onClick = {
                     val s = session ?: return@Button
                     val file = selectedFile ?: return@Button
+                    submitted = true
                     viewModel.connectToOneDriveVault(
-                        name = vaultName,
                         masterPassword = masterPassword,
                         unlockMethod = unlockMethod,
                         keyFile = keyFile,

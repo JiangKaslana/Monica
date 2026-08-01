@@ -1482,7 +1482,7 @@
     <string name="smooth_progress_bar_description">启用平滑动画，消除进度条的停顿感</string>
     <string name="validator_settings_section">验证器设置</string>
     <string name="experimental_features_section">实验功能</string>
-    <string name="mdbx_format_title">MDBX 1.0 格式</string>
+    <string name="mdbx_format_title">MDBX 格式</string>
     <string name="mdbx_format_description">正式版本地优先加密数据库格式，兼容旧测试版数据库</string>
     <string name="mdbx_create_vault_title">创建 MDBX Vault</string>
     <string name="mdbx_storage_section">存储配置</string>
@@ -1518,6 +1518,7 @@
     <string name="mdbx_tiga_sky_title">Sky — 8MB Argon2id</string>
     <string name="mdbx_tiga_sky_desc">快速轻量模式。适用于低风险环境。</string>
     <string name="mdbx_vault_settings">Vault 设置</string>
+    <string name="mdbx_unlock_existing_vault">解锁数据库</string>
     <string name="mdbx_vault_name">Vault 名称</string>
     <string name="mdbx_master_password">主密码</string>
     <string name="mdbx_confirm_password">确认主密码</string>
@@ -3763,6 +3764,10 @@
     <string name="onedrive_backup_encryption_title">加密备份文件</string>
     <string name="onedrive_backup_encryption_desc">使用与 WebDAV 备份相同的加密 ZIP 格式。</string>
     <string name="onedrive_backup_folder_item">文件夹</string>
+    <string name="onedrive_parent_folder">上级目录</string>
+    <string name="onedrive_refresh_folder">刷新目录</string>
+    <string name="onedrive_create_folder">新建文件夹</string>
+    <string name="mdbx_create_location">将创建到 %1$s</string>
     <string name="folder_name">文件夹名称</string>
     <string name="keepass_gdrive_attach_card_description">把 Google Drive 中已有的 .kdbx 文件接入为本地工作副本</string>
     <string name="keepass_gdrive_attach_title">接入 Google Drive 数据库</string>

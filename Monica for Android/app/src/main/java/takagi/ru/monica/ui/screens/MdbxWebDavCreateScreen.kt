@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
 import takagi.ru.monica.data.MdbxEngineType
@@ -55,6 +54,7 @@ fun MdbxWebDavCreateScreen(
     var keyFileError by remember { mutableStateOf<String?>(null) }
     var selectedTigaMode by remember { mutableStateOf(MdbxTigaMode.MULTI) }
     var selectedEngine by remember { mutableStateOf(MdbxEngineType.RUST_MDBX2) }
+    var submitted by remember { mutableStateOf(false) }
 
     val passwordRequired = selectedEngine == MdbxEngineType.RUST_MDBX2 ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
@@ -106,9 +106,10 @@ fun MdbxWebDavCreateScreen(
             keyFile = null
         }
     }
-    LaunchedEffect(operationState) {
-        if (operationState is MdbxViewModel.OperationState.Success) {
-            delay(1200)
+    LaunchedEffect(operationState, submitted) {
+        if (submitted && operationState is MdbxViewModel.OperationState.Success) {
+            submitted = false
+            viewModel.clearOperationState()
             onNavigateBack()
         }
     }
@@ -129,6 +130,7 @@ fun MdbxWebDavCreateScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -213,10 +215,7 @@ fun MdbxWebDavCreateScreen(
                     MdbxEngineTypeSection(
                         selectedEngine = selectedEngine,
                         onEngineChange = { selectedEngine = it },
-                        remote = true
-                    )
-
-                    MdbxTigaModeSection(
+                        remote = true,
                         selectedTigaMode = selectedTigaMode,
                         onTigaModeChange = { selectedTigaMode = it }
                     )
@@ -244,22 +243,22 @@ fun MdbxWebDavCreateScreen(
                                 onConfirmPasswordChange = { confirmPassword = it },
                                 passwordRequired = passwordRequired
                             )
+                            if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
+                                MdbxUnlockMethodSection(
+                                    unlockMethod = unlockMethod,
+                                    onUnlockMethodChange = { unlockMethod = it },
+                                    embedded = true
+                                )
+                                MdbxKeyFileSection(
+                                    keyFile = keyFile,
+                                    keyFileError = keyFileError,
+                                    keyFileRequired = keyFileRequired,
+                                    onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                                    onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") },
+                                    embedded = true
+                                )
+                            }
                         }
-                    }
-
-                    if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
-                        MdbxUnlockMethodSection(
-                            unlockMethod = unlockMethod,
-                            onUnlockMethodChange = { unlockMethod = it }
-                        )
-
-                        MdbxKeyFileSection(
-                            keyFile = keyFile,
-                            keyFileError = keyFileError,
-                            keyFileRequired = keyFileRequired,
-                            onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                            onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
-                        )
                     }
                 }
             }
@@ -279,6 +278,7 @@ fun MdbxWebDavCreateScreen(
 
             Button(
                 onClick = {
+                    submitted = true
                     viewModel.createWebDavVault(
                         name = vaultName,
                         masterPassword = masterPassword,

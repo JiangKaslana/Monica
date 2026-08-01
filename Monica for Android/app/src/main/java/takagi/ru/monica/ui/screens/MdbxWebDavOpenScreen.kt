@@ -64,13 +64,13 @@ fun MdbxWebDavOpenScreen(
     var webDavIsLoadingEntries by remember { mutableStateOf(false) }
     var selectedWebDavFile by remember { mutableStateOf<FileSourceEntry?>(null) }
 
-    var vaultName by remember { mutableStateOf("") }
     var masterPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var unlockMethod by remember { mutableStateOf(MdbxUnlockMethod.MASTER_PASSWORD) }
     var keyFile by remember { mutableStateOf<MdbxKeyFileSelection?>(null) }
     var keyFileError by remember { mutableStateOf<String?>(null) }
     var selectedEngine by remember { mutableStateOf(MdbxEngineType.KOTLIN_MDBX1) }
+    var submitted by remember { mutableStateOf(false) }
 
     val passwordRequired = selectedEngine == MdbxEngineType.RUST_MDBX2 ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
@@ -141,6 +141,13 @@ fun MdbxWebDavOpenScreen(
             keyFile = null
         }
     }
+    LaunchedEffect(operationState, submitted) {
+        if (submitted && operationState is MdbxViewModel.OperationState.Success) {
+            submitted = false
+            viewModel.clearOperationState()
+            onNavigateBack()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -158,6 +165,7 @@ fun MdbxWebDavOpenScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -365,9 +373,6 @@ fun MdbxWebDavOpenScreen(
                                                     selectedWebDavFile = null
                                                 } else if (isMdbxFile) {
                                                     selectedWebDavFile = entry
-                                                    if (vaultName.isBlank()) {
-                                                        vaultName = entry.name.removeSuffix(".mdbx")
-                                                    }
                                                 }
                                             }
                                         )
@@ -425,12 +430,8 @@ fun MdbxWebDavOpenScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Text(
-                                stringResource(R.string.mdbx_vault_settings),
+                                stringResource(R.string.mdbx_unlock_existing_vault),
                                 style = MaterialTheme.typography.titleMedium
-                            )
-                            MdbxVaultNameField(
-                                vaultName = vaultName,
-                                onVaultNameChange = { vaultName = it }
                             )
                             MdbxPasswordFieldSection(
                                 masterPassword = masterPassword,
@@ -439,22 +440,22 @@ fun MdbxWebDavOpenScreen(
                                 onConfirmPasswordChange = { confirmPassword = it },
                                 passwordRequired = passwordRequired
                             )
+                            if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
+                                MdbxUnlockMethodSection(
+                                    unlockMethod = unlockMethod,
+                                    onUnlockMethodChange = { unlockMethod = it },
+                                    embedded = true
+                                )
+                                MdbxKeyFileSection(
+                                    keyFile = keyFile,
+                                    keyFileError = keyFileError,
+                                    keyFileRequired = keyFileRequired,
+                                    onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                                    onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") },
+                                    embedded = true
+                                )
+                            }
                         }
-                    }
-
-                    if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
-                        MdbxUnlockMethodSection(
-                            unlockMethod = unlockMethod,
-                            onUnlockMethodChange = { unlockMethod = it }
-                        )
-
-                        MdbxKeyFileSection(
-                            keyFile = keyFile,
-                            keyFileError = keyFileError,
-                            keyFileRequired = keyFileRequired,
-                            onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                            onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
-                        )
                     }
                 }
             }
@@ -465,7 +466,6 @@ fun MdbxWebDavOpenScreen(
                 serverUrl.isNotBlank() &&
                 username.isNotBlank() &&
                 webDavPassword.isNotBlank() &&
-                vaultName.isNotBlank() &&
                 (!passwordRequired || (
                     normalizedMasterPassword.isNotBlank() &&
                         normalizedMasterPassword == normalizedConfirmPassword
@@ -476,8 +476,8 @@ fun MdbxWebDavOpenScreen(
             Button(
                 onClick = {
                     selectedWebDavFile?.let { file ->
+                        submitted = true
                         viewModel.connectToExistingWebDavVault(
-                            name = vaultName,
                             masterPassword = masterPassword,
                             unlockMethod = unlockMethod,
                             keyFile = keyFile,

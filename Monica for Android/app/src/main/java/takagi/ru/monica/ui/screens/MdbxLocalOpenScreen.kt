@@ -33,7 +33,6 @@ fun MdbxLocalOpenScreen(
     val operationState by viewModel.operationState.collectAsState()
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
-    var vaultName by remember { mutableStateOf("") }
     var masterPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var showMasterPassword by remember { mutableStateOf(false) }
@@ -41,6 +40,7 @@ fun MdbxLocalOpenScreen(
     var unlockMethod by remember { mutableStateOf(MdbxUnlockMethod.MASTER_PASSWORD) }
     var keyFile by remember { mutableStateOf<MdbxKeyFileSelection?>(null) }
     var keyFileError by remember { mutableStateOf<String?>(null) }
+    var submitted by remember { mutableStateOf(false) }
 
     val passwordRequired = unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
@@ -89,6 +89,13 @@ fun MdbxLocalOpenScreen(
     LaunchedEffect(Unit) {
         viewModel.clearOperationState()
     }
+    LaunchedEffect(operationState, submitted) {
+        if (submitted && operationState is MdbxViewModel.OperationState.Success) {
+            submitted = false
+            viewModel.clearOperationState()
+            onNavigateBack()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -106,6 +113,7 @@ fun MdbxLocalOpenScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -164,12 +172,8 @@ fun MdbxLocalOpenScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        stringResource(R.string.mdbx_vault_settings),
+                        stringResource(R.string.mdbx_unlock_existing_vault),
                         style = MaterialTheme.typography.titleMedium
-                    )
-                    MdbxVaultNameField(
-                        vaultName = vaultName,
-                        onVaultNameChange = { vaultName = it }
                     )
                     MdbxPasswordFieldSection(
                         masterPassword = masterPassword,
@@ -178,26 +182,25 @@ fun MdbxLocalOpenScreen(
                         onConfirmPasswordChange = { confirmPassword = it },
                         passwordRequired = passwordRequired
                     )
+                    MdbxUnlockMethodSection(
+                        unlockMethod = unlockMethod,
+                        onUnlockMethodChange = { unlockMethod = it },
+                        includeDeviceKey = true,
+                        embedded = true
+                    )
+                    MdbxKeyFileSection(
+                        keyFile = keyFile,
+                        keyFileError = keyFileError,
+                        keyFileRequired = keyFileRequired,
+                        onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                        onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") },
+                        embedded = true
+                    )
                 }
             }
 
-            MdbxUnlockMethodSection(
-                unlockMethod = unlockMethod,
-                onUnlockMethodChange = { unlockMethod = it },
-                includeDeviceKey = true
-            )
-
-            MdbxKeyFileSection(
-                keyFile = keyFile,
-                keyFileError = keyFileError,
-                keyFileRequired = keyFileRequired,
-                onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
-            )
-
             // === Submit Button ===
             val isFormValid = selectedUri != null &&
-                vaultName.isNotBlank() &&
                 (!passwordRequired || (
                     normalizedMasterPassword.isNotBlank() &&
                         normalizedMasterPassword == normalizedConfirmPassword
@@ -208,9 +211,10 @@ fun MdbxLocalOpenScreen(
             Button(
                 onClick = {
                     selectedUri?.let { uri ->
+                        submitted = true
                         viewModel.importLocalVault(
                             sourceUri = uri,
-                            name = vaultName,
+                            name = null,
                             masterPassword = masterPassword,
                             unlockMethod = unlockMethod,
                             keyFile = keyFile,

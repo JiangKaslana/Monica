@@ -168,6 +168,12 @@ class MdbxViewModel(
         .onEach { _allDatabasesLoaded.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            normalizeExistingRemoteVaultNames()
+        }
+    }
+
     private val _operationState = MutableStateFlow<OperationState>(OperationState.Idle)
     val operationState: StateFlow<OperationState> = _operationState.asStateFlow()
 
@@ -783,7 +789,7 @@ class MdbxViewModel(
                 withContext(Dispatchers.IO) {
                     val sourceName = queryDisplayName(sourceUri) ?: "imported-${UUID.randomUUID()}.mdbx"
                     val displayName = name?.trim()?.takeIf { it.isNotBlank() }
-                        ?: sourceName.removeSuffix(".mdbx")
+                        ?: remoteVaultDisplayName(sourceName)
                     val fileName = if (sourceName.endsWith(".mdbx", ignoreCase = true)) {
                         sourceName
                     } else {
@@ -1015,7 +1021,6 @@ class MdbxViewModel(
     }
 
     fun connectToExistingWebDavVault(
-        name: String,
         masterPassword: String,
         unlockMethod: MdbxUnlockMethod,
         keyFile: MdbxKeyFileSelection?,
@@ -1027,6 +1032,7 @@ class MdbxViewModel(
         description: String?,
         engineType: MdbxEngineType = MdbxEngineType.KOTLIN_MDBX1
     ) {
+        val displayName = remoteVaultDisplayName(remoteFilePath)
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("Connecting to remote MDBX vault...")
 
@@ -1034,7 +1040,7 @@ class MdbxViewModel(
                 withContext(Dispatchers.IO) {
                     if (engineType == MdbxEngineType.RUST_MDBX2) {
                         connectToMdbx2WebDavVault(
-                            name = name,
+                            name = displayName,
                             masterPassword = masterPassword,
                             serverUrl = serverUrl,
                             username = username,
@@ -1043,9 +1049,6 @@ class MdbxViewModel(
                             description = description
                         )
                         return@withContext
-                    }
-                    val displayName = name.trim().ifBlank {
-                        throw IllegalArgumentException("Vault name cannot be empty")
                     }
                     val fileSource = WebDavMdbxFileSource(serverUrl, username, webDavPassword)
                     fileSource.testConnection().getOrThrow()
@@ -1113,7 +1116,7 @@ class MdbxViewModel(
                 }
 
                 _operationState.value = OperationState.Success(
-                    "Connected to remote MDBX vault \"$name\""
+                    "Connected to remote MDBX vault \"$displayName\""
                 )
             } catch (e: Exception) {
                 _operationState.value = OperationState.Error(
@@ -1121,6 +1124,44 @@ class MdbxViewModel(
                 )
             }
         }
+    }
+
+    private fun remoteVaultDisplayName(remoteFilePath: String): String {
+        val fileName = remoteFilePath
+            .trim()
+            .trimEnd('/')
+            .substringAfterLast('/')
+        return if (fileName.endsWith(".mdbx", ignoreCase = true)) {
+            fileName.dropLast(5)
+        } else {
+            fileName
+        }.ifBlank { "MDBX Vault" }
+    }
+
+    private suspend fun normalizeExistingRemoteVaultNames() {
+        databaseDao.getAllDatabasesSnapshot()
+            .filter { database ->
+                database.sourceTypeEnum == MdbxSourceType.REMOTE_WEBDAV ||
+                    database.sourceTypeEnum == MdbxSourceType.REMOTE_ONEDRIVE
+            }
+            .forEach { database ->
+                val displayName = remoteVaultDisplayName(database.filePath)
+                if (database.name != displayName) {
+                    databaseDao.updateDatabase(database.copy(name = displayName))
+                }
+                database.sourceId?.let { sourceId ->
+                    remoteSourceDao.getSourceById(sourceId)?.let { source ->
+                        if (source.displayName != displayName) {
+                            remoteSourceDao.updateSource(
+                                source.copy(
+                                    displayName = displayName,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                }
+            }
     }
 
     data class OneDriveMdbxDirectoryListing(
@@ -1259,7 +1300,6 @@ class MdbxViewModel(
     }
 
     fun connectToOneDriveVault(
-        name: String,
         masterPassword: String,
         unlockMethod: MdbxUnlockMethod,
         keyFile: MdbxKeyFileSelection?,
@@ -1270,6 +1310,7 @@ class MdbxViewModel(
         description: String?,
         engineType: MdbxEngineType = MdbxEngineType.KOTLIN_MDBX1
     ) {
+        val displayName = remoteVaultDisplayName(remoteFilePath)
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("Connecting to OneDrive MDBX vault...")
 
@@ -1277,16 +1318,13 @@ class MdbxViewModel(
                 withContext(Dispatchers.IO) {
                     if (engineType == MdbxEngineType.RUST_MDBX2) {
                         connectToMdbx2OneDriveVault(
-                            name = name,
+                            name = displayName,
                             masterPassword = masterPassword,
                             accountId = accountId,
                             remoteFilePath = remoteFilePath,
                             description = description
                         )
                         return@withContext
-                    }
-                    val displayName = name.trim().ifBlank {
-                        throw IllegalArgumentException("Vault name cannot be empty")
                     }
                     val fileSource = OneDriveMdbxFileSource(context, accountId)
                     fileSource.testConnection().getOrThrow()
@@ -1357,7 +1395,7 @@ class MdbxViewModel(
                 }
 
                 _operationState.value = OperationState.Success(
-                    "Connected to OneDrive MDBX vault \"$name\""
+                    "Connected to OneDrive MDBX vault \"$displayName\""
                 )
             } catch (e: Exception) {
                 _operationState.value = OperationState.Error(

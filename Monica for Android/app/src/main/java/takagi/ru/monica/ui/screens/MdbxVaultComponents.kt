@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Shield
@@ -33,7 +35,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import takagi.ru.monica.R
 import takagi.ru.monica.data.MdbxUnlockMethod
-import takagi.ru.monica.data.MdbxTigaMode
 import takagi.ru.monica.viewmodel.MdbxKeyFileSelection
 import takagi.ru.monica.viewmodel.MdbxViewModel
 import java.text.Normalizer
@@ -130,121 +131,103 @@ internal fun MdbxPasswordFieldSection(
 internal fun MdbxUnlockMethodSection(
     unlockMethod: MdbxUnlockMethod,
     onUnlockMethodChange: (MdbxUnlockMethod) -> Unit,
-    includeDeviceKey: Boolean = false
+    includeDeviceKey: Boolean = false,
+    embedded: Boolean = false
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
-        ) {
-            Text(
-                "解锁方式",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+    var expanded by remember { mutableStateOf(false) }
+    val methods = buildList {
+        add(Triple(MdbxUnlockMethod.MASTER_PASSWORD, Icons.Default.Key, "只用主密码解锁"))
+        add(Triple(MdbxUnlockMethod.KEY_FILE, Icons.Default.VpnKey, "只用 MDBX key file 解锁"))
+        add(
+            Triple(
+                MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE,
+                Icons.Default.Shield,
+                "两者同时正确才可解锁"
             )
-
-            val methods = buildList {
-                add(
-                Triple(MdbxUnlockMethod.MASTER_PASSWORD, Icons.Default.Key, "只用主密码解锁"),
-                )
-                add(
-                Triple(MdbxUnlockMethod.KEY_FILE, Icons.Default.VpnKey, "只用 MDBX key file 解锁"),
-                )
-                add(
-                    Triple(MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE, Icons.Default.Shield, "两者同时正确才可解锁")
-                )
-                if (includeDeviceKey) {
-                    add(
-                        Triple(MdbxUnlockMethod.DEVICE_KEY, Icons.Default.Smartphone, "仅在当前设备的安全存储中解锁")
-                    )
-                }
-            }
-            val titles = mapOf(
-                MdbxUnlockMethod.MASTER_PASSWORD to "主密码",
-                MdbxUnlockMethod.KEY_FILE to "密钥文件",
-                MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE to "主密码 + 密钥文件",
-                MdbxUnlockMethod.DEVICE_KEY to "设备密钥"
-            )
-
-            methods.forEach { (method, icon, description) ->
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            titles[method] ?: "",
-                            fontWeight = if (unlockMethod == method) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                    },
-                    supportingContent = { Text(description) },
-                    leadingContent = {
-                        Icon(
-                            icon,
-                            contentDescription = null,
-                            tint = if (unlockMethod == method) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    },
-                    trailingContent = {
-                        RadioButton(
-                            selected = unlockMethod == method,
-                            onClick = { onUnlockMethodChange(method) }
-                        )
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier
-                        .clickable { onUnlockMethodChange(method) }
-                        .fillMaxWidth()
-                )
-            }
+        )
+        if (includeDeviceKey) {
+            add(Triple(MdbxUnlockMethod.DEVICE_KEY, Icons.Default.Smartphone, "仅在当前设备的安全存储中解锁"))
         }
     }
-}
+    val titles = mapOf(
+        MdbxUnlockMethod.MASTER_PASSWORD to "主密码",
+        MdbxUnlockMethod.KEY_FILE to "密钥文件",
+        MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE to "主密码 + 密钥文件",
+        MdbxUnlockMethod.DEVICE_KEY to "设备密钥"
+    )
+    val selected = methods.firstOrNull { it.first == unlockMethod } ?: methods.first()
 
-@Composable
-internal fun MdbxTigaModeSection(
-    selectedTigaMode: MdbxTigaMode,
-    onTigaModeChange: (MdbxTigaMode) -> Unit
-) {
-    val descResId = when (selectedTigaMode) {
-        MdbxTigaMode.POWER -> R.string.mdbx_tiga_power_desc
-        MdbxTigaMode.MULTI -> R.string.mdbx_tiga_multi_desc
-        MdbxTigaMode.SKY -> R.string.mdbx_tiga_sky_desc
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-    ) {
+    val content: @Composable ColumnScope.() -> Unit = {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
         ) {
-            Text(
-                stringResource(R.string.mdbx_tiga_section),
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                stringResource(descResId),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                MdbxTigaMode.entries.forEachIndexed { index, mode ->
-                    SegmentedButton(
-                        selected = selectedTigaMode == mode,
-                        onClick = { onTigaModeChange(mode) },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index = index,
-                            count = MdbxTigaMode.entries.size
-                        ),
-                        label = { Text(mode.label) }
+            ListItem(
+                headlineContent = { Text("解锁方式", fontWeight = FontWeight.SemiBold) },
+                supportingContent = {
+                    Text("${titles[selected.first]} · ${selected.third}")
+                },
+                leadingContent = {
+                    Icon(selected.second, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                },
+                trailingContent = {
+                    Icon(
+                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "收起解锁方式" else "展开解锁方式"
                     )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
+            )
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    methods.forEach { (method, icon, description) ->
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    titles[method].orEmpty(),
+                                    fontWeight = if (unlockMethod == method) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            },
+                            supportingContent = { Text(description) },
+                            leadingContent = {
+                                Icon(
+                                    icon,
+                                    contentDescription = null,
+                                    tint = if (unlockMethod == method) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            trailingContent = {
+                                RadioButton(
+                                    selected = unlockMethod == method,
+                                    onClick = null
+                                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                onUnlockMethodChange(method)
+                                expanded = false
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
+
+    if (embedded) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerLow
+        ) { Column(content = content) }
+    } else {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+            content = content
+        )
     }
 }
 
@@ -254,16 +237,14 @@ internal fun MdbxKeyFileSection(
     keyFileError: String?,
     keyFileRequired: Boolean,
     onPickKeyFile: () -> Unit,
-    onGenerateKeyFile: () -> Unit
+    onGenerateKeyFile: () -> Unit,
+    embedded: Boolean = false
 ) {
     if (!keyFileRequired) return
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-    ) {
+    val content: @Composable ColumnScope.() -> Unit = {
         Column(
-            modifier = Modifier.padding(vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ListItem(
@@ -298,7 +279,7 @@ internal fun MdbxKeyFileSection(
                         modifier = Modifier.size(24.dp)
                     )
                 },
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
             )
             Row(
                 modifier = Modifier
@@ -328,6 +309,19 @@ internal fun MdbxKeyFileSection(
                 )
             }
         }
+    }
+    if (embedded) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerLow
+        ) { Column(content = content) }
+    } else {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+            content = content
+        )
     }
 }
 

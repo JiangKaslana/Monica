@@ -32,7 +32,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
 import takagi.ru.monica.data.MdbxEngineType
@@ -65,7 +64,6 @@ fun MdbxOneDriveCreateScreen(
     var currentPath by remember { mutableStateOf("") }
     var entries by remember { mutableStateOf<List<FileSourceEntry>>(emptyList()) }
     var isLoadingEntries by remember { mutableStateOf(false) }
-    var selectedDirectory by remember { mutableStateOf("") }
 
     var vaultName by remember { mutableStateOf("") }
     var masterPassword by remember { mutableStateOf("") }
@@ -75,6 +73,7 @@ fun MdbxOneDriveCreateScreen(
     var keyFileError by remember { mutableStateOf<String?>(null) }
     var selectedTigaMode by remember { mutableStateOf(MdbxTigaMode.MULTI) }
     var selectedEngine by remember { mutableStateOf(MdbxEngineType.RUST_MDBX2) }
+    var submitted by remember { mutableStateOf(false) }
 
     val passwordRequired = selectedEngine == MdbxEngineType.RUST_MDBX2 ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
@@ -146,10 +145,28 @@ fun MdbxOneDriveCreateScreen(
             keyFile = null
         }
     }
-    LaunchedEffect(operationState) {
-        if (operationState is MdbxViewModel.OperationState.Success) {
-            delay(1200)
+    LaunchedEffect(operationState, submitted) {
+        if (submitted && operationState is MdbxViewModel.OperationState.Success) {
+            submitted = false
+            viewModel.clearOperationState()
             onNavigateBack()
+        }
+    }
+
+    fun signInOrSwitchAccount() {
+        if (activity == null) return
+        isConnecting = true
+        authError = null
+        scope.launch {
+            runCatching { authManager.signIn(activity) }
+                .onSuccess { activeSession ->
+                    session = activeSession
+                    loadDirectory("")
+                }
+                .onFailure { error ->
+                    authError = error.toOneDriveUserMessage("OneDrive 登录失败")
+                }
+            isConnecting = false
         }
     }
 
@@ -169,229 +186,48 @@ fun MdbxOneDriveCreateScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // === Card: OneDrive Auth ===
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
+            OneDriveLocationPanel(
+                session = session,
+                isConnecting = isConnecting,
+                accountActionLabel = if (session == null) {
+                    stringResource(R.string.keepass_onedrive_sign_in_action)
+                } else {
+                    stringResource(R.string.keepass_onedrive_switch_account)
+                },
+                connectionLabel = when {
+                    isConnecting -> stringResource(R.string.keepass_webdav_status_connecting)
+                    authError != null -> stringResource(R.string.keepass_webdav_status_failed)
+                    session != null -> stringResource(R.string.keepass_webdav_status_connected)
+                    else -> stringResource(R.string.keepass_webdav_status_not_connected)
+                },
+                connectionFailed = authError != null,
+                errorMessage = authError,
+                onAccountAction = ::signInOrSwitchAccount,
+                browserTitle = stringResource(R.string.mdbx_select_directory),
+                currentPath = currentPath,
+                isLoadingEntries = isLoadingEntries,
+                entries = entries.filter { it.isDirectory },
+                emptyMessage = stringResource(R.string.onedrive_backup_no_folders),
+                onNavigateUp = {
+                    loadDirectory(OneDriveKeePassFileSource.parentPathOf(currentPath))
+                },
+                onRefresh = { loadDirectory(currentPath) },
+                entrySupportingText = { entry -> entry.path.toOneDriveDisplayPath() },
+                onEntryClick = { entry -> loadDirectory(entry.path) }
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        "OneDrive 连接",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    if (session != null) {
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    session!!.displayName.ifBlank { session!!.username },
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            },
-                            supportingContent = { Text(session!!.username) },
-                            leadingContent = {
-                                Icon(
-                                    Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            },
-                            trailingContent = {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            },
-                            colors = ListItemDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
-                    } else {
-                        Button(
-                            onClick = {
-                                if (activity == null) return@Button
-                                isConnecting = true
-                                authError = null
-                                scope.launch {
-                                    runCatching { authManager.signIn(activity) }
-                                        .onSuccess { s ->
-                                            session = s
-                                            loadDirectory("")
-                                        }
-                                        .onFailure { e ->
-                                            authError = e.toOneDriveUserMessage("OneDrive 登录失败")
-                                        }
-                                    isConnecting = false
-                                }
-                            },
-                            enabled = !isConnecting,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (isConnecting) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            Icon(Icons.Default.Cloud, null, Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("登录 Microsoft 账户")
-                        }
-                        authError?.let {
-                            Text(
-                                it,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
-            }
-
-            // === Card: Directory Browser (shown after auth) ===
-            AnimatedVisibility(
-                visible = session != null,
-                enter = expandVertically() + fadeIn()
-            ) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                "选择保存位置",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Row {
-                                IconButton(
-                                    onClick = {
-                                        val parent = OneDriveKeePassFileSource.parentPathOf(currentPath)
-                                        loadDirectory(parent)
-                                    },
-                                    enabled = currentPath.isNotBlank()
-                                ) {
-                                    Icon(Icons.Default.ArrowUpward, "上级目录")
-                                }
-                                IconButton(onClick = { loadDirectory(currentPath) }) {
-                                    Icon(Icons.Default.Refresh, "刷新")
-                                }
-                            }
-                        }
-
-                        if (currentPath.isNotBlank()) {
-                            Text(
-                                "/$currentPath",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 260.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
-                        ) {
-                            if (isLoadingEntries) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                }
-                            } else if (entries.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        "此文件夹为空",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            } else {
-                                LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                                    items(entries.filter { it.isDirectory }, key = { it.path }) { entry ->
-                                        ListItem(
-                                            headlineContent = {
-                                                Text(
-                                                    entry.name,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            },
-                                            leadingContent = {
-                                                Icon(
-                                                    Icons.Default.Folder,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            },
-                                            trailingContent = {
-                                                Icon(
-                                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            },
-                                            colors = ListItemDefaults.colors(
-                                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                            ),
-                                            modifier = Modifier.clickable {
-                                                loadDirectory(entry.path)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        AssistChip(
-                            onClick = {},
-                            label = {
-                                Text(
-                                    if (selectedDirectory.isNotBlank()) "保存到: /$selectedDirectory"
-                                    else "保存到: /$currentPath"
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.Folder,
-                                    null,
-                                    Modifier.size(16.dp)
-                                )
-                            }
-                        )
-                        // Fix: set selectedDirectory to currentPath on each navigation
-                        LaunchedEffect(currentPath) {
-                            selectedDirectory = currentPath
-                        }
-                    }
-                }
+                Text(
+                    text = stringResource(
+                        R.string.mdbx_create_location,
+                        currentPath.toOneDriveDisplayPath()
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // === Vault settings (only after auth) ===
@@ -406,10 +242,7 @@ fun MdbxOneDriveCreateScreen(
                     MdbxEngineTypeSection(
                         selectedEngine = selectedEngine,
                         onEngineChange = { selectedEngine = it },
-                        remote = true
-                    )
-
-                    MdbxTigaModeSection(
+                        remote = true,
                         selectedTigaMode = selectedTigaMode,
                         onTigaModeChange = { selectedTigaMode = it }
                     )
@@ -437,22 +270,22 @@ fun MdbxOneDriveCreateScreen(
                                 onConfirmPasswordChange = { confirmPassword = it },
                                 passwordRequired = passwordRequired
                             )
+                            if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
+                                MdbxUnlockMethodSection(
+                                    unlockMethod = unlockMethod,
+                                    onUnlockMethodChange = { unlockMethod = it },
+                                    embedded = true
+                                )
+                                MdbxKeyFileSection(
+                                    keyFile = keyFile,
+                                    keyFileError = keyFileError,
+                                    keyFileRequired = keyFileRequired,
+                                    onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                                    onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") },
+                                    embedded = true
+                                )
+                            }
                         }
-                    }
-
-                    if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
-                        MdbxUnlockMethodSection(
-                            unlockMethod = unlockMethod,
-                            onUnlockMethodChange = { unlockMethod = it }
-                        )
-
-                        MdbxKeyFileSection(
-                            keyFile = keyFile,
-                            keyFileError = keyFileError,
-                            keyFileRequired = keyFileRequired,
-                            onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                            onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
-                        )
                     }
                 }
             }
@@ -471,6 +304,7 @@ fun MdbxOneDriveCreateScreen(
             Button(
                 onClick = {
                     session?.let { s ->
+                        submitted = true
                         viewModel.createOneDriveVault(
                             name = vaultName,
                             masterPassword = masterPassword,
@@ -479,7 +313,7 @@ fun MdbxOneDriveCreateScreen(
                             tigaMode = selectedTigaMode,
                             accountId = s.accountId,
                             accountLabel = s.displayName.ifBlank { s.username },
-                            directoryPath = selectedDirectory.ifBlank { null },
+                            directoryPath = currentPath.ifBlank { null },
                             description = null,
                             engineType = selectedEngine
                         )
