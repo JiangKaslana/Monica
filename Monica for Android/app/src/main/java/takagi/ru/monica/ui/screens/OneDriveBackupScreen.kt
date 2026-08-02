@@ -23,19 +23,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.BookmarkRemove
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -46,7 +43,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -277,6 +273,49 @@ fun OneDriveBackupScreen(
         Toast.makeText(context, context.getString(R.string.onedrive_backup_directory_saved), Toast.LENGTH_SHORT).show()
     }
 
+    fun signInOrSwitchAccount() {
+        Log.i(
+            ONEDRIVE_BACKUP_LOG_TAG,
+            "OneDrive sign-in/switch clicked, state=$connectionState, signingIn=$signingIn, " +
+                "loadingEntries=$loadingEntries, loadingBackups=$loadingBackups, " +
+                "session=${session.debugRef()}, savedConfig=${savedConfig.debugRef()}"
+        )
+        if (activity == null) {
+            browserError = context.getString(R.string.keepass_onedrive_activity_missing)
+            connectionState = OneDriveBackupConnectionState.Failed
+            return
+        }
+        connectionState = OneDriveBackupConnectionState.Connecting
+        browserError = null
+        signingIn = true
+        loadingEntries = false
+        loadingBackups = false
+        coroutineScope.launch {
+            runCatching { authManager.signIn(activity) }
+                .onSuccess { result ->
+                    session = result
+                    savedConfig = backupHelper.getConfig()
+                    connectionState = OneDriveBackupConnectionState.Connected
+                    backupList = emptyList()
+                    val configuredPath = savedConfig
+                        ?.takeIf { it.accountId == result.accountId }
+                        ?.folderPath
+                        .orEmpty()
+                    loadDirectory(configuredPath)
+                }
+                .onFailure { error ->
+                    browserEntries = emptyList()
+                    backupList = emptyList()
+                    connectionState = OneDriveBackupConnectionState.Failed
+                    browserError = error.toOneDriveUserMessage(
+                        context.getString(R.string.keepass_onedrive_sign_in_failed)
+                    )
+                    Log.w(ONEDRIVE_BACKUP_LOG_TAG, "OneDrive interactive sign-in failed", error)
+                }
+            signingIn = false
+        }
+    }
+
     suspend fun performRestore(backup: BackupFile, decryptPasswordValue: String?) {
         val downloadedFile = File(context.cacheDir, "restore_${backup.name}")
         val result = backupHelper.downloadBackup(backup, downloadedFile)
@@ -406,280 +445,78 @@ fun OneDriveBackupScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            ElevatedHeaderCard(
-                title = stringResource(R.string.onedrive_backup_title),
-                description = stringResource(R.string.onedrive_backup_description)
-            )
-
-            Card {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+            OneDriveLocationPanel(
+                session = session,
+                isConnecting = signingIn,
+                accountActionLabel = if (session == null) {
+                    stringResource(R.string.keepass_onedrive_sign_in_action)
+                } else {
+                    stringResource(R.string.keepass_onedrive_switch_account)
+                },
+                connectionLabel = when (connectionState) {
+                    OneDriveBackupConnectionState.NotConnected -> stringResource(R.string.keepass_webdav_status_not_connected)
+                    OneDriveBackupConnectionState.Connecting -> stringResource(R.string.keepass_webdav_status_connecting)
+                    OneDriveBackupConnectionState.Connected -> stringResource(R.string.keepass_webdav_status_connected)
+                    OneDriveBackupConnectionState.Failed -> stringResource(R.string.keepass_webdav_status_failed)
+                },
+                connectionFailed = connectionState == OneDriveBackupConnectionState.Failed,
+                errorMessage = browserError,
+                onAccountAction = ::signInOrSwitchAccount,
+                browserTitle = stringResource(R.string.onedrive_backup_browser_title),
+                currentPath = currentPath,
+                isLoadingEntries = loadingEntries,
+                entries = browserEntries,
+                emptyMessage = stringResource(R.string.onedrive_backup_no_folders),
+                onNavigateUp = {
+                    coroutineScope.launch {
+                        loadDirectory(OneDriveKeePassFileSource.parentPathOf(currentPath))
+                    }
+                },
+                onRefresh = { coroutineScope.launch { loadDirectory(currentPath) } },
+                onCreateFolder = { showCreateFolderDialog = true },
+                entrySupportingText = { stringResource(R.string.onedrive_backup_folder_item) },
+                onEntryClick = { entry -> coroutineScope.launch { loadDirectory(entry.path) } }
+            ) {
+                Button(
+                    onClick = { saveCurrentFolderAsBackupDirectory() },
+                    enabled = !loadingEntries,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
+                    Icon(Icons.Default.Done, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.onedrive_backup_use_current_folder))
+                }
+                savedConfigForCurrentSession?.let { config ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = session?.displayName ?: stringResource(R.string.keepass_onedrive_not_connected),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = session?.username?.ifBlank {
-                                    stringResource(R.string.keepass_onedrive_sign_in_hint)
-                                } ?: stringResource(R.string.keepass_onedrive_sign_in_hint),
-                                style = MaterialTheme.typography.bodySmall,
+                                stringResource(R.string.onedrive_backup_config_title),
+                                style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        Button(
-                            onClick = {
-                                Log.i(
-                                    ONEDRIVE_BACKUP_LOG_TAG,
-                                    "OneDrive sign-in/switch clicked, state=$connectionState, signingIn=$signingIn, " +
-                                        "loadingEntries=$loadingEntries, loadingBackups=$loadingBackups, " +
-                                        "session=${session.debugRef()}, savedConfig=${savedConfig.debugRef()}"
-                                )
-                                if (activity == null) {
-                                    Log.w(ONEDRIVE_BACKUP_LOG_TAG, "OneDrive sign-in blocked: Activity missing")
-                                    browserError = context.getString(R.string.keepass_onedrive_activity_missing)
-                                    connectionState = OneDriveBackupConnectionState.Failed
-                                    return@Button
-                                }
-                                connectionState = OneDriveBackupConnectionState.Connecting
-                                browserError = null
-                                signingIn = true
-                                loadingEntries = false
-                                loadingBackups = false
-                                coroutineScope.launch {
-                                    val signInResult = runCatching { authManager.signIn(activity) }
-                                    signingIn = false
-                                    signInResult
-                                        .onSuccess { result ->
-                                            session = result
-                                            savedConfig = backupHelper.getConfig()
-                                            connectionState = OneDriveBackupConnectionState.Connected
-                                            backupList = emptyList()
-                                            Log.i(
-                                                ONEDRIVE_BACKUP_LOG_TAG,
-                                                "OneDrive interactive sign-in succeeded, session=${result.debugRef()}, " +
-                                                    "configMatches=${savedConfig?.accountId == result.accountId}"
-                                            )
-                                            val configuredPath = savedConfig
-                                                ?.takeIf { it.accountId == result.accountId }
-                                                ?.folderPath
-                                                .orEmpty()
-                                            loadDirectory(configuredPath)
-                                        }
-                                        .onFailure { error ->
-                                            browserEntries = emptyList()
-                                            backupList = emptyList()
-                                            connectionState = OneDriveBackupConnectionState.Failed
-                                            browserError = error.toOneDriveUserMessage(context.getString(R.string.keepass_onedrive_sign_in_failed))
-                                            Log.w(
-                                                ONEDRIVE_BACKUP_LOG_TAG,
-                                                "OneDrive interactive sign-in failed, temporaryAuth=${error.isOneDriveAuthTemporarilyUnavailable()}",
-                                                error
-                                            )
-                                        }
-                                }
-                            },
-                            enabled = !signingIn
-                        ) {
-                            if (signingIn) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
                             Text(
-                                if (session == null) stringResource(R.string.keepass_onedrive_sign_in_action)
-                                else stringResource(R.string.keepass_onedrive_switch_account)
+                                config.folderPath.toOneDriveDisplayPath(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                    }
-
-                    Surface(
-                        color = when (connectionState) {
-                            OneDriveBackupConnectionState.Connected -> MaterialTheme.colorScheme.primaryContainer
-                            OneDriveBackupConnectionState.Failed -> MaterialTheme.colorScheme.errorContainer
-                            else -> MaterialTheme.colorScheme.surfaceContainer
-                        },
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Text(
-                            text = when (connectionState) {
-                                OneDriveBackupConnectionState.NotConnected -> stringResource(R.string.keepass_webdav_status_not_connected)
-                                OneDriveBackupConnectionState.Connecting -> stringResource(R.string.keepass_webdav_status_connecting)
-                                OneDriveBackupConnectionState.Connected -> stringResource(R.string.keepass_webdav_status_connected)
-                                OneDriveBackupConnectionState.Failed -> stringResource(R.string.keepass_webdav_status_failed)
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
-                    }
-
-                    browserError?.let {
-                        Text(
-                            text = it,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-
-            if (oneDriveReady) {
-                Card {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.onedrive_backup_browser_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = stringResource(R.string.keepass_onedrive_current_path, currentPath.ifBlank { "/" }),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        loadDirectory(OneDriveKeePassFileSource.parentPathOf(currentPath))
-                                    }
-                                },
-                                enabled = currentPath.isNotBlank() && !loadingEntries
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = stringResource(R.string.go_back),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            Button(
-                                onClick = { showCreateFolderDialog = true },
-                                enabled = !loadingEntries && !creatingFolder
-                            ) {
-                                Icon(Icons.Default.CreateNewFolder, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = stringResource(R.string.keepass_webdav_create_folder_action),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                        IconButton(onClick = {
+                            backupHelper.clearConfig()
+                            savedConfig = null
+                            backupList = emptyList()
+                        }) {
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.clear))
                         }
-
-                        Button(
-                            onClick = { saveCurrentFolderAsBackupDirectory() },
-                            enabled = !loadingEntries
-                        ) {
-                            Icon(Icons.Default.Done, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.onedrive_backup_use_current_folder))
-                        }
-
-                        if (loadingEntries) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 24.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator()
-                            }
-                        } else if (browserEntries.isEmpty()) {
-                            Text(
-                                text = stringResource(R.string.onedrive_backup_no_folders),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            browserEntries.forEachIndexed { index, entry ->
-                                if (index > 0) {
-                                    HorizontalDivider()
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            coroutineScope.launch { loadDirectory(entry.path) }
-                                        }
-                                        .padding(vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Folder,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(entry.name, fontWeight = FontWeight.Medium)
-                                        Text(
-                                            text = stringResource(R.string.onedrive_backup_folder_item),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            savedConfig?.let { config ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = stringResource(R.string.onedrive_backup_config_title),
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            IconButton(
-                                onClick = {
-                                    backupHelper.clearConfig()
-                                    savedConfig = null
-                                    backupList = emptyList()
-                                }
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.clear))
-                            }
-                        }
-                        ConfigInfoRow(
-                            label = stringResource(R.string.username),
-                            value = config.displayName,
-                            icon = Icons.Default.Person
-                        )
-                        ConfigInfoRow(
-                            label = stringResource(R.string.onedrive_backup_directory_label),
-                            value = config.folderPath.ifBlank { "/" },
-                            icon = Icons.Default.Folder
-                        )
                     }
                 }
             }
@@ -1181,42 +1018,6 @@ fun OneDriveBackupScreen(
                 }
             }
         )
-    }
-}
-
-@Composable
-private fun ElevatedHeaderCard(title: String, description: String) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Cloud,
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Column {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                )
-            }
-        }
     }
 }
 

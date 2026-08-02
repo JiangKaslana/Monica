@@ -63,6 +63,7 @@ internal class Mdbx2VaultSessionExecutor(
         tigaMode: MdbxTigaMode,
         credential: MdbxVaultCredential
     ): File = withContext(Dispatchers.IO) {
+        Mdbx2NativeRuntime.ensureLoaded()
         // Native setup consumes the byte arrays synchronously, but callers may
         // still need their key-file selection after creation (for example to
         // persist its fingerprint or retry an external publication).  Work on
@@ -92,7 +93,7 @@ internal class Mdbx2VaultSessionExecutor(
                 deleteVaultArtifacts(file)
                 val mapped = Mdbx2ErrorMapper.createFailure(error)
                 MdbxDiagLogger.append(
-                    "[MDBX2][create] failed kind=${mapped.kind.name} cause=${error::class.java.simpleName}"
+                    "[MDBX2][create] failed kind=${mapped.kind.name} chain=${error.toDiagnosticChain()}"
                 )
                 throw mapped
             }
@@ -121,7 +122,7 @@ internal class Mdbx2VaultSessionExecutor(
                 deleteVaultArtifacts(file)
                 val mapped = Mdbx2ErrorMapper.createFailure(error)
                 MdbxDiagLogger.append(
-                    "[MDBX2][create] failed kind=${mapped.kind.name} cause=${error::class.java.simpleName}"
+                    "[MDBX2][create] failed kind=${mapped.kind.name} chain=${error.toDiagnosticChain()}"
                 )
                 throw mapped
             } finally {
@@ -191,10 +192,12 @@ internal class Mdbx2VaultSessionExecutor(
     }
 
     suspend fun inspectVaultFormat(file: File): String? = withContext(Dispatchers.IO) {
+        Mdbx2NativeRuntime.ensureLoaded()
         uniffi.mdbx_ffi.inspectVaultMigration(file.absolutePath).formatVersion
     }
 
     suspend fun validatePasswordVaultFile(file: File, password: String) = withContext(Dispatchers.IO) {
+        Mdbx2NativeRuntime.ensureLoaded()
         val vault = openVault(
             path = file.absolutePath,
             password = normalizePassword(password),
@@ -205,6 +208,7 @@ internal class Mdbx2VaultSessionExecutor(
 
     suspend fun validateVaultFile(file: File, credential: MdbxVaultCredential) =
         withContext(Dispatchers.IO) {
+            Mdbx2NativeRuntime.ensureLoaded()
             val workingCredential = credential.copy(
                 keyFileBytes = credential.keyFileBytes?.clone(),
                 deviceKeyBytes = credential.deviceKeyBytes?.clone()
@@ -264,6 +268,7 @@ internal class Mdbx2VaultSessionExecutor(
         mutating: Boolean,
         block: suspend (LocalMdbxDatabase, MdbxVault) -> T
     ): T = withContext(Dispatchers.IO) {
+        Mdbx2NativeRuntime.ensureLoaded()
         vaultLocks.getOrPut(databaseId) { Mutex() }.withLock {
             val database = requireDatabase(databaseId)
             val file = resolveLocalFile(database)
@@ -474,7 +479,22 @@ internal class Mdbx2VaultSessionExecutor(
 
     private suspend fun publishExternal(database: LocalMdbxDatabase, file: File) {
         try {
-            externalStorage.publish(database, file)
+            val publication = externalStorage.publishWithMerge(
+                database = database,
+                workingCopy = file
+            ) { stagedRemote ->
+                mergeExternalRevision(
+                    database = database,
+                    workingCopy = file,
+                    stagedRemote = stagedRemote
+                )
+            }
+            if (publication.conflictCount > 0) {
+                MdbxDiagLogger.append(
+                    "[MDBX2][external-merge] publication completed " +
+                        "databaseId=${database.id} conflicts=${publication.conflictCount}"
+                )
+            }
             databaseDao.updateSyncSuccess(
                 databaseId = database.id,
                 status = takagi.ru.monica.data.MdbxSyncStatus.IN_SYNC.name,
@@ -491,6 +511,51 @@ internal class Mdbx2VaultSessionExecutor(
                 error
             )
         }
+    }
+
+    private fun mergeExternalRevision(
+        database: LocalMdbxDatabase,
+        workingCopy: File,
+        stagedRemote: File
+    ): Int {
+        val localVault = openVaultForDatabase(database, workingCopy)
+        var conflictCount = 0
+        try {
+            val remoteVault = openVaultForDatabase(database, stagedRemote)
+            try {
+                require(localVault.info().vaultId == remoteVault.info().vaultId) {
+                    "External MDBX2 vault identity does not match the local working copy"
+                }
+                externalStorage.mergeSidecarIntoWorkingCopy(stagedRemote, workingCopy)
+                val bundleDirectory = File(appContext.cacheDir, "mdbx2-external-merge")
+                    .also { directory ->
+                        check(directory.exists() || directory.mkdirs()) {
+                            "Cannot create MDBX2 external merge directory"
+                        }
+                    }
+                val bundle = File(bundleDirectory, "${UUID.randomUUID()}.mdbxsync")
+                try {
+                    remoteVault.exportManualSyncBundle(bundle.absolutePath)
+                    val result = localVault.applyManualSyncBundle(bundle.absolutePath)
+                    check(result.missingParentCount == 0u) {
+                        "External MDBX2 merge contains commits with missing parents"
+                    }
+                    MdbxDiagLogger.append(
+                        "[MDBX2][external-merge] imported " +
+                            "databaseId=${database.id} applied=${result.appliedCommits} " +
+                            "skipped=${result.skippedCommits} conflicts=${result.conflictCount}"
+                    )
+                    conflictCount = result.conflictCount.toInt()
+                } finally {
+                    bundle.delete()
+                }
+            } finally {
+                remoteVault.close()
+            }
+        } finally {
+            runCatching { localVault.close() }
+        }
+        return conflictCount
     }
 
     private suspend fun requireDatabase(databaseId: Long): LocalMdbxDatabase {

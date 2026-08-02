@@ -40,6 +40,7 @@ import uniffi.mdbx_ffi.MdbxSnapshotKind
 import uniffi.mdbx_ffi.MdbxSnapshotStructureNode
 import uniffi.mdbx_ffi.MdbxVault
 import uniffi.mdbx_ffi.MdbxWriteCommand
+import uniffi.mdbx_ffi.defaultWriteOperationLimits
 
 class Mdbx2Repository(
     context: Context,
@@ -1169,12 +1170,21 @@ class Mdbx2Repository(
             sessions.withMutatingVault(databaseId) { _, vault ->
                 val vaultId = vault.info().vaultId
                 val rootProjectId = Mdbx2VaultSessionExecutor.rootProjectId(vaultId)
-                val commands = grouped.flatMap { mutation ->
-                    val physicalEntryId = mdbx2PhysicalEntryId(vaultId, mutation.entryId)
+                val mutationsWithPhysicalIds = grouped.map { mutation ->
+                    mutation to mdbx2PhysicalEntryId(vaultId, mutation.entryId)
+                }
+                val snapshot = vault.loadMdbx2EntryMutationSnapshot(
+                    requestedObjectIds = mutationsWithPhysicalIds.mapTo(linkedSetOf()) { it.second },
+                    preferredCollectionIds = grouped.mapNotNullTo(linkedSetOf()) { mutation ->
+                        mutation.folderId?.takeIf(String::isNotBlank)
+                    },
+                    rootCollectionId = rootProjectId
+                )
+                val commandGroups = mutationsWithPhysicalIds.map { (mutation, physicalEntryId) ->
                     val desiredProjectId = mutation.folderId
-                        ?.takeIf { it.isNotBlank() && vault.getCollectionSummary(it)?.deleted == false }
+                        ?.takeIf { it.isNotBlank() && it in snapshot.activeCollectionIds }
                         ?: rootProjectId
-                    val current = vault.getObjectSummary(physicalEntryId)
+                    val current = snapshot.objectsById[physicalEntryId]
                     buildList {
                         if (current == null) {
                             add(
@@ -1214,14 +1224,12 @@ class Mdbx2Repository(
                         }
                     }
                 }
-                if (commands.isNotEmpty()) {
-                    vault.executeWriteOperation(
-                        operationId = UUID.randomUUID().toString(),
-                        operationKind = "monica-upsert-entries",
-                        commands = commands
-                    )
-                    markPendingUpload(databaseId)
-                }
+                executeEntryCommandGroups(
+                    databaseId = databaseId,
+                    vault = vault,
+                    operationKind = "monica-upsert-entries",
+                    commandGroups = commandGroups
+                )
             }
         }
     }
@@ -1229,20 +1237,49 @@ class Mdbx2Repository(
     private suspend fun deleteEntries(databaseId: Long, entryIds: List<String>) {
         sessions.withMutatingVault(databaseId) { _, vault ->
             val vaultId = vault.info().vaultId
-            val commands = entryIds.distinct().mapNotNull { entryId ->
-                val physicalEntryId = mdbx2PhysicalEntryId(vaultId, entryId)
-                vault.getObjectSummary(physicalEntryId)
+            val physicalEntryIds = entryIds.distinct().associateWith { entryId ->
+                mdbx2PhysicalEntryId(vaultId, entryId)
+            }
+            val snapshot = vault.loadMdbx2EntryMutationSnapshot(
+                requestedObjectIds = physicalEntryIds.values.toSet(),
+                preferredCollectionIds = emptySet(),
+                rootCollectionId = Mdbx2VaultSessionExecutor.rootProjectId(vaultId)
+            )
+            val commandGroups = physicalEntryIds.values.mapNotNull { physicalEntryId ->
+                snapshot.objectsById[physicalEntryId]
                     ?.takeUnless { it.deleted }
-                    ?.let { summary -> MdbxWriteCommand.DeleteEntry(physicalEntryId, summary.collectionId) }
+                    ?.let { summary ->
+                        listOf(MdbxWriteCommand.DeleteEntry(physicalEntryId, summary.collectionId))
+                    }
             }
-            if (commands.isNotEmpty()) {
-                vault.executeWriteOperation(
-                    operationId = UUID.randomUUID().toString(),
-                    operationKind = "monica-delete-entries",
-                    commands = commands
-                )
-                markPendingUpload(databaseId)
-            }
+            executeEntryCommandGroups(
+                databaseId = databaseId,
+                vault = vault,
+                operationKind = "monica-delete-entries",
+                commandGroups = commandGroups
+            )
+        }
+    }
+
+    private suspend fun executeEntryCommandGroups(
+        databaseId: Long,
+        vault: MdbxVault,
+        operationKind: String,
+        commandGroups: List<List<MdbxWriteCommand>>
+    ) {
+        val batches = planMdbx2WriteBatches(
+            commandGroups = commandGroups,
+            baseOperationId = UUID.randomUUID().toString(),
+            defaultLimits = defaultWriteOperationLimits()
+        )
+        batches.forEach { batch ->
+            vault.executeWriteOperationWithLimits(
+                operationId = batch.operationId,
+                operationKind = operationKind,
+                commands = batch.commands,
+                limits = batch.limits
+            )
+            markPendingUpload(databaseId)
         }
     }
 

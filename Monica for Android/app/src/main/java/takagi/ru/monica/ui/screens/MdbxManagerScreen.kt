@@ -900,7 +900,7 @@ private fun parseMdbxManagerSourceOrNull(raw: String): MdbxManagerSource? =
     raw.takeIf { it.isNotBlank() }?.let { runCatching { MdbxManagerSource.valueOf(it) }.getOrNull() }
 
 private fun MdbxManagerPage.title(database: LocalMdbxDatabase?): String = when (this) {
-    MdbxManagerPage.Hub -> "MDBX 1.0"
+    MdbxManagerPage.Hub -> "MDBX"
     is MdbxManagerPage.Source -> when (source) {
         MdbxManagerSource.LOCAL -> "本地 MDBX 管理"
         MdbxManagerSource.WEBDAV -> "WebDAV MDBX 管理"
@@ -930,7 +930,7 @@ private fun MdbxManagerHubPage(
     ) {
         item {
             Text(
-                "MDBX 1.0",
+                "MDBX",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary

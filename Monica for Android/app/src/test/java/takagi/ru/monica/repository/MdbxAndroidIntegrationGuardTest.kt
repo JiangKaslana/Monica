@@ -120,6 +120,37 @@ class MdbxAndroidIntegrationGuardTest {
     }
 
     @Test
+    fun localExternalPublicationMergesBeforeReplacingSharedDocument() {
+        val storageSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2ExternalStorage.kt"
+        ).readText()
+        val executorSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2VaultSessionExecutor.kt"
+        ).readText()
+
+        assertTrue(
+            "LOCAL_EXTERNAL publication must hold a cross-process document lease and verify stable bytes.",
+            storageSource.contains("suspend fun publishWithMerge(") &&
+                storageSource.contains("stream.channel.tryLock()") &&
+                storageSource.contains("fingerprintUri(targetUri)") &&
+                storageSource.contains("MAX_EXTERNAL_MERGE_ATTEMPTS")
+        )
+        assertTrue(
+            "LOCAL_EXTERNAL publication must merge authenticated history and content-addressed Blob sidecars before replacing the document.",
+            executorSource.contains("externalStorage.publishWithMerge(") &&
+                executorSource.contains("remoteVault.exportManualSyncBundle(") &&
+                executorSource.contains("localVault.applyManualSyncBundle(") &&
+                executorSource.contains("vault identity does not match") &&
+                storageSource.contains("mergeSidecarIntoWorkingCopy(") &&
+                storageSource.contains("conflicting Blob bytes")
+        )
+        assertFalse(
+            "LOCAL_EXTERNAL mutations must not return to direct whole-file publication.",
+            executorSource.contains("externalStorage.publish(database, file)")
+        )
+    }
+
+    @Test
     fun rustMdbx2HistorySnapshotAndConflictBoundaryIsEnabledEndToEnd() {
         val engineSource = projectFile(
             "app/src/main/java/takagi/ru/monica/data/LocalMdbxDatabase.kt"
@@ -674,7 +705,7 @@ class MdbxAndroidIntegrationGuardTest {
     }
 
     @Test
-    fun appFacingWordingTreatsMdbxAsOnePointZeroNotTestFeature() {
+    fun appFacingWordingUsesGenericMdbxBranding() {
         val managerSource = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/screens/MdbxManagerScreen.kt"
         ).readText()
@@ -684,10 +715,12 @@ class MdbxAndroidIntegrationGuardTest {
         val zhStrings = projectFile("app/src/main/res/values-zh/strings.xml").readText()
         val enStrings = projectFile("app/src/main/res/values/strings.xml").readText()
 
-        assertTrue(managerSource.contains("MDBX 1.0"))
-        assertTrue(syncBackupSource.contains("MDBX 1.0 数据库管理"))
-        assertTrue(zhStrings.contains("MDBX 1.0 格式"))
-        assertTrue(enStrings.contains("MDBX 1.0 Format"))
+        assertTrue(managerSource.contains("MdbxManagerPage.Hub -> \"MDBX\""))
+        assertTrue(syncBackupSource.contains("MDBX 数据库管理"))
+        assertTrue(zhStrings.contains("MDBX 格式"))
+        assertTrue(enStrings.contains("MDBX Format"))
+        assertFalse(managerSource.contains("MDBX 1.0"))
+        assertFalse(syncBackupSource.contains("MDBX 1.0"))
         assertFalse(managerSource.contains("MDBX（测试）"))
         assertFalse(syncBackupSource.contains("MDBX（测试）"))
         assertFalse(syncBackupSource.contains("MDBX 格式管理"))
@@ -792,6 +825,159 @@ class MdbxAndroidIntegrationGuardTest {
             "Bitwarden has no first-class payment-account cipher in Monica, so the live upload boundary must reject unsupported item types explicitly.",
             cipherUploadProcessorSource.contains("else -> return UploadItemResult.Error(\"Unsupported item type: \${item.itemType}\")") &&
                 !cipherUploadProcessorSource.contains("ItemType.PAYMENT_ACCOUNT ->")
+        )
+    }
+
+    @Test
+    fun mdbx2NativePreloadAndSuccessfulFormNavigationAreGuarded() {
+        val nativeRuntimeSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2NativeRuntime.kt"
+        ).readText()
+        val executorSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2VaultSessionExecutor.kt"
+        ).readText()
+        val formSources = listOf(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxLocalCreateScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxLocalOpenScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxWebDavCreateScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveCreateScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxWebDavOpenScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveOpenScreen.kt"
+        ).map { projectFile(it).readText() }
+
+        assertTrue(
+            "Android must preload libmdbx_ffi through its class-loader before generated JNA registration.",
+            nativeRuntimeSource.contains("System.loadLibrary(LIBRARY_NAME)") &&
+                nativeRuntimeSource.contains("private const val LIBRARY_NAME = \"mdbx_ffi\"") &&
+                executorSource.countOccurrences("Mdbx2NativeRuntime.ensureLoaded()") >= 5
+        )
+        assertTrue(
+            "Every affected form must consume only a success produced by its own submission and then return.",
+            formSources.all { source ->
+                source.contains("var submitted by remember { mutableStateOf(false) }") &&
+                    source.contains("if (submitted && operationState is MdbxViewModel.OperationState.Success)") &&
+                    source.contains("viewModel.clearOperationState()") &&
+                    source.contains("onNavigateBack()")
+            }
+        )
+        assertTrue(
+            "MDBX creation must not hold completed forms on-screen with an artificial delay.",
+            formSources.none { it.contains("delay(1200)") }
+        )
+    }
+
+    @Test
+    fun mdbxFormsReserveImeSpaceBeforeScrolling() {
+        val formPaths = listOf(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxLocalCreateScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxLocalOpenScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxWebDavCreateScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxWebDavOpenScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveCreateScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveOpenScreen.kt"
+        )
+
+        formPaths.forEach { path ->
+            val source = projectFile(path).readText()
+            val imePaddingIndex = source.indexOf(".imePadding()")
+            val verticalScrollIndex = source.indexOf(".verticalScroll(")
+            assertTrue(
+                "$path must apply IME padding before its vertical scroll container so focused fields remain visible.",
+                imePaddingIndex >= 0 &&
+                    verticalScrollIndex >= 0 &&
+                    imePaddingIndex < verticalScrollIndex
+            )
+        }
+    }
+
+    @Test
+    fun mdbx2JnaBridgeSurvivesReleaseMinification() {
+        val consumerRules = projectFile("mdbx-engine/consumer-rules.pro").readText()
+
+        assertTrue(
+            "JNA native dispatch looks up class members by their original names, so the engine must keep the full JNA runtime.",
+            consumerRules.contains("-keep class com.sun.jna.** { *; }")
+        )
+        assertTrue(
+            "JNA Structure subclasses expose fields through reflection and must retain those field names.",
+            consumerRules.contains("-keepclassmembers class * extends com.sun.jna.Structure") &&
+                consumerRules.contains("<fields>;")
+        )
+        assertTrue(
+            "UniFFI generated bindings must continue to expose their native method names.",
+            consumerRules.contains("-keep class uniffi.mdbx_ffi.** { *; }") &&
+                consumerRules.contains("-keep interface uniffi.mdbx_ffi.** { *; }")
+        )
+    }
+
+    @Test
+    fun oneDriveContextIsUnifiedAndExistingVaultNamesComeFromSourceFiles() {
+        val sharedPanelSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/OneDriveLocationPanel.kt"
+        ).readText()
+        val engineOptionsSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxEngineTypeSection.kt"
+        ).readText()
+        val vaultComponentsSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxVaultComponents.kt"
+        ).readText()
+        val oneDriveScreens = listOf(
+            "app/src/main/java/takagi/ru/monica/ui/screens/OneDriveBackupScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/LocalKeePassOneDriveBrowser.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveCreateScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveOpenScreen.kt"
+        ).map { projectFile(it).readText() }
+        val openScreenSources = listOf(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxLocalOpenScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxWebDavOpenScreen.kt",
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxOneDriveOpenScreen.kt"
+        ).map { projectFile(it).readText() }
+        val viewModelSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/viewmodel/MdbxViewModel.kt"
+        ).readText()
+        val webDavConnectSignature = viewModelSource
+            .substringAfter("fun connectToExistingWebDavVault(")
+            .substringBefore(") {")
+        val oneDriveConnectSignature = viewModelSource
+            .substringAfter("fun connectToOneDriveVault(")
+            .substringBefore(") {")
+
+        assertTrue(
+            "Every OneDrive backup/database entry must reuse the same account and location hierarchy.",
+            oneDriveScreens.all { it.contains("OneDriveLocationPanel(") } &&
+                sharedPanelSource.contains("private fun OneDriveAccountRow(") &&
+                sharedPanelSource.contains("private fun OneDriveEntryList(") &&
+                sharedPanelSource.contains("BoxWithConstraints") &&
+                sharedPanelSource.contains("maxWidth < 360.dp") &&
+                sharedPanelSource.contains("onNavigateUp") &&
+                sharedPanelSource.contains("onRefresh")
+        )
+        assertTrue(
+            "Opening an existing MDBX file must not ask for a device-local vault name.",
+            openScreenSources.all { source ->
+                !source.contains("var vaultName by remember") &&
+                    !source.contains("MdbxVaultNameField(") &&
+                    !source.contains("vaultName.isNotBlank()")
+            }
+        )
+        assertTrue(
+            "MDBX engine, Tiga, unlock method and key-file choices must use progressive disclosure instead of separate always-expanded cards.",
+            engineOptionsSource.contains("var expanded by remember { mutableStateOf(false) }") &&
+                engineOptionsSource.contains("selectedTigaMode: MdbxTigaMode? = null") &&
+                vaultComponentsSource.contains("embedded: Boolean = false") &&
+                vaultComponentsSource.contains("if (embedded)") &&
+                vaultComponentsSource.contains("收起解锁方式")
+        )
+        assertTrue(
+            "Remote open APIs must derive a stable display name from the selected source file.",
+            webDavConnectSignature.lines().none { it.trimStart().startsWith("name: String") } &&
+                oneDriveConnectSignature.lines().none { it.trimStart().startsWith("name: String") } &&
+                viewModelSource.contains("val displayName = remoteVaultDisplayName(remoteFilePath)") &&
+                viewModelSource.contains("private fun remoteVaultDisplayName(remoteFilePath: String)") &&
+                viewModelSource.contains("normalizeExistingRemoteVaultNames()") &&
+                viewModelSource.contains("databaseDao.updateDatabase(database.copy(name = displayName))") &&
+                openScreenSources.first().contains("name = null") &&
+                viewModelSource.contains("?: remoteVaultDisplayName(sourceName)")
         )
     }
 

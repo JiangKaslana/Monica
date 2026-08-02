@@ -176,10 +176,10 @@ fun SyncBackupScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            SyncBackupSection(title = "MDBX 1.0") {
+            SyncBackupSection(title = "MDBX") {
                 SyncBackupItem(
                     icon = Icons.Default.Storage,
-                    title = "MDBX 1.0 数据库管理",
+                    title = "MDBX 数据库管理",
                     description = "管理本地、WebDAV 和 OneDrive MDBX 数据库，兼容旧测试版库",
                     onClick = onNavigateToMdbx
                 )

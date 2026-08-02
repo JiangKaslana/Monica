@@ -135,10 +135,30 @@ fun KeepassOneDriveBrowserBottomSheet(
             }
     }
 
-    val currentPathLabel = if (currentPath.isBlank()) {
-        stringResource(R.string.keepass_webdav_root_path)
-    } else {
-        "/$currentPath"
+    fun signInOrSwitchAccount() {
+        if (activity == null) {
+            browserError = context.getString(R.string.keepass_onedrive_activity_missing)
+            connectionState = KeepassOneDriveConnectionState.Failed
+            return
+        }
+        connectionState = KeepassOneDriveConnectionState.Connecting
+        isConnecting = true
+        browserError = null
+        coroutineScope.launch {
+            runCatching { authManager.signIn(activity) }
+                .onSuccess { result ->
+                    session = result
+                    currentPath = ""
+                    loadDirectory("")
+                }
+                .onFailure { error ->
+                    isConnecting = false
+                    connectionState = KeepassOneDriveConnectionState.Failed
+                    browserError = error.toOneDriveUserMessage(
+                        context.getString(R.string.keepass_onedrive_sign_in_failed)
+                    )
+                }
+        }
     }
 
     ModalBottomSheet(
@@ -165,233 +185,50 @@ fun KeepassOneDriveBrowserBottomSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.Cloud, contentDescription = null)
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                session?.displayName ?: stringResource(R.string.keepass_onedrive_not_connected),
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                session?.username?.ifBlank {
-                                    stringResource(R.string.keepass_onedrive_sign_in_hint)
-                                } ?: stringResource(R.string.keepass_onedrive_sign_in_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Button(
-                            onClick = {
-                                if (activity == null) {
-                                    browserError = context.getString(R.string.keepass_onedrive_activity_missing)
-                                    connectionState = KeepassOneDriveConnectionState.Failed
-                                    return@Button
-                                }
-                                connectionState = KeepassOneDriveConnectionState.Connecting
-                                isConnecting = true
-                                browserError = null
-                                coroutineScope.launch {
-                                    runCatching { authManager.signIn(activity) }
-                                        .onSuccess { result ->
-                                            session = result
-                                            currentPath = ""
-                                            loadDirectory("")
-                                        }
-                                        .onFailure { error ->
-                                            isConnecting = false
-                                            connectionState = KeepassOneDriveConnectionState.Failed
-                                            browserError = error.toOneDriveUserMessage(context.getString(R.string.keepass_onedrive_sign_in_failed))
-                                        }
-                                }
-                            },
-                            enabled = !isConnecting && !isLoadingEntries
-                        ) {
-                            if (isConnecting) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            Text(
-                                if (session == null) stringResource(R.string.keepass_onedrive_sign_in_action)
-                                else stringResource(R.string.keepass_onedrive_switch_account)
-                            )
-                        }
-                    }
+            OneDriveLocationPanel(
+                session = session,
+                isConnecting = isConnecting,
+                accountActionLabel = if (session == null) {
+                    stringResource(R.string.keepass_onedrive_sign_in_action)
+                } else {
+                    stringResource(R.string.keepass_onedrive_switch_account)
+                },
+                connectionLabel = when (connectionState) {
+                    KeepassOneDriveConnectionState.NotConnected -> stringResource(R.string.keepass_webdav_status_not_connected)
+                    KeepassOneDriveConnectionState.Connecting -> stringResource(R.string.keepass_webdav_status_connecting)
+                    KeepassOneDriveConnectionState.Connected -> stringResource(R.string.keepass_webdav_status_connected)
+                    KeepassOneDriveConnectionState.Failed -> stringResource(R.string.keepass_webdav_status_failed)
+                },
+                connectionFailed = connectionState == KeepassOneDriveConnectionState.Failed,
+                errorMessage = browserError,
+                onAccountAction = ::signInOrSwitchAccount,
+                browserTitle = stringResource(R.string.v2_select_database),
+                currentPath = currentPath,
+                isLoadingEntries = isLoadingEntries,
+                entries = entries,
+                emptyMessage = stringResource(R.string.keepass_onedrive_empty_directory),
+                onNavigateUp = {
+                    loadDirectory(OneDriveKeePassFileSource.parentPathOf(currentPath))
+                },
+                onRefresh = { loadDirectory(currentPath) },
+                onCreateFolder = { showCreateFolderDialog = true },
+                entryIcon = { entry ->
+                    if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Link
+                },
+                entrySupportingText = { entry -> entry.path.toOneDriveDisplayPath() },
+                onEntryClick = { entry ->
+                    if (entry.isDirectory) loadDirectory(entry.path)
+                    else selectedDatabaseEntry = entry
                 }
-            }
-
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        stringResource(R.string.keepass_webdav_status_title),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        when (connectionState) {
-                            KeepassOneDriveConnectionState.NotConnected -> stringResource(R.string.keepass_webdav_status_not_connected)
-                            KeepassOneDriveConnectionState.Connecting -> stringResource(R.string.keepass_webdav_status_connecting)
-                            KeepassOneDriveConnectionState.Connected -> stringResource(R.string.keepass_webdav_status_connected)
-                            KeepassOneDriveConnectionState.Failed -> stringResource(R.string.keepass_webdav_status_failed)
-                        },
-                        color = when (connectionState) {
-                            KeepassOneDriveConnectionState.Connected -> MaterialTheme.colorScheme.primary
-                            KeepassOneDriveConnectionState.Failed -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                    Text(
-                        stringResource(R.string.keepass_onedrive_current_path, currentPathLabel),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            browserError?.let { error ->
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
+                Button(
+                    onClick = { showCreateDatabaseDialog = true },
+                    enabled = !isLoadingEntries,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = error,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-
-            AnimatedVisibility(visible = session != null) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { loadDirectory(currentPath) },
-                            enabled = !isLoadingEntries,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.refresh))
-                        }
-                        OutlinedButton(
-                            onClick = { loadDirectory(OneDriveKeePassFileSource.parentPathOf(currentPath)) },
-                            enabled = !isLoadingEntries,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.keepass_webdav_go_parent))
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { showCreateFolderDialog = true },
-                            enabled = !isLoadingEntries,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.CreateNewFolder, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.keepass_webdav_create_folder_confirm))
-                        }
-                        Button(
-                            onClick = { showCreateDatabaseDialog = true },
-                            enabled = !isLoadingEntries,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.keepass_webdav_create_confirm))
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            if (isLoadingEntries) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(stringResource(R.string.keepass_remote_loading_files))
-                                }
-                            } else if (entries.isEmpty()) {
-                                Text(
-                                    text = stringResource(R.string.keepass_onedrive_empty_directory),
-                                    modifier = Modifier.padding(16.dp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                entries.forEach { entry ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                if (entry.isDirectory) {
-                                                    loadDirectory(entry.path)
-                                                } else {
-                                                    selectedDatabaseEntry = entry
-                                                }
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Link,
-                                            contentDescription = null
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(entry.name, fontWeight = FontWeight.Medium)
-                                            Text(
-                                                if (entry.isDirectory) "/${entry.path}" else entry.path,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                            contentDescription = null
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.keepass_webdav_create_confirm))
                 }
             }
         }

@@ -18,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
 import takagi.ru.monica.data.MdbxEngineType
@@ -50,6 +49,7 @@ fun MdbxLocalCreateScreen(
     var selectedEngine by remember { mutableStateOf(MdbxEngineType.RUST_MDBX2) }
     var useCustomDirectory by remember { mutableStateOf(false) }
     var customDirectoryUri by remember { mutableStateOf<Uri?>(null) }
+    var submitted by remember { mutableStateOf(false) }
 
     val passwordRequired = unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD ||
         unlockMethod == MdbxUnlockMethod.MASTER_PASSWORD_AND_KEY_FILE
@@ -104,9 +104,10 @@ fun MdbxLocalCreateScreen(
             keyFile = null
         }
     }
-    LaunchedEffect(operationState) {
-        if (operationState is MdbxViewModel.OperationState.Success) {
-            delay(1200)
+    LaunchedEffect(operationState, submitted) {
+        if (submitted && operationState is MdbxViewModel.OperationState.Success) {
+            submitted = false
+            viewModel.clearOperationState()
             onNavigateBack()
         }
     }
@@ -127,47 +128,18 @@ fun MdbxLocalCreateScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("数据库引擎", style = MaterialTheme.typography.titleMedium)
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        val engines = listOf(
-                            MdbxEngineType.KOTLIN_MDBX1 to "MDBX 1",
-                            MdbxEngineType.RUST_MDBX2 to "MDBX 2"
-                        )
-                        engines.forEachIndexed { index, (engine, label) ->
-                            SegmentedButton(
-                                selected = selectedEngine == engine,
-                                onClick = { selectedEngine = engine },
-                                shape = SegmentedButtonDefaults.itemShape(index, engines.size)
-                            ) {
-                                Text(label)
-                            }
-                        }
-                    }
-                    Text(
-                        text = if (selectedEngine == MdbxEngineType.KOTLIN_MDBX1) {
-                            "MDBX 1 用于创建兼容旧版本的数据库"
-                        } else {
-                            "MDBX 2 是新建数据库的默认 Rust 引擎"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            MdbxEngineTypeSection(
+                selectedEngine = selectedEngine,
+                onEngineChange = { selectedEngine = it },
+                remote = false,
+                selectedTigaMode = selectedTigaMode,
+                onTigaModeChange = { selectedTigaMode = it }
+            )
 
             // === Card: Storage Location ===
             AnimatedVisibility(
@@ -228,12 +200,6 @@ fun MdbxLocalCreateScreen(
                 }
             }
 
-            // === Card: Tiga Mode ===
-            MdbxTigaModeSection(
-                selectedTigaMode = selectedTigaMode,
-                onTigaModeChange = { selectedTigaMode = it }
-            )
-
             // === Card: Vault Settings ===
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -258,23 +224,19 @@ fun MdbxLocalCreateScreen(
                         onConfirmPasswordChange = { confirmPassword = it },
                         passwordRequired = passwordRequired
                     )
-                }
-            }
-
-            AnimatedVisibility(visible = true) {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     MdbxUnlockMethodSection(
                         unlockMethod = unlockMethod,
                         onUnlockMethodChange = { unlockMethod = it },
-                        includeDeviceKey = selectedEngine == MdbxEngineType.RUST_MDBX2
+                        includeDeviceKey = selectedEngine == MdbxEngineType.RUST_MDBX2,
+                        embedded = true
                     )
-
                     MdbxKeyFileSection(
                         keyFile = keyFile,
                         keyFileError = keyFileError,
                         keyFileRequired = keyFileRequired,
                         onPickKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                        onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") }
+                        onGenerateKeyFile = { keyFileCreateLauncher.launch("monica-mdbx.key") },
+                        embedded = true
                     )
                 }
             }
@@ -291,6 +253,7 @@ fun MdbxLocalCreateScreen(
 
             Button(
                 onClick = {
+                    submitted = true
                     MdbxDiagLogger.append(
                         "[MDBX][MdbxLocalCreateScreen] submitClicked name=${vaultName.trim().ifBlank { "<blank>" }} useCustomDirectory=$useCustomDirectory hasCustomUri=${customDirectoryUri != null} unlock=${unlockMethod.name} passwordRequired=$passwordRequired keyFileRequired=$keyFileRequired hasKeyFile=${keyFile != null} formValid=$isFormValid"
                     )

@@ -2,14 +2,21 @@ package takagi.ru.monica.repository
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
+import java.nio.channels.FileLock
+import java.nio.channels.OverlappingFileLockException
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import takagi.ru.monica.data.LocalMdbxDatabase
+import takagi.ru.monica.mdbx.MdbxDiagLogger
 import uniffi.mdbx_ffi.createPortableBackup
 
 internal data class Mdbx2ExternalDocument(
@@ -30,6 +37,7 @@ internal data class Mdbx2ExternalDocument(
 internal class Mdbx2ExternalStorage(context: Context) {
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
+    private val lastPublishedFingerprints = ConcurrentHashMap<String, StreamFingerprint>()
 
     suspend fun createDocument(
         treeUri: Uri,
@@ -50,6 +58,7 @@ internal class Mdbx2ExternalStorage(context: Context) {
                 targetDirectory = directory,
                 sidecarName = "${target.name ?: displayName}$SIDECAR_SUFFIX"
             )
+            lastPublishedFingerprints[target.uri.toString()] = fingerprintUri(target.uri)
         } catch (error: Throwable) {
             runCatching { target.delete() }
             runCatching { directory.findFile("$displayName$SIDECAR_SUFFIX")?.delete() }
@@ -68,23 +77,97 @@ internal class Mdbx2ExternalStorage(context: Context) {
                 "MDBX2 working copy is missing: ${workingCopy.absolutePath}"
             }
             val targetUri = Uri.parse(database.filePath)
-            publishMainFile(targetUri, workingCopy)
-
-            database.externalTreeUri
-                ?.takeIf(String::isNotBlank)
-                ?.let(Uri::parse)
-                ?.let { treeUri ->
-                    val directory = DocumentFile.fromTreeUri(appContext, treeUri)
-                        ?: throw IllegalStateException("External MDBX2 directory permission is unavailable")
-                    val targetName = queryDisplayName(targetUri)
-                        ?: database.name.asMdbxFileName()
-                    mirrorLocalSidecar(
-                        source = sidecarFor(workingCopy),
-                        targetDirectory = directory,
-                        sidecarName = "$targetName$SIDECAR_SUFFIX"
-                    )
-                }
+            withTargetLease(targetUri) {
+                publishLocked(database, targetUri, workingCopy)
+                lastPublishedFingerprints[targetUri.toString()] = fingerprintUri(targetUri)
+            }
         }
+
+    /**
+     * Merge the current external revision into the local working copy before
+     * publishing.  The target document remains locked for the complete
+     * read/merge/write/verify sequence so two Monica processes cannot both
+     * publish a stale snapshot.
+     */
+    suspend fun publishWithMerge(
+        database: LocalMdbxDatabase,
+        workingCopy: File,
+        mergeRemote: suspend (File) -> Int
+    ): Mdbx2ExternalPublishResult = withContext(Dispatchers.IO) {
+        require(workingCopy.isFile) {
+            "MDBX2 working copy is missing: ${workingCopy.absolutePath}"
+        }
+        val targetUri = Uri.parse(database.filePath)
+        withTargetLease(targetUri) {
+            var mergedRemote = false
+            var conflictCount = 0
+            repeat(MAX_EXTERNAL_MERGE_ATTEMPTS) { attempt ->
+                val staged = File(
+                    workingCopy.parentFile,
+                    ".mdbx2-external-merge-${UUID.randomUUID()}.mdbx"
+                )
+                try {
+                    copyDocumentToOwnedFile(
+                        sourceUri = targetUri,
+                        targetFile = staged,
+                        sourceTreeUri = database.externalTreeUri
+                            ?.takeIf(String::isNotBlank)
+                            ?.let(Uri::parse)
+                    )
+                    val stagedFingerprint = staged.inputStream().buffered().use(::fingerprint)
+                    val beforeMerge = fingerprintUri(targetUri)
+                    if (!beforeMerge.sameAs(stagedFingerprint)) {
+                        MdbxDiagLogger.append(
+                            "[MDBX2][external-merge] target changed while staging " +
+                                "attempt=${attempt + 1}"
+                        )
+                        return@repeat
+                    }
+
+                    val cacheKey = targetUri.toString()
+                    val needsMerge = lastPublishedFingerprints[cacheKey]
+                        ?.sameAs(stagedFingerprint) != true
+                    if (needsMerge) {
+                        mergeSidecarIntoWorkingCopy(staged, workingCopy)
+                        conflictCount += mergeRemote(staged)
+                        mergedRemote = true
+                    }
+
+                    val beforePublish = fingerprintUri(targetUri)
+                    if (!beforePublish.sameAs(stagedFingerprint)) {
+                        MdbxDiagLogger.append(
+                            "[MDBX2][external-merge] target changed before publish " +
+                                "attempt=${attempt + 1}"
+                        )
+                        return@repeat
+                    }
+                    publishLocked(database, targetUri, workingCopy)
+                    val published = fingerprintUri(targetUri)
+                    lastPublishedFingerprints[cacheKey] = published
+                    return@withTargetLease Mdbx2ExternalPublishResult(
+                        mergedRemote = mergedRemote,
+                        conflictCount = conflictCount
+                    )
+                } finally {
+                    staged.delete()
+                    sidecarFor(staged).deleteRecursively()
+                }
+            }
+            throw IOException(
+                "External MDBX2 file changed during merge; publication was aborted"
+            )
+        }
+    }
+
+    internal fun mergeSidecarIntoWorkingCopy(sourceFile: File, targetFile: File) {
+        val source = sidecarFor(sourceFile)
+        if (!source.isDirectory) return
+        val target = sidecarFor(targetFile)
+        check(target.exists() || target.mkdirs()) {
+            "Cannot create MDBX2 local attachment directory"
+        }
+        mergeLocalDirectory(source, target)
+    }
 
     suspend fun copyDocumentToOwnedFile(
         sourceUri: Uri,
@@ -157,6 +240,7 @@ internal class Mdbx2ExternalStorage(context: Context) {
 
     suspend fun deleteCreatedDocument(document: Mdbx2ExternalDocument) =
         withContext(Dispatchers.IO) {
+            lastPublishedFingerprints.remove(document.fileUri.toString())
             runCatching { DocumentFile.fromSingleUri(appContext, document.fileUri)?.delete() }
             runCatching {
                 DocumentFile.fromTreeUri(appContext, document.treeUri)
@@ -164,6 +248,142 @@ internal class Mdbx2ExternalStorage(context: Context) {
                     ?.delete()
             }
         }
+
+    private fun publishLocked(
+        database: LocalMdbxDatabase,
+        targetUri: Uri,
+        workingCopy: File
+    ) {
+        publishMainFile(targetUri, workingCopy)
+        database.externalTreeUri
+            ?.takeIf(String::isNotBlank)
+            ?.let(Uri::parse)
+            ?.let { treeUri ->
+                val directory = DocumentFile.fromTreeUri(appContext, treeUri)
+                    ?: throw IllegalStateException("External MDBX2 directory permission is unavailable")
+                val targetName = queryDisplayName(targetUri)
+                    ?: database.name.asMdbxFileName()
+                mirrorLocalSidecar(
+                    source = sidecarFor(workingCopy),
+                    targetDirectory = directory,
+                    sidecarName = "$targetName$SIDECAR_SUFFIX"
+                )
+            }
+    }
+
+    private suspend fun <T> withTargetLease(
+        targetUri: Uri,
+        block: suspend () -> T
+    ): T {
+        var lastError: Throwable? = null
+        for (attempt in 0 until LEASE_ATTEMPTS) {
+            val descriptor = runCatching {
+                resolver.openFileDescriptor(targetUri, "rw")
+            }.getOrElse { error ->
+                lastError = error
+                null
+            }
+            if (descriptor != null) {
+                val stream = runCatching {
+                    ParcelFileDescriptor.AutoCloseOutputStream(descriptor)
+                }.getOrElse { error ->
+                    descriptor.close()
+                    lastError = error
+                    null
+                }
+                if (stream != null) {
+                    try {
+                        val lock = try {
+                            stream.channel.tryLock()
+                        } catch (error: OverlappingFileLockException) {
+                            lastError = error
+                            null
+                        } catch (error: IOException) {
+                            lastError = error
+                            null
+                        } catch (error: RuntimeException) {
+                            lastError = error
+                            null
+                        }
+                        if (lock != null) {
+                            try {
+                                return block()
+                            } finally {
+                                releaseLock(lock)
+                            }
+                        } else if (lastError == null) {
+                            lastError = IOException("External MDBX2 file lease is held")
+                        }
+                    } finally {
+                        runCatching { stream.close() }
+                    }
+                }
+            } else {
+                lastError = IOException("Cannot open external MDBX2 file for locking")
+            }
+            if (attempt + 1 < LEASE_ATTEMPTS) delay(LEASE_RETRY_DELAY_MS)
+        }
+        throw IllegalStateException(
+            "External MDBX2 provider does not support a safe concurrent write lease",
+            lastError
+        )
+    }
+
+    private fun releaseLock(lock: FileLock) {
+        runCatching { lock.release() }
+    }
+
+    private fun mergeLocalDirectory(source: File, target: File) {
+        source.listFiles().orEmpty().forEach { child ->
+            val name = child.name.takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("MDBX2 sidecar contains an unnamed item")
+            val targetChild = File(target, name)
+            check(targetChild.canonicalPath.startsWith(target.canonicalPath + File.separator)) {
+                "MDBX2 sidecar contains an invalid path"
+            }
+            if (child.isDirectory) {
+                check(targetChild.exists() || targetChild.mkdirs()) {
+                    "Cannot create MDBX2 local attachment directory"
+                }
+                check(targetChild.isDirectory) {
+                    "MDBX2 sidecar path conflicts with a directory"
+                }
+                mergeLocalDirectory(child, targetChild)
+            } else {
+                if (targetChild.exists()) {
+                    check(targetChild.isFile) {
+                        "MDBX2 sidecar path conflicts with a file"
+                    }
+                    val sourceFingerprint = child.inputStream().buffered().use(::fingerprint)
+                    val targetFingerprint = targetChild.inputStream().buffered().use(::fingerprint)
+                    check(sourceFingerprint.sameAs(targetFingerprint)) {
+                        "MDBX2 sidecar contains conflicting Blob bytes: $name"
+                    }
+                } else {
+                    val temporary = File(target, ".${name}.${UUID.randomUUID()}.tmp")
+                    try {
+                        child.inputStream().buffered().use { input ->
+                            temporary.outputStream().buffered().use { output -> input.copyTo(output) }
+                        }
+                        val sourceFingerprint = child.inputStream().buffered().use(::fingerprint)
+                        val temporaryFingerprint = temporary.inputStream().buffered().use(::fingerprint)
+                        check(sourceFingerprint.sameAs(temporaryFingerprint)) {
+                            "MDBX2 sidecar Blob copy verification failed: $name"
+                        }
+                        check(temporary.renameTo(targetChild)) {
+                            "Cannot activate MDBX2 local attachment Blob: $name"
+                        }
+                    } finally {
+                        temporary.delete()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun fingerprintUri(uri: Uri): StreamFingerprint =
+        resolver.openInputStream(uri)?.buffered()?.use(::fingerprint)
+            ?: throw IllegalStateException("Cannot read external MDBX2 file")
 
     private fun publishMainFile(targetUri: Uri, workingCopy: File) {
         val backupDirectory = File(appContext.cacheDir, "mdbx2-external-publish").also { directory ->
@@ -177,20 +397,12 @@ internal class Mdbx2ExternalStorage(context: Context) {
                 sourcePath = workingCopy.absolutePath,
                 destination = portableBackup.absolutePath
             )
-            val expectedLength = portableBackup.length()
-            val expectedDigest = portableBackup.inputStream().buffered().use(::sha256)
+            val expected = portableBackup.inputStream().buffered().use(::fingerprint)
             resolver.openOutputStream(targetUri, "rwt")?.use { output ->
                 portableBackup.inputStream().buffered().use { input -> input.copyTo(output) }
+                output.flush()
             } ?: throw IllegalStateException("Cannot open external MDBX2 file for writing")
-            val actualLength = queryLength(targetUri)
-            check(actualLength == null || actualLength == expectedLength) {
-                "External MDBX2 file length verification failed"
-            }
-            val actualDigest = resolver.openInputStream(targetUri)?.buffered()?.use(::sha256)
-                ?: throw IllegalStateException("Cannot verify external MDBX2 file")
-            check(MessageDigest.isEqual(expectedDigest, actualDigest)) {
-                "External MDBX2 file digest verification failed"
-            }
+            verifyPublishedMainFile(targetUri, expected)
         } finally {
             portableBackup.delete()
         }
@@ -282,6 +494,50 @@ internal class Mdbx2ExternalStorage(context: Context) {
         }
     }
 
+    private fun verifyPublishedMainFile(targetUri: Uri, expected: StreamFingerprint) {
+        var actual: StreamFingerprint? = null
+        var readFailure: Throwable? = null
+        for (attempt in 0 until PUBLISH_VERIFY_ATTEMPTS) {
+            val result = runCatching {
+                resolver.openInputStream(targetUri)?.buffered()?.use(::fingerprint)
+                    ?: throw IllegalStateException("Cannot verify external MDBX2 file")
+            }
+            actual = result.getOrNull()
+            readFailure = result.exceptionOrNull()
+            val verified = actual?.let { value ->
+                value.length == expected.length &&
+                    MessageDigest.isEqual(expected.digest, value.digest)
+            } == true
+            if (verified) return
+
+            MdbxDiagLogger.append(
+                "[MDBX2][external-publish] verifyAttempt=${attempt + 1} " +
+                    "expectedBytes=${expected.length} actualBytes=${actual?.length ?: -1L} " +
+                    "readable=${readFailure == null}"
+            )
+            if (attempt < PUBLISH_VERIFY_DELAYS_MS.size) {
+                try {
+                    Thread.sleep(PUBLISH_VERIFY_DELAYS_MS[attempt])
+                } catch (interrupted: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+        }
+
+        readFailure?.let { error ->
+            throw IllegalStateException("Cannot verify external MDBX2 file", error)
+        }
+        val finalActual = checkNotNull(actual) { "Cannot verify external MDBX2 file" }
+        check(finalActual.length == expected.length) {
+            "External MDBX2 file length verification failed: " +
+                "expected=${expected.length}, actual=${finalActual.length}"
+        }
+        check(MessageDigest.isEqual(expected.digest, finalActual.digest)) {
+            "External MDBX2 file digest verification failed"
+        }
+    }
+
     private fun replaceFile(staged: File, target: File) {
         listOf(File("${target.absolutePath}-wal"), File("${target.absolutePath}-shm")).forEach(File::delete)
         val backup = File(target.parentFile, ".${target.name}.${UUID.randomUUID()}.bak")
@@ -315,23 +571,20 @@ internal class Mdbx2ExternalStorage(context: Context) {
                 if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
             }
 
-    private fun queryLength(uri: Uri): Long? =
-        resolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
-            ?.use { cursor ->
-                val index = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                if (index >= 0 && cursor.moveToFirst() && !cursor.isNull(index)) cursor.getLong(index) else null
-            }
-
-    private fun sha256(input: InputStream): ByteArray {
+    private fun fingerprint(input: InputStream): StreamFingerprint {
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(COPY_BUFFER_BYTES)
+        var length = 0L
         while (true) {
             val count = input.read(buffer)
             if (count < 0) break
             digest.update(buffer, 0, count)
+            length += count
         }
-        return digest.digest()
+        return StreamFingerprint(length = length, digest = digest.digest())
     }
+
+    private fun sha256(input: InputStream): ByteArray = fingerprint(input).digest
 
     private fun sidecarFor(file: File): File = File("${file.absolutePath}$SIDECAR_SUFFIX")
 
@@ -345,5 +598,23 @@ internal class Mdbx2ExternalStorage(context: Context) {
         private const val BLOB_MIME_TYPE = "application/octet-stream"
         private const val SIDECAR_SUFFIX = ".blobs"
         private const val COPY_BUFFER_BYTES = 128 * 1024
+        private const val PUBLISH_VERIFY_ATTEMPTS = 3
+        private val PUBLISH_VERIFY_DELAYS_MS = longArrayOf(40L, 120L)
+        private const val MAX_EXTERNAL_MERGE_ATTEMPTS = 3
+        private const val LEASE_ATTEMPTS = 300
+        private const val LEASE_RETRY_DELAY_MS = 100L
     }
+}
+
+internal data class Mdbx2ExternalPublishResult(
+    val mergedRemote: Boolean,
+    val conflictCount: Int
+)
+
+private data class StreamFingerprint(
+    val length: Long,
+    val digest: ByteArray
+) {
+    fun sameAs(other: StreamFingerprint): Boolean =
+        length == other.length && MessageDigest.isEqual(digest, other.digest)
 }

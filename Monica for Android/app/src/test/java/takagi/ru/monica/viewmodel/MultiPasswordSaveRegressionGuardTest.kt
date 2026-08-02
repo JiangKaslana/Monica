@@ -1305,10 +1305,10 @@ class MultiPasswordSaveRegressionGuardTest {
         ).readText()
 
         assertTrue(
-            "Database and backup settings must expose MDBX as its own testing category.",
+            "Database and backup settings must expose MDBX as its own category.",
             syncBackupSource.contains("onNavigateToMdbx") &&
-                syncBackupSource.contains("MDBX 1.0") &&
-                syncBackupSource.contains("MDBX 1.0 数据库管理") &&
+                syncBackupSource.contains("SyncBackupSection(title = \"MDBX\")") &&
+                syncBackupSource.contains("MDBX 数据库管理") &&
                 mainActivitySource.contains("onNavigateToMdbx = {") &&
                 mainActivitySource.contains("navController.navigate(Screen.MdbxManager.route)")
         )

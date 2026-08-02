@@ -1504,7 +1504,7 @@
     <string name="smooth_progress_bar_description">Enable smooth animation for seamless progress display without stuttering</string>
     <string name="validator_settings_section">Validator Settings</string>
     <string name="experimental_features_section">Experimental Features</string>
-    <string name="mdbx_format_title">MDBX 1.0 Format</string>
+    <string name="mdbx_format_title">MDBX Format</string>
     <string name="mdbx_format_description">Monica Database eXtended: the official local-first encrypted database format with compatible access to older test vaults</string>
     <string name="mdbx_create_vault_title">Create MDBX Vault</string>
     <string name="mdbx_storage_section">Storage Configuration</string>
@@ -1540,6 +1540,7 @@
     <string name="mdbx_tiga_sky_title">Sky — 8MB Argon2id</string>
     <string name="mdbx_tiga_sky_desc">Fast and lightweight. Suitable for low-risk environments.</string>
     <string name="mdbx_vault_settings">Vault Settings</string>
+    <string name="mdbx_unlock_existing_vault">Unlock database</string>
     <string name="mdbx_vault_name">Vault Name</string>
     <string name="mdbx_master_password">Master Password</string>
     <string name="mdbx_confirm_password">Confirm Master Password</string>
@@ -3674,6 +3675,10 @@
     <string name="onedrive_backup_encryption_title">Encrypt backup files</string>
     <string name="onedrive_backup_encryption_desc">Use the same encrypted ZIP format as WebDAV backup.</string>
     <string name="onedrive_backup_folder_item">Folder</string>
+    <string name="onedrive_parent_folder">Parent folder</string>
+    <string name="onedrive_refresh_folder">Refresh folder</string>
+    <string name="onedrive_create_folder">Create folder</string>
+    <string name="mdbx_create_location">Create in %1$s</string>
     <string name="folder_name">Folder Name</string>
     <string name="keepass_gdrive_attach_card_description">Attach an existing .kdbx file from your Google Drive as a working copy</string>
     <string name="keepass_gdrive_attach_title">Attach Google Drive Database</string>

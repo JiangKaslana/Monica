@@ -13,11 +13,40 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import uniffi.mdbx_ffi.createVault
+import uniffi.mdbx_ffi.createVaultWithTigaMode
 import uniffi.mdbx_ffi.MdbxWriteCommand
+import uniffi.mdbx_ffi.MdbxTigaMode
 import uniffi.mdbx_ffi.openVault
 
 @RunWith(AndroidJUnit4::class)
 class MdbxEngineSmokeTest {
+
+    @Test
+    fun skyVaultReopensAfterClose() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val testDirectory = File(context.cacheDir, "mdbx2-sky-${UUID.randomUUID()}")
+        assertTrue(testDirectory.mkdirs())
+        val vaultFile = File(testDirectory, "sky.mdbx")
+        val password = "mdbx2-sky-password"
+        val deviceId = "android-sky-device"
+
+        try {
+            val vaultId = createVaultWithTigaMode(
+                path = vaultFile.absolutePath,
+                password = password,
+                deviceId = deviceId,
+                mode = MdbxTigaMode.SKY,
+            ).use { created ->
+                created.info().vaultId
+            }
+
+            openVault(vaultFile.absolutePath, password, deviceId).use { reopened ->
+                assertEquals(vaultId, reopened.info().vaultId)
+            }
+        } finally {
+            testDirectory.deleteRecursively()
+        }
+    }
 
     @Test
     fun explicitMonicaEntryIdSurvivesUpdateDeleteAndReopen() {
