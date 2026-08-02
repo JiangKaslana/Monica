@@ -1013,6 +1013,31 @@ const cards = computed(() => currentCopy.value.cards);
   line-height: 1.65;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .ecosystem-hero {
+    animation: eco-enter 0.42s ease both;
+  }
+
+  .ecosystem-metrics {
+    animation: eco-enter 0.42s 0.08s ease both;
+  }
+
+  .ecosystem-cards {
+    animation: eco-enter 0.42s 0.16s ease both;
+  }
+
+  .ecosystem-principles {
+    animation: eco-enter 0.42s 0.24s ease both;
+  }
+}
+
+@keyframes eco-enter {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+  }
+}
+
 @media (max-width: 640px) {
   .ecosystem-landing {
     gap: 28px;
