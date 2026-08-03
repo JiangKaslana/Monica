@@ -1,16 +1,12 @@
 {
   "repo": "Monica-Pass/Monica",
   "repoUrl": "https://github.com/Monica-Pass/Monica",
-  "generatedAt": "2026-08-02T21:09:45.691Z",
+  "generatedAt": "2026-08-03T21:21:33.119Z",
   "range": {
-    "from": "2025-08-03",
-    "to": "2026-08-02"
+    "from": "2025-08-04",
+    "to": "2026-08-03"
   },
   "activity": [
-    {
-      "date": "2025-08-03",
-      "count": 0
-    },
     {
       "date": "2025-08-04",
       "count": 0
@@ -1465,10 +1461,50 @@
     },
     {
       "date": "2026-08-02",
+      "count": 4
+    },
+    {
+      "date": "2026-08-03",
       "count": 0
     }
   ],
   "latest": [
+    {
+      "sha": "416af4189f63e67f33b4c85dc870dff8ac3ca0e8",
+      "shortSha": "416af41",
+      "message": "Merge pull request #83 from Mrmiaomrzh/main",
+      "authorName": "JoyinJoester",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
+      "date": "2026-08-02T21:12:25Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/416af4189f63e67f33b4c85dc870dff8ac3ca0e8"
+    },
+    {
+      "sha": "7fcbc7f4589ba0cf5202be82a73f7df8f7f70009",
+      "shortSha": "7fcbc7f",
+      "message": "feat: Update website image resources; update documentation in other languages.",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-08-02T18:06:39Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/7fcbc7f4589ba0cf5202be82a73f7df8f7f70009"
+    },
+    {
+      "sha": "391eada95bffa8b8c34cd94ac2ec960a963acb0d",
+      "shortSha": "391eada",
+      "message": "Merge branch 'main' of https://github.com/Mrmiaomrzh/Monica",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-08-02T17:36:32Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/391eada95bffa8b8c34cd94ac2ec960a963acb0d"
+    },
+    {
+      "sha": "03551174679dffc1e772019e12ae348c6c7f2780",
+      "shortSha": "0355117",
+      "message": "feat: Update document content",
+      "authorName": "Mrmiaomrzh",
+      "authorAvatar": "https://avatars.githubusercontent.com/u/189438881?v=4",
+      "date": "2026-08-02T17:36:26Z",
+      "url": "https://github.com/Monica-Pass/Monica/commit/03551174679dffc1e772019e12ae348c6c7f2780"
+    },
     {
       "sha": "18508eb306dfa9a9d6b7838b163114383f9766e7",
       "shortSha": "18508eb",
@@ -1522,42 +1558,6 @@
       "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
       "date": "2026-07-29T07:56:45Z",
       "url": "https://github.com/Monica-Pass/Monica/commit/6eff206ea92b0bb5b5809348b7ca4c483b06f9be"
-    },
-    {
-      "sha": "2b791ac3f6b182015545248201fcdbb6c4067b0e",
-      "shortSha": "2b791ac",
-      "message": "fix(android): use installed version across settings",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-29T07:56:31Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/2b791ac3f6b182015545248201fcdbb6c4067b0e"
-    },
-    {
-      "sha": "81ef058b034bfffd381c3d8d65b18ff9a684dfc3",
-      "shortSha": "81ef058",
-      "message": "feat(android): complete MDBX2 remote sync and hardening",
-      "authorName": "JoyinJoester",
-      "authorAvatar": "https://avatars.githubusercontent.com/u/87232423?v=4",
-      "date": "2026-07-29T07:56:17Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/81ef058b034bfffd381c3d8d65b18ff9a684dfc3"
-    },
-    {
-      "sha": "47d66c23fdfce29f9288e634c30dd6224305523d",
-      "shortSha": "47d66c2",
-      "message": "docs: update Afdian sponsor list",
-      "authorName": "github-actions[bot]",
-      "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
-      "date": "2026-07-29T05:32:39Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/47d66c23fdfce29f9288e634c30dd6224305523d"
-    },
-    {
-      "sha": "0174c9466fddeaa9ef49f5d0f21d056912eeb449",
-      "shortSha": "0174c94",
-      "message": "docs: update Afdian sponsor list",
-      "authorName": "github-actions[bot]",
-      "authorAvatar": "https://avatars.githubusercontent.com/in/15368?v=4",
-      "date": "2026-07-28T05:26:30Z",
-      "url": "https://github.com/Monica-Pass/Monica/commit/0174c9466fddeaa9ef49f5d0f21d056912eeb449"
     }
   ]
 }
