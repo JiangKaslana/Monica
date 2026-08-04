@@ -2115,7 +2115,7 @@
 
     <!-- Monica Plus -->
     <string name="monica_plus_title">Monica Plus</string>
-    <string name="monica_plus_card_desc">Поддержите разработку Monica</string>
+    <string name="monica_plus_card_desc">С Monica Pass вы можете бесплатно активировать Monica Plus — достаточно нажать кнопку активации. Если можете, поддержите разработку Monica.</string>
     <string name="click_to_pay">Оплатить</string>
     <string name="monica_plus_features_title">Функции Plus</string>
     <string name="monica_plus_features_placeholder">Скоро будет больше...</string>
@@ -2129,7 +2129,7 @@
     <string name="plus_title">Monica Plus</string>
     <string name="plus_subtitle_active">Активировано</string>
     <string name="plus_subtitle_inactive">Поддержать разработку</string>
-    <string name="plus_description">Поддержите разработку Monica</string>
+    <string name="plus_description">С Monica Pass вы можете бесплатно активировать Monica Plus — достаточно нажать кнопку активации. Если можете, поддержите разработку Monica.</string>
     <string name="plus_activation_title">Статус Plus</string>
     <string name="plus_status_activated">Активировано</string>
     <string name="plus_payment_button">Оплатить</string>
@@ -2850,6 +2850,7 @@
     <string name="extensions_password_field_customization_desc">Настроить отображаемые поля карточек</string>
     <string name="target_account">Целевой аккаунт</string>
     <string name="payment_platform_afdian">Afdian</string>
+    <string name="payment_platform_paypal">PayPal</string>
     <string name="password_field_customization_title">Настройка полей пароля</string>
     <string name="password_field_customization_notice">Отключённые поля скрыты при добавлении/редактировании.\n\nПоля с данными по-прежнему видны.</string>
     <string name="password_field_customization_system_fields">Системные поля</string>

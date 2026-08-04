@@ -2626,31 +2626,31 @@
     <string name="error_opening_link">Error opening link</string>
 
     <!-- Monica Plus -->
-    <string name="monica_plus_title">Monica plus</string>
-    <string name="monica_plus_card_desc">求各位股东入资，月收益10块，买不起token了，要饿死了😭😭😭😭</string>
-    <string name="click_to_pay">点击付款</string>
-    <string name="monica_plus_features_title">Plus 功能</string>
-    <string name="monica_plus_features_placeholder">更多功能敬请期待...</string>
-    <string name="payment_page_title">支持作者</string>
-    <string name="payment_qr_code_title">收款二维码</string>
-    <string name="free_donation_toggle">自由打赏</string>
+    <string name="monica_plus_title">Monica Plus</string>
+    <string name="monica_plus_card_desc">With Monica Pass, you can activate Monica Plus for free — just tap the activate button. If you can, please support Monica\'s development.</string>
+    <string name="click_to_pay">Pay now</string>
+    <string name="monica_plus_features_title">Plus features</string>
+    <string name="monica_plus_features_placeholder">More features coming soon...</string>
+    <string name="payment_page_title">Support the author</string>
+    <string name="payment_qr_code_title">Payment QR code</string>
+    <string name="free_donation_toggle">Custom amount</string>
     <string name="payment_kofi_link">ko-fi.com/joyinjoester</string>
-    <string name="payment_paid_button">我已付款，激活plus</string>
+    <string name="payment_paid_button">I\'ve paid — activate Plus</string>
 
     <!-- Saison Plus Copy -->
     <string name="plus_title">Monica Plus</string>
-    <string name="plus_subtitle_active">已激活</string>
-    <string name="plus_subtitle_inactive">支持开发</string>
-    <string name="plus_description">求各位股东入资，月收益10块，买不起token了，要饿死了😭😭😭😭</string>
-    <string name="plus_activation_title">Plus 状态</string>
-    <string name="plus_status_activated">已激活</string>
-    <string name="plus_payment_button">点击付款</string>
-    <string name="plus_features_title">Plus 功能</string>
-    <string name="plus_feature_unlocked">已解锁</string>
-    <string name="plus_feature_locked">需要 Plus</string>
-    <string name="cd_back">返回</string>
-    <string name="plus_thank_you">感谢您的支持！</string>
-    <string name="plus_payment_links_title">支付链接</string>
+    <string name="plus_subtitle_active">Activated</string>
+    <string name="plus_subtitle_inactive">Support development</string>
+    <string name="plus_description">With Monica Pass, you can activate Monica Plus for free — just tap the activate button. If you can, please support Monica\'s development.</string>
+    <string name="plus_activation_title">Plus status</string>
+    <string name="plus_status_activated">Activated</string>
+    <string name="plus_payment_button">Pay now</string>
+    <string name="plus_features_title">Plus features</string>
+    <string name="plus_feature_unlocked">Unlocked</string>
+    <string name="plus_feature_locked">Requires Plus</string>
+    <string name="cd_back">Back</string>
+    <string name="plus_thank_you">Thank you for your support!</string>
+    <string name="plus_payment_links_title">Payment links</string>
 
     <!-- TOTP Association -->
     <string name="association_options">Association Options</string>
@@ -3399,6 +3399,7 @@
     <string name="extensions_password_field_customization_desc">Customize which field cards are shown</string>
     <string name="target_account">Target account</string>
     <string name="payment_platform_afdian">Afdian</string>
+    <string name="payment_platform_paypal">PayPal</string>
     <string name="password_field_customization_title">Add password field customization</string>
     <string name="password_field_customization_notice">Disabled fields are hidden when adding or editing.\n\nFields with existing data still appear.</string>
     <string name="password_field_customization_system_fields">System fields</string>

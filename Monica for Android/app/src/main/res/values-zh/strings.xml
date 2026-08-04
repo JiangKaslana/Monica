@@ -3230,6 +3230,7 @@
     <string name="bitwarden_status_synced">已同步</string>
     <string name="target_account">目标账户</string>
     <string name="payment_platform_afdian">爱发电</string>
+    <string name="payment_platform_paypal">PayPal</string>
     <string name="password_field_customization_title">添加密码页面字段定制</string>
     <string name="password_field_customization_notice">关闭的字段将不会在添加/编辑密码页面显示。\n\n注意：如果某条密码已有该字段的数据，即使关闭了开关，编辑该条目时仍会显示对应卡片。</string>
     <string name="password_field_customization_system_fields">系统字段</string>
@@ -3539,6 +3540,11 @@
     <string name="click_to_pay">点击付款</string>
     <string name="monica_plus_features_title">Plus 功能</string>
     <string name="monica_plus_features_placeholder">更多功能敬请期待...</string>
+    <string name="payment_page_title">支持作者</string>
+    <string name="payment_qr_code_title">收款二维码</string>
+    <string name="free_donation_toggle">自由打赏</string>
+    <string name="payment_kofi_link">ko-fi.com/joyinjoester</string>
+    <string name="payment_paid_button">我已付款，激活 Plus</string>
     <string name="plus_title">Monica Plus</string>
     <string name="plus_subtitle_active">已激活</string>
     <string name="plus_subtitle_inactive">支持开发</string>
@@ -3549,6 +3555,7 @@
     <string name="plus_features_title">Plus 功能</string>
     <string name="plus_feature_unlocked">已解锁</string>
     <string name="plus_feature_locked">需要 Plus</string>
+    <string name="cd_back">返回</string>
     <string name="plus_thank_you">感谢你的支持！</string>
     <string name="plus_payment_links_title">支付链接</string>
     <string name="page_adjust_custom_title">页面调整自定义</string>

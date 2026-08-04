@@ -157,6 +157,17 @@ fun PaymentScreen(
                         context = context,
                         snackbarHostState = snackbarHostState
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // PayPal Link
+                    PaymentLinkButton(
+                        platform = stringResource(R.string.payment_platform_paypal),
+                        url = "https://www.paypal.com/ncp/payment/BHSYWK73CA8FW",
+                        icon = Icons.Default.AccountBalanceWallet,
+                        context = context,
+                        snackbarHostState = snackbarHostState
+                    )
                 }
             }
             
