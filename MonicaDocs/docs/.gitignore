@@ -1,6 +1,0 @@
-# VitePress build output
-.vitepress/dist/
-.vitepress/cache/
-
-# Local agent/runtime metadata
-.agents/

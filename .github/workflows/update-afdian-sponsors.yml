@@ -13,6 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout documentation repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.DOCS_REPOSITORY }}
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+          path: docs-repo
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
@@ -20,13 +26,21 @@ jobs:
         env:
           AFDIAN_TOKEN: ${{ secrets.AFDIAN_TOKEN }}
           AFDIAN_USER_ID: 8b131882c4ec11f0b26e52540025c377
-        run: |
-          python .github/scripts/update_afdian_sponsors.py
-          python .github/scripts/update_afdian_sponsors.py --readme MonicaDocs/docs/personal.md
+        run: python .github/scripts/update_afdian_sponsors.py --readme README.md --readme docs-repo/personal.md
       - name: Commit sponsor acknowledgements
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md MonicaDocs/docs/personal.md
-          git diff --cached --quiet || git commit -m "docs: update Afdian sponsor list"
-          git push
+          if ! git diff --quiet -- README.md; then
+            git add README.md
+            git commit -m "docs: update Afdian sponsor list"
+            git push
+          fi
+
+          git -C docs-repo config user.name "github-actions[bot]"
+          git -C docs-repo config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git -C docs-repo diff --quiet -- personal.md; then
+            git -C docs-repo add personal.md
+            git -C docs-repo commit -m "docs: update Afdian sponsor list"
+            git -C docs-repo push
+          fi

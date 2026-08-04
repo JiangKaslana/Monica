@@ -138,7 +138,7 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
-    parser.add_argument("--readme", type=Path, default=Path("README.md"))
+    parser.add_argument("--readme", type=Path, action="append")
     parser.add_argument("--token", default=os.environ.get("AFDIAN_TOKEN"))
     parser.add_argument("--user-id", default=os.environ.get("AFDIAN_USER_ID", USER_ID))
     args = parser.parse_args()
@@ -146,8 +146,11 @@ def main() -> int:
         raise RuntimeError("缺少 AFDIAN_TOKEN；请通过环境变量或 GitHub Secret 提供")
     sponsors = paged(args.token, args.user_id, "query-sponsor")
     orders = paged(args.token, args.user_id, "query-order")
-    update_readme(args.readme, render(sponsors, current_month_total(orders)))
-    print(f"已更新 {args.readme}：{len(sponsors)} 位支持者，本月 ¥{current_month_total(orders):.2f}")
+    readmes = args.readme or [Path("README.md")]
+    sponsor_block = render(sponsors, current_month_total(orders))
+    for readme in readmes:
+        update_readme(readme, sponsor_block)
+        print(f"已更新 {readme}：{len(sponsors)} 位支持者，本月 ¥{current_month_total(orders):.2f}")
     return 0
 
 
