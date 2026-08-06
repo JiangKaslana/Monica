@@ -119,7 +119,20 @@ data class MdbxDeltaSummary(
     val changedObjectPreview: String,
     val changedFieldSummary: String,
     val parentCount: Int,
-    val createdAt: String
+    val createdAt: String,
+    val operationId: String? = null,
+    val operationKind: String? = null,
+    val branchName: String? = null,
+    val message: String? = null,
+    val changes: List<MdbxCommitChangeSummary> = emptyList(),
+    val legacy: Boolean = false
+)
+
+data class MdbxCommitChangeSummary(
+    val objectType: String,
+    val objectId: String,
+    val action: String,
+    val fields: List<String>
 )
 
 data class MdbxCommitDiff(
@@ -135,7 +148,8 @@ data class MdbxCommitDiff(
     val previousDeleted: Boolean?,
     val currentDeleted: Boolean,
     val changedFields: List<String>,
-    val createdAt: String
+    val createdAt: String,
+    val contentType: String? = null
 )
 
 data class MdbxSyncBundle(

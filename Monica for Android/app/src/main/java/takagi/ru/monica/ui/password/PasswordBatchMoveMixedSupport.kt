@@ -52,13 +52,17 @@ internal data class PasswordBatchAggregateSelection(
             notes.isNotEmpty() ||
             totpItems.isNotEmpty() ||
             passkeys.isNotEmpty()
+
+    val secureItems: List<SecureItem>
+        get() = totpItems + notes + bankCards + documents + billingAddresses
 }
 
 internal data class MixedPasswordBatchMoveResult(
     val successCount: Int,
     val failedCount: Int,
     val blockedPasskeyCount: Int,
-    val copiedPasswordIds: List<Long>
+    val copiedPasswordIds: List<Long>,
+    val copiedPasswordIdPairs: List<Pair<Long, Long>> = emptyList()
 )
 
 internal fun PasswordListAggregateUiState.resolveBatchAggregateSelection(
@@ -119,8 +123,88 @@ internal suspend fun executeMixedPasswordBatchMove(
     viewModel: PasswordViewModel,
     aggregateUiState: PasswordListAggregateUiState,
     bitwardenRepository: BitwardenRepository,
+    passwordTargetOverrides: Map<Long, UnifiedMoveCategoryTarget> = emptyMap(),
     onProgress: ((Int, Int) -> Unit)? = null
 ): MixedPasswordBatchMoveResult {
+    if (
+        passwordTargetOverrides.isNotEmpty() &&
+        target !is UnifiedMoveCategoryTarget.MdbxDatabaseTarget &&
+        target !is UnifiedMoveCategoryTarget.MdbxFolderTarget
+    ) {
+        val passwordGroups = groupPasswordBatchEntriesByTarget(
+            entries = selectedEntries,
+            selectedTarget = target,
+            targetOverrides = passwordTargetOverrides
+        )
+        val totalCount = aggregateSelection.totalItemCount(selectedEntries.size)
+        var completedCount = 0
+        var successCount = 0
+        var failedCount = 0
+        var blockedPasskeyCount = 0
+        val copiedPasswordIds = mutableListOf<Long>()
+        val copiedPasswordIdPairs = mutableListOf<Pair<Long, Long>>()
+
+        suspend fun executePart(
+            partTarget: UnifiedMoveCategoryTarget,
+            partPasswords: List<PasswordEntry>,
+            partAggregateSelection: PasswordBatchAggregateSelection
+        ) {
+            val partSize = partAggregateSelection.totalItemCount(partPasswords.size)
+            if (partSize <= 0) return
+            val baseCompleted = completedCount
+            val result = executeMixedPasswordBatchMove(
+                context = context,
+                action = action,
+                target = partTarget,
+                selectedEntries = partPasswords,
+                aggregateSelection = partAggregateSelection,
+                categories = categories,
+                keepassDatabases = keepassDatabases,
+                localKeePassViewModel = localKeePassViewModel,
+                securityManager = securityManager,
+                viewModel = viewModel,
+                aggregateUiState = aggregateUiState,
+                bitwardenRepository = bitwardenRepository,
+                passwordTargetOverrides = emptyMap(),
+                onProgress = { processed, _ ->
+                    onProgress?.invoke(
+                        (baseCompleted + processed).coerceAtMost(totalCount),
+                        totalCount
+                    )
+                }
+            )
+            completedCount += partSize
+            successCount += result.successCount
+            failedCount += result.failedCount
+            blockedPasskeyCount += result.blockedPasskeyCount
+            copiedPasswordIds += result.copiedPasswordIds
+            copiedPasswordIdPairs += result.copiedPasswordIdPairs
+        }
+
+        passwordGroups.forEach { (partTarget, partPasswords) ->
+            executePart(
+                partTarget = partTarget,
+                partPasswords = partPasswords,
+                partAggregateSelection = PasswordBatchAggregateSelection()
+            )
+        }
+        if (aggregateSelection.hasItems) {
+            executePart(
+                partTarget = target,
+                partPasswords = emptyList(),
+                partAggregateSelection = aggregateSelection
+            )
+        }
+        onProgress?.invoke(totalCount, totalCount)
+        return MixedPasswordBatchMoveResult(
+            successCount = successCount,
+            failedCount = failedCount,
+            blockedPasskeyCount = blockedPasskeyCount,
+            copiedPasswordIds = copiedPasswordIds,
+            copiedPasswordIdPairs = copiedPasswordIdPairs
+        )
+    }
+
     val passwordActionResolution = resolvePasswordBatchMoveAction(
         requestedAction = action,
         selectedEntries = selectedEntries,
@@ -194,6 +278,7 @@ internal suspend fun executeMixedPasswordBatchMove(
     var failedCount = 0
     var blockedPasskeyCount = 0
     val copiedPasswordIds = mutableListOf<Long>()
+    val copiedPasswordIdPairs = mutableListOf<Pair<Long, Long>>()
 
     val totalCount = selectedEntries.size +
         aggregateSelection.bankCards.size +
@@ -220,6 +305,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 val createdId = viewModel.copyPasswordToMonicaLocal(entry, targetCategoryId)
                 if (createdId != null && createdId > 0) {
                     copiedPasswordIds += createdId
+                    copiedPasswordIdPairs += entry.id to createdId
                     successCount++
                 } else {
                     failedCount++
@@ -228,7 +314,14 @@ internal suspend fun executeMixedPasswordBatchMove(
             }
         } else if (target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget || target is UnifiedMoveCategoryTarget.MdbxFolderTarget) {
             val copiedEntries = selectedEntries.map { entry ->
-                buildCopiedEntryForTarget(entry, target)
+                buildCopiedEntryForTarget(
+                    entry,
+                    passwordBatchTargetForEntry(
+                        entry = entry,
+                        selectedTarget = target,
+                        targetOverrides = passwordTargetOverrides
+                    )
+                )
             }
             val createdIds = viewModel.createMdbxPasswordEntriesBatchAlreadyEncrypted(copiedEntries)
             val copiedCount = createdIds.count { it > 0 }
@@ -240,6 +333,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 }
             }
             copiedPasswordIds += createdIds.filter { it > 0 }
+            copiedPasswordIdPairs += idPairs
             successCount += copiedCount
             failedCount += (selectedEntries.size - copiedCount).coerceAtLeast(0)
             if (idPairs.isNotEmpty()) {
@@ -253,6 +347,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 )
                 if (createdId != null && createdId > 0) {
                     copiedPasswordIds += createdId
+                    copiedPasswordIdPairs += entry.id to createdId
                     successCount++
                 } else {
                     failedCount++
@@ -261,6 +356,16 @@ internal suspend fun executeMixedPasswordBatchMove(
             }
         }
 
+        if (targetMdbxDatabaseId != null) {
+            val batchResult = viewModel.copySecureItemsToMdbxBatch(
+                items = aggregateSelection.secureItems,
+                databaseId = targetMdbxDatabaseId,
+                folderId = targetMdbxFolderId
+            )
+            successCount += batchResult.successCount
+            failedCount += batchResult.failedCount
+            reportProgress(aggregateSelection.secureItems.size)
+        } else {
         aggregateSelection.totpItems.forEach { item ->
             val totpViewModel = aggregateUiState.totpViewModel
             if (totpViewModel == null) {
@@ -436,17 +541,10 @@ internal suspend fun executeMixedPasswordBatchMove(
                 reportProgress()
                 return@forEach
             }
-            val createdId = when {
-                isMonicaLocalTarget ->
-                    billingAddressViewModel.copyAddressToMonicaLocal(item, targetCategoryId)
-                targetMdbxDatabaseId != null ->
-                    billingAddressViewModel.copyAddressToStorage(
-                        item = item,
-                        categoryId = targetCategoryId,
-                        mdbxDatabaseId = targetMdbxDatabaseId,
-                        mdbxFolderId = targetMdbxFolderId
-                    )
-                else -> null
+            val createdId = if (isMonicaLocalTarget) {
+                billingAddressViewModel.copyAddressToMonicaLocal(item, targetCategoryId)
+            } else {
+                null
             }
             if (createdId != null) {
                 successCount++
@@ -455,10 +553,20 @@ internal suspend fun executeMixedPasswordBatchMove(
             }
             reportProgress()
         }
+        }
 
     } else {
         val oldStates = selectedEntries.map(::toLocationState)
-        val newStates = selectedEntries.map { toMovedLocationState(it, target) }
+        val newStates = selectedEntries.map { entry ->
+            toMovedLocationState(
+                entry,
+                passwordBatchTargetForEntry(
+                    entry = entry,
+                    selectedTarget = target,
+                    targetOverrides = passwordTargetOverrides
+                )
+            )
+        }
         val recreatedEntries = mutableListOf<TimelinePasswordRecreatedEntry>()
         val decryptedPasswordSnapshot = selectedEntries
             .mapNotNull { entry ->
@@ -474,6 +582,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 try {
                     val keepassEntries = selectedEntries.filter { it.isKeePassEntry() }
                     val bitwardenEntries = selectedEntries.filter { it.isBitwardenEntry() }
+                    val mdbxEntries = selectedEntries.filter { it.isMdbxEntry() }
                     val localIds = selectedEntries.filter { it.isLocalOnlyEntry() }.map { it.id }
 
                     if (keepassEntries.isNotEmpty()) {
@@ -503,6 +612,14 @@ internal suspend fun executeMixedPasswordBatchMove(
                         }
                     }
 
+                    if (mdbxEntries.isNotEmpty()) {
+                        viewModel.moveMdbxPasswordsToMonicaCategoryAwait(
+                            entries = mdbxEntries,
+                            categoryId = null
+                        )
+                        successCount += mdbxEntries.size
+                    }
+
                     if (localIds.isNotEmpty()) {
                         viewModel.unarchivePasswordsAwait(localIds)
                         viewModel.movePasswordsToCategoryAwait(localIds, null)
@@ -517,6 +634,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 try {
                     val keepassEntries = selectedEntries.filter { it.isKeePassEntry() }
                     val bitwardenEntries = selectedEntries.filter { it.isBitwardenEntry() }
+                    val mdbxEntries = selectedEntries.filter { it.isMdbxEntry() }
                     val localIds = selectedEntries.filter { it.isLocalOnlyEntry() }.map { it.id }
 
                     if (keepassEntries.isNotEmpty()) {
@@ -547,6 +665,14 @@ internal suspend fun executeMixedPasswordBatchMove(
                         } else {
                             failedCount++
                         }
+                    }
+
+                    if (mdbxEntries.isNotEmpty()) {
+                        viewModel.moveMdbxPasswordsToMonicaCategoryAwait(
+                            entries = mdbxEntries,
+                            categoryId = target.categoryId
+                        )
+                        successCount += mdbxEntries.size
                     }
 
                     if (localIds.isNotEmpty()) {
@@ -645,16 +771,43 @@ internal suspend fun executeMixedPasswordBatchMove(
 
             target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget -> {
                 if (selectedIds.isNotEmpty()) {
+                    val folderIdsByPasswordId = selectedEntries.associate { entry ->
+                        val resolvedTarget = passwordBatchTargetForEntry(
+                            entry = entry,
+                            selectedTarget = target,
+                            targetOverrides = passwordTargetOverrides
+                        )
+                        val folderId = (resolvedTarget as? UnifiedMoveCategoryTarget.MdbxFolderTarget)
+                            ?.folderId
+                        entry.id to folderId
+                    }
                     viewModel.unarchivePasswordsAwait(selectedIds)
-                    viewModel.movePasswordsToMdbxDatabaseAwait(selectedIds, target.databaseId)
+                    viewModel.movePasswordsToMdbxFoldersAwait(
+                        databaseId = target.databaseId,
+                        folderIdsByPasswordId = folderIdsByPasswordId
+                    )
                     successCount += selectedEntries.size
                 }
             }
 
             target is UnifiedMoveCategoryTarget.MdbxFolderTarget -> {
                 if (selectedIds.isNotEmpty()) {
+                    val folderIdsByPasswordId = selectedEntries.associate { entry ->
+                        val resolvedTarget = passwordBatchTargetForEntry(
+                            entry = entry,
+                            selectedTarget = target,
+                            targetOverrides = passwordTargetOverrides
+                        )
+                        val folderId = (resolvedTarget as? UnifiedMoveCategoryTarget.MdbxFolderTarget)
+                            ?.folderId
+                            ?: target.folderId
+                        entry.id to folderId
+                    }
                     viewModel.unarchivePasswordsAwait(selectedIds)
-                    viewModel.movePasswordsToMdbxDatabaseAwait(selectedIds, target.databaseId, target.folderId)
+                    viewModel.movePasswordsToMdbxFoldersAwait(
+                        databaseId = target.databaseId,
+                        folderIdsByPasswordId = folderIdsByPasswordId
+                    )
                     successCount += selectedEntries.size
                 }
             }
@@ -664,6 +817,16 @@ internal suspend fun executeMixedPasswordBatchMove(
             reportProgress(selectedEntries.size)
         }
 
+        if (targetMdbxDatabaseId != null) {
+            val batchResult = viewModel.moveSecureItemsToMdbxBatch(
+                items = aggregateSelection.secureItems,
+                databaseId = targetMdbxDatabaseId,
+                folderId = targetMdbxFolderId
+            )
+            successCount += batchResult.successCount
+            failedCount += batchResult.failedCount
+            reportProgress(aggregateSelection.secureItems.size)
+        } else {
         aggregateSelection.totpItems.forEach { item ->
             val totpViewModel = aggregateUiState.totpViewModel
             if (totpViewModel == null) {
@@ -804,15 +967,15 @@ internal suspend fun executeMixedPasswordBatchMove(
                 reportProgress()
                 return@forEach
             }
-            val moved = when {
-                isMonicaLocalTarget || targetMdbxDatabaseId != null ->
-                    billingAddressViewModel.moveAddressToStorage(
-                        id = item.id,
-                        categoryId = targetCategoryId,
-                        mdbxDatabaseId = targetMdbxDatabaseId,
-                        mdbxFolderId = targetMdbxFolderId
-                    )
-                else -> false
+            val moved = if (isMonicaLocalTarget) {
+                billingAddressViewModel.moveAddressToStorage(
+                    id = item.id,
+                    categoryId = targetCategoryId,
+                    mdbxDatabaseId = null,
+                    mdbxFolderId = null
+                )
+            } else {
+                false
             }
             if (moved) successCount++ else failedCount++
             reportProgress()
@@ -844,6 +1007,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 reportProgress()
             }
         }
+        }
 
         if (selectedEntries.isNotEmpty()) {
             val targetLabel = buildMoveTargetLabel(
@@ -870,7 +1034,67 @@ internal suspend fun executeMixedPasswordBatchMove(
         failedCount += blockedPasskeysByType
         reportProgress(blockedPasskeysByType)
     }
-    movablePasskeys.forEach { passkey ->
+    val mdbxBatchPasskeys = if (targetMdbxDatabaseId != null) {
+        movablePasskeys.filter { it.keepassDatabaseId == null }
+    } else {
+        emptyList()
+    }
+    val individuallyMovedPasskeys = if (targetMdbxDatabaseId != null) {
+        movablePasskeys.filter { it.keepassDatabaseId != null }
+    } else {
+        movablePasskeys
+    }
+    if (mdbxBatchPasskeys.isNotEmpty()) {
+        val preparedRecordIds = mutableListOf<Long>()
+        mdbxBatchPasskeys.forEach { passkey ->
+            val updateResult = applyPasswordPagePasskeyStorageTarget(
+                passkey = passkey,
+                target = target,
+                bitwardenRepository = bitwardenRepository,
+                context = context
+            )
+            when {
+                updateResult.isSuccess && passkey.id > 0L -> {
+                    val queueDelete = queuePasswordPagePasskeyBitwardenDeleteAfterMove(
+                        source = passkey,
+                        target = target,
+                        bitwardenRepository = bitwardenRepository
+                    )
+                    if (queueDelete.isSuccess) {
+                        preparedRecordIds += passkey.id
+                    } else {
+                        failedCount++
+                        reportProgress()
+                    }
+                }
+
+                updateResult.exceptionOrNull() is PasswordPagePasskeyBitwardenMoveBlockedException -> {
+                    blockedPasskeyCount++
+                    failedCount++
+                    reportProgress()
+                }
+
+                else -> {
+                    failedCount++
+                    reportProgress()
+                }
+            }
+        }
+        if (preparedRecordIds.isNotEmpty()) {
+            val persisted = aggregateUiState.passkeyViewModel?.updateMdbxDatabaseForPasskeys(
+                recordIds = preparedRecordIds,
+                databaseId = targetMdbxDatabaseId!!,
+                folderId = targetMdbxFolderId
+            )
+            if (persisted?.isSuccess == true) {
+                successCount += preparedRecordIds.size
+            } else {
+                failedCount += preparedRecordIds.size
+            }
+            reportProgress(preparedRecordIds.size)
+        }
+    }
+    individuallyMovedPasskeys.forEach { passkey ->
         val updateResult = applyPasswordPagePasskeyStorageTarget(
             passkey = passkey,
             target = target,
@@ -922,7 +1146,8 @@ internal suspend fun executeMixedPasswordBatchMove(
         successCount = successCount,
         failedCount = failedCount,
         blockedPasskeyCount = blockedPasskeyCount,
-        copiedPasswordIds = copiedPasswordIds
+        copiedPasswordIds = copiedPasswordIds,
+        copiedPasswordIdPairs = copiedPasswordIdPairs
     )
 }
 

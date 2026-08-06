@@ -6,18 +6,16 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,16 +52,18 @@ fun SwipeableAddFab(
             } else {
                 fabContainerColor
             }
-            Box(
+            FloatingActionButton(
+                onClick = onClick,
                 modifier = Modifier
-                    .size(56.dp)
-                    .background(fabColor, RoundedCornerShape(16.dp))
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                        onClick = onClick
-                    ),
-                contentAlignment = Alignment.Center
+                    .size(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                containerColor = fabColor,
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 6.dp,
+                    pressedElevation = 8.dp,
+                    focusedElevation = 6.dp,
+                    hoveredElevation = 8.dp
+                )
             ) {
                 fabContent()
             }

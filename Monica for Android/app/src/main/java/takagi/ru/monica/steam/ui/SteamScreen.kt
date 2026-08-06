@@ -1536,6 +1536,17 @@ fun SteamScreen(
                                     }
                                 },
                                 onClearSelection = { selectedMarketListingIds = emptyList() },
+                                onSelectAll = {
+                                    val visibleIds = filteredMarketListings.map { it.listingId }
+                                    selectedMarketListingIds = if (
+                                        visibleIds.isNotEmpty() &&
+                                        visibleIds.all { it in selectedMarketListingIds }
+                                    ) {
+                                        selectedMarketListingIds - visibleIds.toSet()
+                                    } else {
+                                        (selectedMarketListingIds + visibleIds).distinct()
+                                    }
+                                },
                                 onRequestCancelListings = { listings ->
                                     if (listings.isNotEmpty()) {
                                         requestProtectedMarketAction(
@@ -2064,8 +2075,7 @@ private fun SteamCodeContent(
     val haptic = rememberHapticFeedback()
     val selectedIds = selectedAccountIds.toSet()
     val selectionMode = selectedIds.isNotEmpty()
-    val sharedProgressTimeMillis = rememberTotpTickerMillis(appSettings.validatorSmoothProgress)
-    val sharedTickSeconds = sharedProgressTimeMillis / 1000L
+    val sharedTickSeconds = rememberTotpTickerMillis(smooth = false) / 1000L
     val lazyListState = rememberSaveableLazyListState()
     var localAccounts by remember { mutableStateOf(accounts) }
     val reorderEnabled = selectionMode && !isSearchActive
@@ -2228,7 +2238,6 @@ private fun SteamCodeContent(
                                     },
                                     onCopyCode = ::copyCode,
                                     sharedTickSeconds = sharedTickSeconds,
-                                    sharedProgressTimeMillis = sharedProgressTimeMillis,
                                     appSettings = appSettings,
                                     immersiveBackgroundVisible = miniProfileBackgroundAvailable,
                                     backgroundContent = if (miniProfileBackgroundRequested) {

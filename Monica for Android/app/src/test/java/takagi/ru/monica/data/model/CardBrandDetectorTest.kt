@@ -43,6 +43,39 @@ class CardBrandDetectorTest {
     }
 
     @Test
+    fun visaBrandDoesNotOscillateWhileEnteringNumberThatOverlapsLegacyEloRegex() {
+        val visaNumber = "4367001234567890"
+
+        (1..visaNumber.length).forEach { length ->
+            val partialNumber = visaNumber.take(length)
+            assertEquals(
+                "length=$length number=$partialNumber",
+                CardBrand.VISA,
+                CardBrandDetector.detect(partialNumber)
+            )
+        }
+    }
+
+    @Test
+    fun knownEloBinStillDetectsAsEloWhileEnteringNumber() {
+        val eloNumbers = listOf(
+            "4011781234567890",
+            "6277801234567890"
+        )
+
+        eloNumbers.forEach { eloNumber ->
+            (6..eloNumber.length).forEach { length ->
+                val partialNumber = eloNumber.take(length)
+                assertEquals(
+                    "length=$length number=$partialNumber",
+                    CardBrand.ELO,
+                    CardBrandDetector.detect(partialNumber)
+                )
+            }
+        }
+    }
+
+    @Test
     fun unknownWhenNumberIsBlankOrUnsupported() {
         assertEquals(CardBrand.UNKNOWN, CardBrandDetector.detect(""))
         assertEquals(CardBrand.UNKNOWN, CardBrandDetector.detect("not a card"))

@@ -24,9 +24,54 @@ enum class CardBrand(val displayName: String) {
 object CardBrandDetector {
     private data class Rule(
         val brand: CardBrand,
-        val pattern: Regex,
-        val eagerPattern: Regex
+        val pattern: Regex? = null,
+        val eagerPattern: Regex? = null,
+        val fullMatchOverride: ((String) -> Boolean)? = null,
+        val eagerMatchOverride: ((String) -> Boolean)? = null,
+        val preferSpecificBinMatch: Boolean = false
+    ) {
+        fun matchesFull(number: String): Boolean =
+            fullMatchOverride?.invoke(number) ?: (pattern?.matches(number) == true)
+
+        fun matchesEager(number: String): Boolean =
+            eagerMatchOverride?.invoke(number) ?: (eagerPattern?.containsMatchIn(number) == true)
+    }
+
+    // The legacy Elo regex used by creditcards-types expands a handful of old
+    // prefixes into very broad ranges (for example 4367xx), which overlaps many
+    // unrelated Visa BINs. Keep the current six-digit Elo ranges explicit so
+    // live input can distinguish an Elo BIN from an ordinary Visa card.
+    private val eloBinRanges = listOf(
+        401178..401179,
+        431274..431274,
+        438935..438935,
+        451416..451416,
+        457393..457393,
+        457631..457632,
+        504175..504175,
+        506699..506778,
+        509000..509999,
+        627780..627780,
+        636297..636297,
+        636368..636368,
+        650031..650033,
+        650035..650051,
+        650405..650439,
+        650485..650538,
+        650541..650598,
+        650700..650718,
+        650720..650727,
+        650901..650978,
+        651652..651679,
+        655000..655019,
+        655021..655058
     )
+
+    private fun hasKnownEloBin(number: String): Boolean {
+        if (number.length < 6) return false
+        val bin = number.take(6).toIntOrNull() ?: return false
+        return eloBinRanges.any { bin in it }
+    }
 
     // Patterns are based on the MIT-licensed creditcards-types rules used by Keyguard.
     private val rules = listOf(
@@ -36,9 +81,12 @@ object CardBrandDetector {
             "^62".toRegex()
         ),
         Rule(
-            CardBrand.ELO,
-            "^(4[035]|5[0]|6[235])(6[7263]|9[90]|1[2416]|7[736]|8[9]|0[04579]|5[0])([0-9])([0-9])\\d{10}$".toRegex(),
-            "^(4[035]|5[0]|6[235])(6[7263]|9[90]|1[2416]|7[736]|8[9]|0[04579]|5[0])([0-9])([0-9])".toRegex()
+            brand = CardBrand.ELO,
+            fullMatchOverride = { number ->
+                number.length == 16 && hasKnownEloBin(number)
+            },
+            eagerMatchOverride = ::hasKnownEloBin,
+            preferSpecificBinMatch = true
         ),
         Rule(
             CardBrand.MADA,
@@ -138,12 +186,21 @@ object CardBrandDetector {
             return CardBrand.UNKNOWN
         }
 
-        val exactBrand = rules.firstOrNull { it.pattern.matches(digits) }?.brand
+        if (allowPartial) {
+            val specificBinBrand = rules.firstOrNull {
+                it.preferSpecificBinMatch && it.matchesEager(digits)
+            }?.brand
+            if (specificBinBrand != null) {
+                return specificBinBrand
+            }
+        }
+
+        val exactBrand = rules.firstOrNull { it.matchesFull(digits) }?.brand
         if (exactBrand != null || !allowPartial) {
             return exactBrand ?: CardBrand.UNKNOWN
         }
 
-        return rules.firstOrNull { it.eagerPattern.containsMatchIn(digits) }?.brand
+        return rules.firstOrNull { it.matchesEager(digits) }?.brand
             ?: CardBrand.UNKNOWN
     }
 

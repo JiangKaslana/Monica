@@ -74,6 +74,12 @@ class SettingsViewModel(
             settingsManager.updateColorScheme(colorScheme)
         }
     }
+
+    fun updateInterfaceScalePercent(percent: Int) {
+        viewModelScope.launch {
+            settingsManager.updateInterfaceScalePercent(percent)
+        }
+    }
     
     fun updateLanguage(language: Language) {
         viewModelScope.launch {

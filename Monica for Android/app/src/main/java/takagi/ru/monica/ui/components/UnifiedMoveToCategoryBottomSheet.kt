@@ -136,6 +136,11 @@ fun UnifiedMoveToCategoryBottomSheet(
     allowCopy: Boolean = false,
     allowMove: Boolean = true,
     allowArchiveTarget: Boolean = false,
+    onBeforeTargetSelected: ((
+        target: UnifiedMoveCategoryTarget,
+        action: UnifiedMoveAction,
+        proceed: () -> Unit
+    ) -> Unit)? = null,
     onTargetSelected: (UnifiedMoveCategoryTarget, UnifiedMoveAction) -> Unit
 ) {
     if (!visible) return
@@ -297,7 +302,9 @@ fun UnifiedMoveToCategoryBottomSheet(
                 return
             }
         }
-        onTargetSelected(target, selectedAction.value)
+        val action = selectedAction.value
+        val proceed = { onTargetSelected(target, action) }
+        onBeforeTargetSelected?.invoke(target, action, proceed) ?: proceed()
     }
 
     val activeSource = sources.firstOrNull { it.key == activeSourceKey.value }

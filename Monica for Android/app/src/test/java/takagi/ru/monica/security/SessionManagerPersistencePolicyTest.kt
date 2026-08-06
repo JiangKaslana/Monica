@@ -7,6 +7,50 @@ import org.junit.Test
 class SessionManagerPersistencePolicyTest {
 
     @Test
+    fun activityTimestampUpdatesAtMostOncePerSecond() {
+        assertFalse(
+            shouldRefreshSessionActivity(
+                lastActivityElapsedRealtime = 100_000L,
+                nowElapsedRealtime = 100_999L,
+            )
+        )
+        assertTrue(
+            shouldRefreshSessionActivity(
+                lastActivityElapsedRealtime = 100_000L,
+                nowElapsedRealtime = 101_000L,
+            )
+        )
+        assertTrue(
+            shouldRefreshSessionActivity(
+                lastActivityElapsedRealtime = 100_000L,
+                nowElapsedRealtime = 99_000L,
+            )
+        )
+    }
+
+    @Test
+    fun activityPersistenceIsLimitedToOneWritePerWindow() {
+        assertFalse(
+            shouldPersistSessionRefresh(
+                lastPersistElapsedRealtime = 100_000L,
+                nowElapsedRealtime = 114_999L,
+            )
+        )
+        assertTrue(
+            shouldPersistSessionRefresh(
+                lastPersistElapsedRealtime = 100_000L,
+                nowElapsedRealtime = 115_000L,
+            )
+        )
+        assertTrue(
+            shouldPersistSessionRefresh(
+                lastPersistElapsedRealtime = 0L,
+                nowElapsedRealtime = 1L,
+            )
+        )
+    }
+
+    @Test
     fun neverExpireSurvivesAppProcessRestartWithinTheSameBoot() {
         assertTrue(
             isPersistedSessionWithinTimeout(

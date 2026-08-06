@@ -587,6 +587,8 @@ internal suspend fun executePasswordBatchCopy(
     addCopiedEntry: suspend (PasswordEntry) -> Long?,
     addMdbxCopiedEntriesBatch: suspend (List<PasswordEntry>) -> List<Long>,
     buildCopiedEntryForTarget: (PasswordEntry, UnifiedMoveCategoryTarget) -> PasswordEntry,
+    rollbackCopiedEntry: suspend (Long) -> Unit = {},
+    logTimeline: Boolean = true,
     onProgress: ((Int, Int) -> Unit)? = null
 ): PasswordBatchCopyResult {
     val copiedIds = mutableListOf<Long>()
@@ -637,26 +639,37 @@ internal suspend fun executePasswordBatchCopy(
         }
     }
 
-    // 复制源密码的本地附件到新密码（仅 Monica-local 目标）。
-    // 对 Bitwarden / KeePass 目标不做复制：前者服务端不兼容 free 账户附件；
-    // 后者由各自 executor 在 kdbx 落地流程中自行处理。
-    if (targetRouting.isMonicaCopyTarget && idPairs.isNotEmpty()) {
+    // Monica 与 MDBX 目标都使用独立 LOCAL 附件记录；MDBX 克隆时同步写入目标数据库。
+    // KeePass 由 KDBX 执行器处理，Bitwarden 需要等待目标 cipher 建立后再上传。
+    val cloneToLocalAttachmentTarget = targetRouting.isMonicaCopyTarget ||
+        target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget ||
+        target is UnifiedMoveCategoryTarget.MdbxFolderTarget
+    if (cloneToLocalAttachmentTarget && idPairs.isNotEmpty()) {
         val facade = takagi.ru.monica.attachments.AttachmentContainer.facade(context)
-        idPairs.forEach { (sourceId, newId) ->
-            runCatching { facade.cloneAttachmentsToNewParent(sourceId, newId) }
-                .onFailure { e ->
-                    android.util.Log.w(
-                        "PasswordBatchCopy",
-                        "cloneAttachments failed src=$sourceId -> dst=$newId: ${e.message}"
-                    )
+        idPairs.toList().forEach { pair ->
+            val (sourceId, newId) = pair
+            val attachmentCopied = runCatching {
+                val expectedCount = facade.listByPassword(sourceId).size
+                val copiedCount = facade.cloneAttachmentsToNewParent(sourceId, newId)
+                check(copiedCount == expectedCount) {
+                    "Attachment copy incomplete for password $sourceId"
                 }
+            }.isSuccess
+            if (!attachmentCopied) {
+                runCatching { rollbackCopiedEntry(newId) }
+                copiedIds.remove(newId)
+                idPairs.remove(pair)
+                failedCount += 1
+            }
         }
     }
 
-    logPasswordBatchCopyTimeline(
-        context = context,
-        copiedEntryIds = copiedIds.toList()
-    )
+    if (logTimeline) {
+        logPasswordBatchCopyTimeline(
+            context = context,
+            copiedEntryIds = copiedIds.toList()
+        )
+    }
 
     return PasswordBatchCopyResult(
         successCount = copiedIds.size,
@@ -760,7 +773,7 @@ private fun resolvePasswordForBatchMove(
         ?: ""
 }
 
-private fun PasswordBatchAggregateSelection.totalItemCount(
+internal fun PasswordBatchAggregateSelection.totalItemCount(
     selectedPasswordCount: Int
 ): Int {
     return selectedPasswordCount +
@@ -867,6 +880,10 @@ internal fun PasswordBatchMoveSheet(
     var attachmentAwarePrompt by remember {
         mutableStateOf<AttachmentAwareMovePrompt?>(null)
     }
+    var preserveCategoriesPrompt by remember {
+        mutableStateOf<PasswordBatchPreserveCategoriesPrompt?>(null)
+    }
+    var preserveCategoriesForNextTransfer by remember { mutableStateOf(false) }
 
     UnifiedMoveToCategoryBottomSheet(
         visible = visible,
@@ -883,7 +900,29 @@ internal fun PasswordBatchMoveSheet(
         allowCopy = true,
         allowMove = true,
         allowArchiveTarget = !hasMixedSelection,
+        onBeforeTargetSelected = { target, _, proceed ->
+            if (shouldOfferPasswordBatchCategoryPreservation(selectedEntries, target)) {
+                val targetStorageKey = target.passwordBatchStorageKey()
+                val classifiedItemCount = selectedEntries.count { entry ->
+                    entry.hasPasswordBatchSourceCategory() &&
+                        entry.passwordBatchStorageKey() != targetStorageKey
+                }
+                preserveCategoriesPrompt = PasswordBatchPreserveCategoriesPrompt(
+                    classifiedItemCount = classifiedItemCount,
+                    proceed = { preserveCategories ->
+                        preserveCategoriesForNextTransfer = preserveCategories
+                        preserveCategoriesPrompt = null
+                        proceed()
+                    }
+                )
+            } else {
+                preserveCategoriesForNextTransfer = false
+                proceed()
+            }
+        },
         onTargetSelected = { target, action ->
+            val preserveSourceCategories = preserveCategoriesForNextTransfer
+            preserveCategoriesForNextTransfer = false
             val selectedIds = selectedEntries.map(PasswordEntry::id)
             val actionResolutionForProgress = resolvePasswordBatchMoveAction(
                 requestedAction = action,
@@ -956,6 +995,36 @@ internal fun PasswordBatchMoveSheet(
                 var successCount = 0
                 var failedCount = 0
                 var completedCleanly = false
+                val passwordTargetOverrides = if (preserveSourceCategories) {
+                    try {
+                        resolvePasswordBatchPreservedCategoryTargets(
+                            entries = selectedEntries,
+                            selectedTarget = target,
+                            categories = categories,
+                            bitwardenRepository = bitwardenRepository,
+                            localKeePassViewModel = localKeePassViewModel,
+                            passwordViewModel = viewModel
+                        )
+                    } catch (error: Exception) {
+                        PasswordBatchTransferNotificationHelper.showCompleted(
+                            context = context,
+                            notificationId = notificationId,
+                            action = effectiveAction,
+                            successCount = 0,
+                            failedCount = totalCount
+                        )
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.webdav_operation_failed, error.message ?: ""),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        transferProgress = null
+                        PasswordBatchTransferProgressTracker.clear()
+                        return@launch
+                    }
+                } else {
+                    emptyMap()
+                }
                 // Attachment_Aware_Move_Dialog preflight（Requirement 8）：
                 // 目标是 Bitwarden Vault/Folder + 该 vault 是免费账户 + 选中集合里有带附件条目
                 // → 弹 dialog 让用户知情；用户确认后按原逻辑执行（附件本身不会被搬到 Bitwarden）
@@ -1001,18 +1070,40 @@ internal fun PasswordBatchMoveSheet(
                                     else -> ""
                                 }
                                 if (classification.plainMove.isNotEmpty()) {
-                                    viewModel.unarchivePasswordsAwait(classification.plainMove)
-                                    viewModel.movePasswordsToBitwardenFolderAwait(
-                                        classification.plainMove,
-                                        bitwardenMoveTargetVaultId,
-                                        targetFolderId
-                                    )
+                                    selectedEntries
+                                        .filter { it.id in classification.plainMove }
+                                        .groupBy { entry ->
+                                            passwordBatchTargetForEntry(
+                                                entry = entry,
+                                                selectedTarget = target,
+                                                targetOverrides = passwordTargetOverrides
+                                            )
+                                        }
+                                        .forEach { (resolvedTarget, entries) ->
+                                            val folderId = (resolvedTarget as? UnifiedMoveCategoryTarget.BitwardenFolderTarget)
+                                                ?.folderId
+                                                ?: targetFolderId
+                                            val ids = entries.map(PasswordEntry::id)
+                                            viewModel.unarchivePasswordsAwait(ids)
+                                            viewModel.movePasswordsToBitwardenFolderAwait(
+                                                ids,
+                                                bitwardenMoveTargetVaultId,
+                                                folderId
+                                            )
+                                        }
                                 }
                                 if (classification.copyInsteadOfMove.isNotEmpty()) {
                                     val entriesToCopy = selectedEntries
                                         .filter { it.id in classification.copyInsteadOfMove }
                                     entriesToCopy.forEach { entry ->
-                                        val copied = buildCopiedEntryForTarget(entry, target)
+                                        val copied = buildCopiedEntryForTarget(
+                                            entry,
+                                            passwordBatchTargetForEntry(
+                                                entry = entry,
+                                                selectedTarget = target,
+                                                targetOverrides = passwordTargetOverrides
+                                            )
+                                        )
                                         viewModel.addPasswordEntryWithResultAwait(copied)
                                     }
                                 }
@@ -1058,6 +1149,26 @@ internal fun PasswordBatchMoveSheet(
                     }
                 }
                 try {
+                    val targetBitwardenVault = bitwardenMoveTargetVaultId?.let { vaultId ->
+                        bitwardenVaults.firstOrNull { it.id == vaultId }
+                            ?: error("Bitwarden target vault is missing")
+                    }
+                    val targetBitwardenIsPremium = bitwardenMoveTargetVaultId?.let { vaultId ->
+                        takagi.ru.monica.bitwarden.BitwardenVaultPremiumStore.isPremium(context, vaultId)
+                    } ?: false
+                    val preparedAttachments = preparePasswordBatchAttachments(
+                        context = context,
+                        entries = selectedEntries,
+                        bitwardenVaults = bitwardenVaults,
+                        viewModel = viewModel,
+                        skipPasswordIds = if (
+                            bitwardenMoveTargetVaultId != null && !targetBitwardenIsPremium
+                        ) {
+                            selectedIds.toSet()
+                        } else {
+                            emptySet()
+                        }
+                    )
                     if (hasMixedSelection) {
                         val result = executeMixedPasswordBatchMove(
                             context = context,
@@ -1072,10 +1183,44 @@ internal fun PasswordBatchMoveSheet(
                             viewModel = viewModel,
                             aggregateUiState = aggregateUiState,
                             bitwardenRepository = bitwardenRepository,
+                            passwordTargetOverrides = passwordTargetOverrides,
                             onProgress = onProgressUpdate
                         )
                         successCount = result.successCount
                         failedCount = result.failedCount
+                        if (effectiveAction == UnifiedMoveAction.COPY) {
+                            if (targetBitwardenVault != null && targetBitwardenIsPremium) {
+                                completePasswordBatchBitwardenAttachments(
+                                    context = context,
+                                    idPairs = result.copiedPasswordIdPairs,
+                                    sourceEntries = selectedEntries,
+                                    targetVault = targetBitwardenVault,
+                                    preparedAttachments = preparedAttachments,
+                                    isMove = false,
+                                    viewModel = viewModel,
+                                    bitwardenRepository = bitwardenRepository
+                                )
+                            } else {
+                                completePasswordBatchLocalOrKeePassAttachmentCopies(
+                                    context = context,
+                                    idPairs = result.copiedPasswordIdPairs,
+                                    target = target,
+                                    preparedAttachments = preparedAttachments,
+                                    viewModel = viewModel
+                                )
+                            }
+                        } else if (targetBitwardenVault != null && targetBitwardenIsPremium) {
+                            completePasswordBatchBitwardenAttachments(
+                                context = context,
+                                idPairs = selectedEntries.map { it.id to it.id },
+                                sourceEntries = selectedEntries,
+                                targetVault = targetBitwardenVault,
+                                preparedAttachments = preparedAttachments,
+                                isMove = true,
+                                viewModel = viewModel,
+                                bitwardenRepository = bitwardenRepository
+                            )
+                        }
                         if (result.blockedPasskeyCount > 0) {
                             Toast.makeText(
                                 context,
@@ -1099,6 +1244,11 @@ internal fun PasswordBatchMoveSheet(
 
                         val resolvedAction = actionResolution.effectiveAction
                         val targetRouting = resolvePasswordBatchMoveTargetRouting(target)
+                        val passwordGroups = groupPasswordBatchEntriesByTarget(
+                            entries = selectedEntries,
+                            selectedTarget = target,
+                            targetOverrides = passwordTargetOverrides
+                        )
                         if (resolvedAction == UnifiedMoveAction.COPY) {
                             when (target) {
                                 is UnifiedMoveCategoryTarget.KeePassDatabaseTarget,
@@ -1107,8 +1257,15 @@ internal fun PasswordBatchMoveSheet(
                                         entries = selectedEntries,
                                         securityManager = securityManager
                                     )
-                                    val copiedEntries = selectedEntries.map {
-                                        buildCopiedEntryForTarget(it, target)
+                                    val copiedEntries = selectedEntries.map { entry ->
+                                        buildCopiedEntryForTarget(
+                                            entry,
+                                            passwordBatchTargetForEntry(
+                                                entry = entry,
+                                                selectedTarget = target,
+                                                targetOverrides = passwordTargetOverrides
+                                            )
+                                        )
                                     }
                                     val targetDatabaseId = when (target) {
                                         is UnifiedMoveCategoryTarget.KeePassDatabaseTarget -> target.databaseId
@@ -1143,40 +1300,99 @@ internal fun PasswordBatchMoveSheet(
                                 }
 
                                 else -> {
-                                    val copyResult = executePasswordBatchCopy(
-                                        context = context,
-                                        selectedEntries = selectedEntries,
-                                        target = target,
-                                        targetRouting = targetRouting,
-                                        copyPasswordToMonicaLocal = { entry, categoryId ->
-                                            viewModel.copyPasswordToMonicaLocal(
-                                                entry = entry,
-                                                categoryId = categoryId
-                                            )
-                                        },
-                                        addCopiedEntry = { entry ->
-                                            viewModel.addPasswordEntryWithResultAwait(entry)
-                                        },
-                                        addMdbxCopiedEntriesBatch = { entries ->
-                                            viewModel.createMdbxPasswordEntriesBatchAlreadyEncrypted(entries)
-                                        },
-                                        buildCopiedEntryForTarget = ::buildCopiedEntryForTarget,
-                                        onProgress = onProgressUpdate
-                                    )
-                                    successCount = copyResult.successCount
-                                    failedCount = copyResult.failedCount
-                                    if (
-                                        copyResult.idPairs.isNotEmpty() &&
-                                        (target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget ||
-                                            target is UnifiedMoveCategoryTarget.MdbxFolderTarget)
+                                    val copiedEntryIds = mutableListOf<Long>()
+                                    val copiedIdPairs = mutableListOf<Pair<Long, Long>>()
+                                    var processedBeforeGroup = 0
+                                    val copyGroups = if (
+                                        target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget ||
+                                        target is UnifiedMoveCategoryTarget.MdbxFolderTarget
                                     ) {
-                                        viewModel.copyBoundTotpsForPasswordCopies(copyResult.idPairs)
+                                        listOf(target to selectedEntries)
+                                    } else {
+                                        passwordGroups
+                                    }
+                                    copyGroups.forEach { (groupTarget, groupEntries) ->
+                                        val copyResult = executePasswordBatchCopy(
+                                            context = context,
+                                            selectedEntries = groupEntries,
+                                            target = groupTarget,
+                                            targetRouting = resolvePasswordBatchMoveTargetRouting(groupTarget),
+                                            copyPasswordToMonicaLocal = { entry, categoryId ->
+                                                viewModel.copyPasswordToMonicaLocal(
+                                                    entry = entry,
+                                                    categoryId = categoryId
+                                                )
+                                            },
+                                            addCopiedEntry = { entry ->
+                                                viewModel.addPasswordEntryWithResultAwait(entry)
+                                            },
+                                            addMdbxCopiedEntriesBatch = { entries ->
+                                                viewModel.createMdbxPasswordEntriesBatchAlreadyEncrypted(entries)
+                                            },
+                                            buildCopiedEntryForTarget = { entry, fallbackTarget ->
+                                                val resolvedTarget = if (
+                                                    target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget ||
+                                                    target is UnifiedMoveCategoryTarget.MdbxFolderTarget
+                                                ) {
+                                                    passwordBatchTargetForEntry(
+                                                        entry = entry,
+                                                        selectedTarget = target,
+                                                        targetOverrides = passwordTargetOverrides
+                                                    )
+                                                } else {
+                                                    fallbackTarget
+                                                }
+                                                buildCopiedEntryForTarget(entry, resolvedTarget)
+                                            },
+                                            rollbackCopiedEntry = viewModel::rollbackPasswordTransferTargetAwait,
+                                            logTimeline = false,
+                                            onProgress = { processed, _ ->
+                                                onProgressUpdate(
+                                                    (processedBeforeGroup + processed)
+                                                        .coerceAtMost(selectedEntries.size),
+                                                    selectedEntries.size
+                                                )
+                                            }
+                                        )
+                                        processedBeforeGroup += groupEntries.size
+                                        successCount += copyResult.successCount
+                                        failedCount += copyResult.failedCount
+                                        copiedEntryIds += copyResult.copiedEntryIds
+                                        copiedIdPairs += copyResult.idPairs
+                                    }
+                                    logPasswordBatchCopyTimeline(
+                                        context = context,
+                                        copiedEntryIds = copiedEntryIds
+                                    )
+                                    if (copiedIdPairs.isNotEmpty() && target.passwordBatchStorageKey()?.startsWith("mdbx:") == true) {
+                                        viewModel.copyBoundTotpsForPasswordCopies(copiedIdPairs)
+                                    }
+                                    if (targetBitwardenVault != null && targetBitwardenIsPremium) {
+                                        completePasswordBatchBitwardenAttachments(
+                                            context = context,
+                                            idPairs = copiedIdPairs,
+                                            sourceEntries = selectedEntries,
+                                            targetVault = targetBitwardenVault,
+                                            preparedAttachments = preparedAttachments,
+                                            isMove = false,
+                                            viewModel = viewModel,
+                                            bitwardenRepository = bitwardenRepository
+                                        )
                                     }
                                 }
                             }
                         } else {
                             val oldStates = selectedEntries.map(::toLocationState)
-                            val newStates = selectedEntries.map { toMovedLocationState(it, target) }
+                            val newStates = selectedEntries.map { entry ->
+                                toMovedLocationState(
+                                    entry,
+                                    passwordBatchTargetForEntry(
+                                        entry = entry,
+                                        selectedTarget = target,
+                                        targetOverrides = passwordTargetOverrides
+                                    )
+                                )
+                            }
                             val recreatedEntries = mutableListOf<TimelinePasswordRecreatedEntry>()
                             val decryptSnapshot = buildPasswordDecryptSnapshot(
                                 entries = selectedEntries,
@@ -1189,166 +1405,179 @@ internal fun PasswordBatchMoveSheet(
                                     onProgressUpdate(selectedEntries.size, selectedEntries.size)
                                 }
 
-                                target == UnifiedMoveCategoryTarget.Uncategorized -> {
-                                    val keepassEntries = selectedEntries.filter { it.isKeePassEntry() }
-                                    val bitwardenEntries = selectedEntries.filter { it.isBitwardenEntry() }
-                                    val localIds = selectedEntries
-                                        .filter { it.isLocalOnlyEntry() }
-                                        .map { it.id }
-
-                                    if (keepassEntries.isNotEmpty()) {
-                                        val keepassIds = keepassEntries.map { it.id }
-                                        val result = viewModel.moveKeePassPasswordsToMonicaCategoryAwait(
-                                            ids = keepassIds,
-                                            categoryId = null
-                                        )
-                                        if (result.isFailure) {
-                                            throw result.exceptionOrNull()
-                                                ?: IllegalStateException("Keepass move failed")
+                                else -> {
+                                    if (
+                                        target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget ||
+                                        target is UnifiedMoveCategoryTarget.MdbxFolderTarget
+                                    ) {
+                                        val databaseId = when (target) {
+                                            is UnifiedMoveCategoryTarget.MdbxDatabaseTarget -> target.databaseId
+                                            is UnifiedMoveCategoryTarget.MdbxFolderTarget -> target.databaseId
+                                            else -> error("Unexpected MDBX target")
                                         }
-                                        viewModel.unarchivePasswordsAwait(keepassIds)
-                                    }
-
-                                    bitwardenEntries.forEach { entry ->
-                                        val result = viewModel.moveBitwardenPasswordToMonicaLocal(entry, null)
-                                        if (result.isFailure) {
-                                            throw result.exceptionOrNull()
-                                                ?: IllegalStateException("Bitwarden move failed")
-                                        }
-                                        recreatedEntries += TimelinePasswordRecreatedEntry(
-                                            sourceEntryId = entry.id,
-                                            recreatedEntryId = result.getOrThrow()
-                                        )
-                                    }
-
-                                    if (localIds.isNotEmpty()) {
-                                        viewModel.unarchivePasswordsAwait(localIds)
-                                        viewModel.movePasswordsToCategoryAwait(localIds, null)
-                                    }
-                                    onProgressUpdate(selectedEntries.size, selectedEntries.size)
-                                }
-
-                                target is UnifiedMoveCategoryTarget.MonicaCategory -> {
-                                    val keepassEntries = selectedEntries.filter { it.isKeePassEntry() }
-                                    val bitwardenEntries = selectedEntries.filter { it.isBitwardenEntry() }
-                                    val localIds = selectedEntries
-                                        .filter { it.isLocalOnlyEntry() }
-                                        .map { it.id }
-
-                                    if (keepassEntries.isNotEmpty()) {
-                                        val keepassIds = keepassEntries.map { it.id }
-                                        val result = viewModel.moveKeePassPasswordsToMonicaCategoryAwait(
-                                            ids = keepassIds,
-                                            categoryId = target.categoryId
-                                        )
-                                        if (result.isFailure) {
-                                            throw result.exceptionOrNull()
-                                                ?: IllegalStateException("Keepass move failed")
-                                        }
-                                        viewModel.unarchivePasswordsAwait(keepassIds)
-                                    }
-
-                                    bitwardenEntries.forEach { entry ->
-                                        val result = viewModel.moveBitwardenPasswordToMonicaLocal(
-                                            entry = entry,
-                                            categoryId = target.categoryId
-                                        )
-                                        if (result.isFailure) {
-                                            throw result.exceptionOrNull()
-                                                ?: IllegalStateException("Bitwarden move failed")
-                                        }
-                                        recreatedEntries += TimelinePasswordRecreatedEntry(
-                                            sourceEntryId = entry.id,
-                                            recreatedEntryId = result.getOrThrow()
-                                        )
-                                    }
-
-                                    if (localIds.isNotEmpty()) {
-                                        viewModel.unarchivePasswordsAwait(localIds)
-                                        viewModel.movePasswordsToCategoryAwait(localIds, target.categoryId)
-                                    }
-                                    onProgressUpdate(selectedEntries.size, selectedEntries.size)
-                                }
-
-                                target is UnifiedMoveCategoryTarget.BitwardenVaultTarget -> {
-                                    viewModel.unarchivePasswordsAwait(selectedIds)
-                                    viewModel.movePasswordsToBitwardenFolderAwait(selectedIds, target.vaultId, "")
-                                    onProgressUpdate(selectedEntries.size, selectedEntries.size)
-                                }
-
-                                target is UnifiedMoveCategoryTarget.BitwardenFolderTarget -> {
-                                    viewModel.unarchivePasswordsAwait(selectedIds)
-                                    viewModel.movePasswordsToBitwardenFolderAwait(
-                                        selectedIds,
-                                        target.vaultId,
-                                        target.folderId
-                                    )
-                                    onProgressUpdate(selectedEntries.size, selectedEntries.size)
-                                }
-
-                                target is UnifiedMoveCategoryTarget.KeePassDatabaseTarget -> {
-                                    val result = localKeePassViewModel.movePasswordEntriesToKdbx(
-                                        databaseId = target.databaseId,
-                                        groupPath = null,
-                                        entries = selectedEntries,
-                                        decryptPassword = { encrypted ->
-                                            resolvePasswordForBatchMove(
-                                                encrypted = encrypted,
-                                                decryptSnapshot = decryptSnapshot,
-                                                securityManager = securityManager
+                                        val folderIdsByPasswordId = selectedEntries.associate { entry ->
+                                            val resolvedTarget = passwordBatchTargetForEntry(
+                                                entry = entry,
+                                                selectedTarget = target,
+                                                targetOverrides = passwordTargetOverrides
                                             )
-                                        },
-                                        onItemProcessed = onProgressUpdate
-                                    )
-                                    if (result.isFailure) {
-                                        throw result.exceptionOrNull()
-                                            ?: IllegalStateException("Move to KeePass database failed")
+                                            val folderId = (resolvedTarget as? UnifiedMoveCategoryTarget.MdbxFolderTarget)
+                                                ?.folderId
+                                            entry.id to folderId
+                                        }
+                                        viewModel.unarchivePasswordsAwait(selectedIds)
+                                        viewModel.movePasswordsToMdbxFoldersAwait(
+                                            databaseId = databaseId,
+                                            folderIdsByPasswordId = folderIdsByPasswordId
+                                        )
+                                        onProgressUpdate(selectedEntries.size, selectedEntries.size)
+                                    } else {
+                                    var processedBeforeGroup = 0
+                                    passwordGroups.forEach { (groupTarget, groupEntries) ->
+                                        val groupIds = groupEntries.map(PasswordEntry::id)
+                                        when (groupTarget) {
+                                            UnifiedMoveCategoryTarget.Uncategorized,
+                                            is UnifiedMoveCategoryTarget.MonicaCategory -> {
+                                                val categoryId = (groupTarget as? UnifiedMoveCategoryTarget.MonicaCategory)
+                                                    ?.categoryId
+                                                val keepassEntries = groupEntries.filter { it.isKeePassEntry() }
+                                                val bitwardenEntries = groupEntries.filter { it.isBitwardenEntry() }
+                                                val mdbxEntries = groupEntries.filter { it.isMdbxEntry() }
+                                                val localIds = groupEntries
+                                                    .filter { it.isLocalOnlyEntry() }
+                                                    .map(PasswordEntry::id)
+
+                                                if (keepassEntries.isNotEmpty()) {
+                                                    val keepassIds = keepassEntries.map(PasswordEntry::id)
+                                                    val result = viewModel.moveKeePassPasswordsToMonicaCategoryAwait(
+                                                        ids = keepassIds,
+                                                        categoryId = categoryId
+                                                    )
+                                                    if (result.isFailure) {
+                                                        throw result.exceptionOrNull()
+                                                            ?: IllegalStateException("KeePass move failed")
+                                                    }
+                                                    viewModel.unarchivePasswordsAwait(keepassIds)
+                                                }
+                                                bitwardenEntries.forEach { entry ->
+                                                    val result = viewModel.moveBitwardenPasswordToMonicaLocal(
+                                                        entry = entry,
+                                                        categoryId = categoryId
+                                                    )
+                                                    if (result.isFailure) {
+                                                        throw result.exceptionOrNull()
+                                                            ?: IllegalStateException("Bitwarden move failed")
+                                                    }
+                                                    recreatedEntries += TimelinePasswordRecreatedEntry(
+                                                        sourceEntryId = entry.id,
+                                                        recreatedEntryId = result.getOrThrow()
+                                                    )
+                                                }
+                                                if (mdbxEntries.isNotEmpty()) {
+                                                    viewModel.moveMdbxPasswordsToMonicaCategoryAwait(
+                                                        entries = mdbxEntries,
+                                                        categoryId = categoryId
+                                                    )
+                                                }
+                                                if (localIds.isNotEmpty()) {
+                                                    viewModel.unarchivePasswordsAwait(localIds)
+                                                    viewModel.movePasswordsToCategoryAwait(localIds, categoryId)
+                                                }
+                                            }
+
+                                            is UnifiedMoveCategoryTarget.BitwardenVaultTarget,
+                                            is UnifiedMoveCategoryTarget.BitwardenFolderTarget -> {
+                                                val vaultId = when (groupTarget) {
+                                                    is UnifiedMoveCategoryTarget.BitwardenVaultTarget -> groupTarget.vaultId
+                                                    is UnifiedMoveCategoryTarget.BitwardenFolderTarget -> groupTarget.vaultId
+                                                    else -> error("Unexpected Bitwarden target")
+                                                }
+                                                val folderId = (groupTarget as? UnifiedMoveCategoryTarget.BitwardenFolderTarget)
+                                                    ?.folderId
+                                                    .orEmpty()
+                                                viewModel.unarchivePasswordsAwait(groupIds)
+                                                viewModel.movePasswordsToBitwardenFolderAwait(groupIds, vaultId, folderId)
+                                            }
+
+                                            is UnifiedMoveCategoryTarget.KeePassDatabaseTarget,
+                                            is UnifiedMoveCategoryTarget.KeePassGroupTarget -> {
+                                                val databaseId = when (groupTarget) {
+                                                    is UnifiedMoveCategoryTarget.KeePassDatabaseTarget -> groupTarget.databaseId
+                                                    is UnifiedMoveCategoryTarget.KeePassGroupTarget -> groupTarget.databaseId
+                                                    else -> error("Unexpected KeePass target")
+                                                }
+                                                val groupPath = (groupTarget as? UnifiedMoveCategoryTarget.KeePassGroupTarget)
+                                                    ?.groupPath
+                                                val result = localKeePassViewModel.movePasswordEntriesToKdbx(
+                                                    databaseId = databaseId,
+                                                    groupPath = groupPath,
+                                                    entries = groupEntries,
+                                                    decryptPassword = { encrypted ->
+                                                        resolvePasswordForBatchMove(
+                                                            encrypted = encrypted,
+                                                            decryptSnapshot = decryptSnapshot,
+                                                            securityManager = securityManager
+                                                        )
+                                                    },
+                                                    onItemProcessed = { processed, _ ->
+                                                        onProgressUpdate(
+                                                            (processedBeforeGroup + processed)
+                                                                .coerceAtMost(selectedEntries.size),
+                                                            selectedEntries.size
+                                                        )
+                                                    }
+                                                )
+                                                if (result.isFailure) {
+                                                    throw result.exceptionOrNull()
+                                                        ?: IllegalStateException("Move to KeePass failed")
+                                                }
+                                                viewModel.unarchivePasswordsAwait(groupIds)
+                                                if (groupPath == null) {
+                                                    viewModel.movePasswordsToKeePassDatabaseAwait(groupIds, databaseId)
+                                                } else {
+                                                    viewModel.movePasswordsToKeePassGroupAwait(
+                                                        groupIds,
+                                                        databaseId,
+                                                        groupPath
+                                                    )
+                                                }
+                                            }
+
+                                            is UnifiedMoveCategoryTarget.MdbxDatabaseTarget,
+                                            is UnifiedMoveCategoryTarget.MdbxFolderTarget -> {
+                                                val databaseId = when (groupTarget) {
+                                                    is UnifiedMoveCategoryTarget.MdbxDatabaseTarget -> groupTarget.databaseId
+                                                    is UnifiedMoveCategoryTarget.MdbxFolderTarget -> groupTarget.databaseId
+                                                    else -> error("Unexpected MDBX target")
+                                                }
+                                                val folderId = (groupTarget as? UnifiedMoveCategoryTarget.MdbxFolderTarget)
+                                                    ?.folderId
+                                                viewModel.unarchivePasswordsAwait(groupIds)
+                                                viewModel.movePasswordsToMdbxDatabaseAwait(
+                                                    groupIds,
+                                                    databaseId,
+                                                    folderId
+                                                )
+                                            }
+                                        }
+                                        processedBeforeGroup += groupEntries.size
+                                        onProgressUpdate(processedBeforeGroup, selectedEntries.size)
                                     }
-                                    viewModel.unarchivePasswordsAwait(selectedIds)
-                                    viewModel.movePasswordsToKeePassDatabaseAwait(selectedIds, target.databaseId)
-                                }
-
-                                target is UnifiedMoveCategoryTarget.KeePassGroupTarget -> {
-                                    val result = localKeePassViewModel.movePasswordEntriesToKdbx(
-                                        databaseId = target.databaseId,
-                                        groupPath = target.groupPath,
-                                        entries = selectedEntries,
-                                        decryptPassword = { encrypted ->
-                                            resolvePasswordForBatchMove(
-                                                encrypted = encrypted,
-                                                decryptSnapshot = decryptSnapshot,
-                                                securityManager = securityManager
-                                            )
-                                        },
-                                        onItemProcessed = onProgressUpdate
-                                    )
-                                    if (result.isFailure) {
-                                        throw result.exceptionOrNull()
-                                            ?: IllegalStateException("Move to KeePass group failed")
                                     }
-                                    viewModel.unarchivePasswordsAwait(selectedIds)
-                                    viewModel.movePasswordsToKeePassGroupAwait(
-                                        selectedIds,
-                                        target.databaseId,
-                                        target.groupPath
-                                    )
                                 }
+                            }
 
-                                target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget -> {
-                                    viewModel.unarchivePasswordsAwait(selectedIds)
-                                    viewModel.movePasswordsToMdbxDatabaseAwait(selectedIds, target.databaseId)
-                                    onProgressUpdate(selectedEntries.size, selectedEntries.size)
-                                }
-
-                                target is UnifiedMoveCategoryTarget.MdbxFolderTarget -> {
-                                    viewModel.unarchivePasswordsAwait(selectedIds)
-                                    viewModel.movePasswordsToMdbxDatabaseAwait(
-                                        selectedIds,
-                                        target.databaseId,
-                                        target.folderId
-                                    )
-                                    onProgressUpdate(selectedEntries.size, selectedEntries.size)
-                                }
+                            if (targetBitwardenVault != null && targetBitwardenIsPremium) {
+                                completePasswordBatchBitwardenAttachments(
+                                    context = context,
+                                    idPairs = selectedEntries.map { it.id to it.id },
+                                    sourceEntries = selectedEntries,
+                                    targetVault = targetBitwardenVault,
+                                    preparedAttachments = preparedAttachments,
+                                    isMove = true,
+                                    viewModel = viewModel,
+                                    bitwardenRepository = bitwardenRepository
+                                )
                             }
 
                             logPasswordBatchMoveTimeline(
@@ -1384,16 +1613,26 @@ internal fun PasswordBatchMoveSheet(
                     onSelectionCleared()
                 } catch (e: Exception) {
                     val normalizedTotal = lastKnownTotal.coerceAtLeast(totalCount)
-                    val inferredSuccessCount = maxOf(
+                    val attachmentFailureCount = (e as? PasswordBatchAttachmentTransferException)
+                        ?.failedPasswordCount
+                        ?: 1
+                    val preliminarySuccessCount = maxOf(
                         successCount,
                         (lastKnownProcessed - failedCount).coerceAtLeast(0)
                     ).coerceIn(0, normalizedTotal)
                     val normalizedFailedCount = if (failedCount > 0) {
-                        maxOf(failedCount, normalizedTotal - inferredSuccessCount)
+                        maxOf(
+                            failedCount,
+                            attachmentFailureCount,
+                            normalizedTotal - preliminarySuccessCount
+                        )
                             .coerceIn(0, normalizedTotal)
                     } else {
-                        (normalizedTotal - inferredSuccessCount).coerceAtLeast(0)
+                        maxOf(attachmentFailureCount, normalizedTotal - preliminarySuccessCount)
+                            .coerceIn(0, normalizedTotal)
                     }
+                    val inferredSuccessCount = preliminarySuccessCount
+                        .coerceAtMost((normalizedTotal - normalizedFailedCount).coerceAtLeast(0))
                     PasswordBatchTransferNotificationHelper.showCompleted(
                         context = context,
                         notificationId = notificationId,
@@ -1444,6 +1683,13 @@ internal fun PasswordBatchMoveSheet(
             onDismiss = {
                 prompt.response.complete(false)
             }
+        )
+    }
+
+    preserveCategoriesPrompt?.let { prompt ->
+        PasswordBatchPreserveCategoriesDialog(
+            prompt = prompt,
+            onDismiss = { preserveCategoriesPrompt = null }
         )
     }
 }

@@ -22,6 +22,7 @@ import takagi.ru.monica.attachments.util.AttachmentLogger
 import takagi.ru.monica.bitwarden.api.BitwardenVaultApi
 import takagi.ru.monica.bitwarden.api.CipherAttachmentApiData
 import takagi.ru.monica.bitwarden.crypto.BitwardenCrypto.SymmetricCryptoKey
+import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordEntryDao
 import takagi.ru.monica.repository.MdbxRepository
 import takagi.ru.monica.repository.mdbxPasswordObjectId
@@ -99,6 +100,28 @@ class AttachmentFacade(
         repository.listByPassword(passwordId)
 
     suspend fun getById(id: Long): Attachment? = repository.getById(id)
+
+    /**
+     * 在密码传输开始前确认全部附件均具有可读取的本地加密缓存。
+     *
+     * 远端附件会使用对应上下文下载；任一附件缺少字节或上下文时抛出异常，调用方应当保留来源条目。
+     */
+    suspend fun ensureAttachmentsReadyForTransfer(
+        passwordId: Long,
+        bitwardenContext: BitwardenContext? = null,
+        keepassContext: KeePassContext? = null
+    ): Int = withContext(Dispatchers.IO) {
+        if (passwordId <= 0L) return@withContext 0
+        val attachments = repository.listByPassword(passwordId)
+        attachments.forEach { attachment ->
+            ensureLocalCacheForTransfer(
+                attachment = attachment,
+                sourceBitwardenContext = bitwardenContext,
+                sourceKeepassContext = keepassContext
+            )
+        }
+        attachments.size
+    }
 
     // ---------------------------------------------------------------- 添加
 
@@ -490,15 +513,18 @@ class AttachmentFacade(
         if (sourcePasswordId <= 0 || targetPasswordId <= 0 || sourcePasswordId == targetPasswordId) {
             return@withContext 0
         }
-        val sources = repository.listByPassword(sourcePasswordId).filter {
-            !it.localPath.isNullOrBlank() && !it.wrappedCek.isNullOrBlank()
-        }
+        val sources = repository.listByPassword(sourcePasswordId)
         if (sources.isEmpty()) return@withContext 0
 
-        var successCount = 0
-        sources.forEach { source ->
-            runCatching {
-                val plainStream = localExecutor.openDecrypted(source)
+        val created = mutableListOf<Attachment>()
+        try {
+            sources.forEach { source ->
+                val ready = ensureLocalCacheForTransfer(
+                    attachment = source,
+                    sourceBitwardenContext = null,
+                    sourceKeepassContext = null
+                )
+                val plainStream = localExecutor.openDecrypted(ready)
                 val blob = plainStream.use { storage.writeEncrypted(it) }
                 val wrapped = try {
                     keyVault.wrap(blob.cek)
@@ -509,13 +535,13 @@ class AttachmentFacade(
                     blob.cek.fill(0)
                 }
                 val now = System.currentTimeMillis()
-                val cloned = source.copy(
+                val cloned = ready.copy(
                     id = 0,
                     parentPasswordId = targetPasswordId,
                     source = AttachmentSource.LOCAL.name,
                     localPath = blob.relativePath,
                     wrappedCek = wrapped,
-                    sizeBytes = blob.sizeBytes.takeIf { it > 0 } ?: source.sizeBytes,
+                    sizeBytes = blob.sizeBytes.takeIf { it > 0 } ?: ready.sizeBytes,
                     sha256Hex = blob.sha256Hex,
                     bitwardenAttachmentId = null,
                     bitwardenUrl = null,
@@ -527,19 +553,141 @@ class AttachmentFacade(
                     isDeleted = false,
                     deletedAt = null
                 )
-                repository.insert(cloned)
-                successCount++
-            }.onFailure { e ->
-                AttachmentLogger.logFailure(
-                    event = AttachmentLogger.Event.CLONE,
-                    attachmentId = source.id,
-                    source = source.sourceEnum,
-                    error = e,
-                    extras = mapOf("target_password_id" to targetPasswordId)
+                val insertedId = try {
+                    repository.insert(cloned)
+                } catch (error: Throwable) {
+                    storage.delete(blob.relativePath)
+                    throw error
+                }
+                val saved = cloned.copy(id = insertedId)
+                try {
+                    mirrorAttachmentToMdbx(saved, requireSuccess = true)
+                } catch (error: Throwable) {
+                    repository.deleteById(insertedId)
+                    storage.delete(blob.relativePath)
+                    throw error
+                }
+                created += saved
+            }
+        } catch (error: Throwable) {
+            created.asReversed().forEach { cloned ->
+                runCatching { mirrorAttachmentDeleteToMdbx(cloned) }
+                runCatching { repository.deleteById(cloned.id) }
+                cloned.localPath?.let { path -> runCatching { storage.delete(path) } }
+            }
+            AttachmentLogger.logFailure(
+                event = AttachmentLogger.Event.CLONE,
+                attachmentId = null,
+                source = null,
+                error = error,
+                extras = mapOf(
+                    "source_password_id" to sourcePasswordId,
+                    "target_password_id" to targetPasswordId,
+                    "attachment_count" to sources.size
                 )
+            )
+            throw error
+        }
+        created.size
+    }
+
+    /**
+     * 把来源密码的全部附件上传到目标 Bitwarden cipher。
+     *
+     * 复制场景会插入新的附件记录；移动场景中来源与目标密码 ID 相同时会替换原记录。
+     */
+    suspend fun copyAttachmentsToBitwardenEntry(
+        sourcePasswordId: Long,
+        targetPasswordId: Long,
+        targetContext: BitwardenContext,
+        sourceBitwardenContext: BitwardenContext? = null,
+        sourceKeepassContext: KeePassContext? = null
+    ): Int = withContext(Dispatchers.IO) {
+        if (sourcePasswordId <= 0L || targetPasswordId <= 0L) return@withContext 0
+        if (!targetContext.isOnline) throw AttachmentError.Offline
+        val sources = repository.listByPassword(sourcePasswordId)
+        if (sources.isEmpty()) return@withContext 0
+
+        val readySources = sources.map { source ->
+            ensureLocalCacheForTransfer(
+                attachment = source,
+                sourceBitwardenContext = sourceBitwardenContext,
+                sourceKeepassContext = sourceKeepassContext
+            )
+        }
+        val uploaded = mutableListOf<Pair<Attachment, Attachment>>()
+        try {
+            readySources.forEach { source ->
+                val targetAttachment = localExecutor.openDecrypted(source).use { plainStream ->
+                    bitwardenExecutor.upload(
+                        parentPasswordId = targetPasswordId,
+                        fileName = source.fileName,
+                        mimeType = source.mimeType,
+                        source = plainStream,
+                        sizeBytes = source.sizeBytes,
+                        ctx = BitwardenAttachmentExecutor.UploadContext(
+                            vaultApi = targetContext.vaultApi,
+                            httpClient = targetContext.httpClient,
+                            accessToken = targetContext.accessToken,
+                            cipherId = targetContext.cipherId,
+                            wrappingKey = targetContext.wrappingKey
+                        )
+                    )
+                }
+                uploaded += source to targetAttachment
+            }
+        } catch (error: Throwable) {
+            rollbackBitwardenAttachmentUploads(uploaded.map { it.second }, targetContext)
+            throw error
+        }
+
+        val persisted = mutableListOf<Pair<Attachment, Attachment>>()
+        try {
+            uploaded.forEach { (source, targetAttachment) ->
+                val now = System.currentTimeMillis()
+                val replacingSource = sourcePasswordId == targetPasswordId
+                val metadata = targetAttachment.copy(
+                    id = if (replacingSource) source.id else 0L,
+                    parentPasswordId = targetPasswordId,
+                    createdAt = if (replacingSource) source.createdAt else now,
+                    updatedAt = now,
+                    isDeleted = false,
+                    deletedAt = null
+                )
+                if (replacingSource) {
+                    check(repository.update(metadata) == 1) { "Bitwarden attachment metadata update failed" }
+                } else {
+                    val insertedId = repository.insert(metadata)
+                    check(insertedId > 0L) { "Bitwarden attachment metadata insert failed" }
+                }
+                persisted += source to metadata
+            }
+        } catch (error: Throwable) {
+            persisted.asReversed().forEach { (source, metadata) ->
+                if (sourcePasswordId == targetPasswordId) {
+                    runCatching { repository.update(source) }
+                } else {
+                    val remoteId = metadata.bitwardenAttachmentId
+                    if (!remoteId.isNullOrBlank()) {
+                        repository.getByBitwardenAttachmentId(remoteId)?.let { stored ->
+                            runCatching { repository.deleteById(stored.id) }
+                        }
+                    }
+                }
+            }
+            rollbackBitwardenAttachmentUploads(uploaded.map { it.second }, targetContext)
+            throw error
+        }
+
+        if (sourcePasswordId == targetPasswordId) {
+            persisted.forEach { (source, metadata) ->
+                val oldPath = source.localPath
+                if (!oldPath.isNullOrBlank() && oldPath != metadata.localPath) {
+                    storage.delete(oldPath)
+                }
             }
         }
-        successCount
+        persisted.size
     }
 
     /**
@@ -559,7 +707,11 @@ class AttachmentFacade(
 
         val keepassContext = KeePassContext(databaseId = databaseId, entryUuid = entryUuid)
         sources.forEach { source ->
-            ensureLocalCacheForTransfer(source, keepassContext)
+            ensureLocalCacheForTransfer(
+                attachment = source,
+                sourceBitwardenContext = null,
+                sourceKeepassContext = keepassContext
+            )
         }
 
         val unresolved = repository.listByParentAndSource(passwordId, AttachmentSource.KEEPASS)
@@ -569,6 +721,23 @@ class AttachmentFacade(
         }
 
         repository.convertSourceToLocal(passwordId, AttachmentSource.KEEPASS)
+    }
+
+    suspend fun materializeBitwardenAttachmentsForLocal(
+        passwordId: Long,
+        bitwardenContext: BitwardenContext
+    ): Int = withContext(Dispatchers.IO) {
+        if (passwordId <= 0L) return@withContext 0
+        val sources = repository.listByParentAndSource(passwordId, AttachmentSource.BITWARDEN)
+        if (sources.isEmpty()) return@withContext 0
+        sources.forEach { source ->
+            ensureLocalCacheForTransfer(
+                attachment = source,
+                sourceBitwardenContext = bitwardenContext,
+                sourceKeepassContext = null
+            )
+        }
+        repository.convertSourceToLocal(passwordId, AttachmentSource.BITWARDEN)
     }
 
     /**
@@ -585,7 +754,8 @@ class AttachmentFacade(
         targetDatabaseId: Long,
         targetEntryUuid: String,
         sourceKeepassDatabaseId: Long? = null,
-        sourceKeepassEntryUuid: String? = null
+        sourceKeepassEntryUuid: String? = null,
+        sourceBitwardenContext: BitwardenContext? = null
     ): Int = withContext(Dispatchers.IO) {
         if (sourcePasswordId <= 0 || targetEntryUuid.isBlank()) return@withContext 0
         val sources = repository.listByPassword(sourcePasswordId)
@@ -602,7 +772,11 @@ class AttachmentFacade(
 
         var copied = 0
         sources.forEach { source ->
-            val ready = ensureLocalCacheForTransfer(source, sourceKeepassContext)
+            val ready = ensureLocalCacheForTransfer(
+                attachment = source,
+                sourceBitwardenContext = sourceBitwardenContext,
+                sourceKeepassContext = sourceKeepassContext
+            )
             val bytes = localExecutor.openDecrypted(ready).use { it.readBytes() }
             val uploaded = keepassExecutor.upload(
                 parentPasswordId = targetPasswordId ?: sourcePasswordId,
@@ -633,6 +807,91 @@ class AttachmentFacade(
         }
         copied
     }
+
+    /** 将当前 Room 密码下的全部附件强制写入其 MDBX 数据库。 */
+    suspend fun mirrorAttachmentsForPassword(passwordId: Long): Int = withContext(Dispatchers.IO) {
+        val attachments = repository.listByPassword(passwordId)
+        attachments.forEach { attachment ->
+            val ready = ensureLocalCacheForTransfer(
+                attachment = attachment,
+                sourceBitwardenContext = null,
+                sourceKeepassContext = null
+            )
+            mirrorAttachmentToMdbx(ready, requireSuccess = true)
+        }
+        attachments.size
+    }
+
+    /**
+     * 在密码跨 MDBX 数据库移动后迁移附件对象；目标写入全部成功后才删除来源对象。
+     */
+    suspend fun relocateMdbxAttachments(
+        sourceEntry: PasswordEntry,
+        targetEntry: PasswordEntry
+    ): Int = withContext(Dispatchers.IO) {
+        val sourceDatabaseId = sourceEntry.mdbxDatabaseId
+        val targetDatabaseId = targetEntry.mdbxDatabaseId
+        if (sourceDatabaseId == targetDatabaseId) return@withContext 0
+        val vaultStore = mdbxVaultStore ?: return@withContext 0
+        val attachments = repository.listByPassword(targetEntry.id)
+        if (attachments.isEmpty()) return@withContext 0
+        val readyAttachments = attachments.map { attachment ->
+            ensureLocalCacheForTransfer(
+                attachment = attachment,
+                sourceBitwardenContext = null,
+                sourceKeepassContext = null
+            )
+        }
+        val sourceParentId = sourceDatabaseId?.let { mdbxPasswordObjectId(sourceEntry) }
+        val targetParentId = targetDatabaseId?.let { mdbxPasswordObjectId(targetEntry) }
+
+        try {
+            if (targetDatabaseId != null && targetParentId != null) {
+                readyAttachments.forEach { attachment ->
+                    vaultStore.upsertAttachment(targetDatabaseId, targetParentId, attachment)
+                }
+            }
+            if (sourceDatabaseId != null && sourceParentId != null) {
+                readyAttachments.forEach { attachment ->
+                    vaultStore.deleteAttachment(sourceDatabaseId, sourceParentId, attachment)
+                }
+            }
+        } catch (error: Throwable) {
+            if (sourceDatabaseId != null && sourceParentId != null) {
+                readyAttachments.forEach { attachment ->
+                    runCatching { vaultStore.upsertAttachment(sourceDatabaseId, sourceParentId, attachment) }
+                }
+            }
+            if (targetDatabaseId != null && targetParentId != null) {
+                readyAttachments.forEach { attachment ->
+                    runCatching { vaultStore.deleteAttachment(targetDatabaseId, targetParentId, attachment) }
+                }
+            }
+            throw error
+        }
+        readyAttachments.size
+    }
+
+    suspend fun removeAttachmentsFromMdbxSource(sourceEntry: PasswordEntry): Int =
+        withContext(Dispatchers.IO) {
+            val databaseId = sourceEntry.mdbxDatabaseId ?: return@withContext 0
+            val vaultStore = mdbxVaultStore ?: return@withContext 0
+            val parentEntryId = mdbxPasswordObjectId(sourceEntry)
+            val attachments = repository.listByPassword(sourceEntry.id)
+            val deleted = mutableListOf<Attachment>()
+            try {
+                attachments.forEach { attachment ->
+                    vaultStore.deleteAttachment(databaseId, parentEntryId, attachment)
+                    deleted += attachment
+                }
+            } catch (error: Throwable) {
+                deleted.forEach { attachment ->
+                    runCatching { vaultStore.upsertAttachment(databaseId, parentEntryId, attachment) }
+                }
+                throw error
+            }
+            attachments.size
+        }
 
     /**
      * 清理已被 Room 遗弃的本地密文文件（例如通过 `ON DELETE CASCADE` 因密码永久删除
@@ -677,6 +936,7 @@ class AttachmentFacade(
 
     private suspend fun ensureLocalCacheForTransfer(
         attachment: Attachment,
+        sourceBitwardenContext: BitwardenContext?,
         sourceKeepassContext: KeePassContext?
     ): Attachment {
         if (!attachment.localPath.isNullOrBlank() &&
@@ -686,21 +946,49 @@ class AttachmentFacade(
             return attachment
         }
 
-        if (attachment.sourceEnum == AttachmentSource.KEEPASS && sourceKeepassContext != null) {
-            val downloaded = keepassExecutor.download(
-                existing = attachment,
-                databaseId = sourceKeepassContext.databaseId,
-                entryUuid = sourceKeepassContext.entryUuid
+        val downloaded = when (attachment.sourceEnum) {
+            AttachmentSource.LOCAL -> throw AttachmentError.IoError
+            AttachmentSource.BITWARDEN -> ensureDownloaded(
+                attachmentId = attachment.id,
+                bitwardenContext = sourceBitwardenContext ?: throw AttachmentError.IoError
             )
-            val fixed = downloaded.copy(id = attachment.id)
-            repository.update(fixed)
-            return fixed
+            AttachmentSource.KEEPASS -> ensureDownloaded(
+                attachmentId = attachment.id,
+                keepassContext = sourceKeepassContext ?: throw AttachmentError.IoError
+            )
         }
-
-        throw AttachmentError.IoError
+        if (downloaded.localPath.isNullOrBlank() ||
+            downloaded.wrappedCek.isNullOrBlank() ||
+            !storage.exists(downloaded.localPath)
+        ) {
+            throw AttachmentError.IoError
+        }
+        return downloaded
     }
 
-    private suspend fun mirrorAttachmentToMdbx(attachment: Attachment) {
+    private suspend fun rollbackBitwardenAttachmentUploads(
+        uploaded: List<Attachment>,
+        targetContext: BitwardenContext
+    ) {
+        uploaded.asReversed().forEach { attachment ->
+            attachment.bitwardenAttachmentId?.takeIf(String::isNotBlank)?.let { remoteId ->
+                runCatching {
+                    bitwardenExecutor.remove(
+                        vaultApi = targetContext.vaultApi,
+                        accessToken = targetContext.accessToken,
+                        cipherId = targetContext.cipherId,
+                        bitwardenAttachmentId = remoteId
+                    )
+                }
+            }
+            attachment.localPath?.let { path -> runCatching { storage.delete(path) } }
+        }
+    }
+
+    private suspend fun mirrorAttachmentToMdbx(
+        attachment: Attachment,
+        requireSuccess: Boolean = false
+    ) {
         val vaultStore = mdbxVaultStore ?: return
         val dao = passwordEntryDao ?: return
         if (attachment.localPath.isNullOrBlank() || attachment.wrappedCek.isNullOrBlank()) return
@@ -717,7 +1005,7 @@ class AttachmentFacade(
                 error = error,
                 extras = mapOf("mdbx_database_id" to databaseId)
             )
-            if (vaultStore.requiresStrictMutationConsistency(databaseId)) throw error
+            if (requireSuccess || vaultStore.requiresStrictMutationConsistency(databaseId)) throw error
         }
     }
 

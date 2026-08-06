@@ -548,6 +548,10 @@
     <string name="bottom_nav_move_up">上移标签</string>
     <string name="bottom_nav_move_down">下移标签</string>
     <string name="bottom_nav_settings_entry_subtitle">选择要显示的页签并调整顺序</string>
+    <string name="interface_scale_title">界面缩放</string>
+    <string name="interface_scale_current">%1$d%% · %2$d DPI</string>
+    <string name="interface_scale_description">调整 Monica 内的界面大小，不会修改系统、键盘或自动填充窗口的缩放。</string>
+    <string name="interface_scale_reset">恢复默认</string>
     <string name="bottom_nav_auto_hide_single_tab_title">仅剩一个页签时隐藏导航栏</string>
     <string name="bottom_nav_auto_hide_single_tab_subtitle">当底部导航只启用一个页签时，自动隐藏导航栏，并改为通过右上角菜单进入设置。</string>
     <string name="draggable_bottom_nav">可拖拽底部导航栏</string>
@@ -1815,6 +1819,8 @@
     <!-- Security Analysis -->
     <string name="security_analysis">安全分析</string>
     <string name="security_analysis_description">检查密码安全性、泄露情况和2FA状态</string>
+    <string name="security_analysis_pull_hint">下拉或点按进入安全分析</string>
+    <string name="security_analysis_pull_release">松手进入安全分析</string>
     <string name="start_security_analysis">开始安全分析</string>
     <string name="analysis_may_take_time">分析可能需要几分钟时间</string>
     <string name="security_overview">安全概览</string>

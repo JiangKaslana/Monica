@@ -16,6 +16,20 @@ import kotlinx.coroutines.isActive
 private const val SMOOTH_TICK_MS = 50L
 private const val TICK_STOP_TIMEOUT_MS = 5_000L
 
+internal fun nextSmoothTotpProgressTarget(
+    progress: Float,
+    periodSeconds: Int,
+): Float {
+    val safeProgress = if (progress.isFinite()) progress.coerceIn(0f, 1f) else 0f
+    val step = 1f / periodSeconds.coerceAtLeast(1).toFloat()
+    return (safeProgress + step).coerceAtMost(1f)
+}
+
+internal fun shouldResetSmoothTotpProgress(
+    animatedProgress: Float,
+    sampledProgress: Float,
+): Boolean = animatedProgress > 0.8f && sampledProgress < 0.2f
+
 private val tickerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 private val smoothTicker = tickerFlow(smooth = true).stateIn(

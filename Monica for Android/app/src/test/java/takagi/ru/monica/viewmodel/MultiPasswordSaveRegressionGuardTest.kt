@@ -1930,7 +1930,8 @@ class MultiPasswordSaveRegressionGuardTest {
             "Mixed password-page move/copy must propagate MDBX folder ids to passwords and supplementary item types.",
             mixedBatchSource.contains("val targetMdbxFolderId = when (target)") &&
                 mixedBatchSource.contains("is UnifiedMoveCategoryTarget.MdbxFolderTarget -> target.folderId") &&
-                mixedBatchSource.contains("viewModel.movePasswordsToMdbxDatabaseAwait(selectedIds, target.databaseId, target.folderId)") &&
+                mixedBatchSource.contains("viewModel.movePasswordsToMdbxFoldersAwait(") &&
+                mixedBatchSource.contains("folderIdsByPasswordId = folderIdsByPasswordId") &&
                 mixedBatchSource.contains("totpViewModel.moveTotpToStorage(") &&
                 mixedBatchSource.contains("noteViewModel.moveNoteToStorage(") &&
                 mixedBatchSource.contains("bankCardViewModel.moveCardToStorage(") &&
@@ -1977,12 +1978,14 @@ class MultiPasswordSaveRegressionGuardTest {
                 !managerSource.contains("schema、commit 图、设备 head、快照、附件 chunk")
         )
         assertTrue(
-            "History summary should avoid a four-tile dashboard and use compact diagnostic lines.",
-            managerSource.substringAfter("private fun DeltaSummaryHeader(")
-                .substringBefore("private fun DeltaRow(")
-                .contains("DiagnosticLine(Icons.Default.History, \"提交\"") &&
-                !managerSource.substringAfter("private fun DeltaSummaryHeader(")
-                    .substringBefore("private fun DeltaRow(")
+            "History should use one semantic operation card per commit instead of a diagnostic dashboard.",
+            managerSource.contains("private fun DeltaRow(") &&
+                managerSource.contains("val presentation = remember(delta) { delta.toHistoryPresentation() }") &&
+                managerSource.contains("presentation.primaryAction.historyIcon()") &&
+                managerSource.contains("HistoryStatusPill(\"系统\")") &&
+                !managerSource.contains("private fun DeltaSummaryHeader(") &&
+                !managerSource.substringAfter("private fun DeltaRow(")
+                    .substringBefore("private fun shortId(")
                     .contains("StatusTile(")
         )
     }
@@ -1994,6 +1997,12 @@ class MultiPasswordSaveRegressionGuardTest {
         ).readText()
         val storeSource = projectFile(
             "app/src/main/java/takagi/ru/monica/repository/MdbxVaultStore.kt"
+        ).readText()
+        val mdbx2RepositorySource = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/Mdbx2Repository.kt"
+        ).readText()
+        val historyPresentationSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/MdbxCommitHistoryPresentation.kt"
         ).readText()
 
         assertTrue(
@@ -2030,16 +2039,13 @@ class MultiPasswordSaveRegressionGuardTest {
                 !managerSource.contains("DiffLineKind")
         )
         assertTrue(
-            "Commit history should render object-level change cards while conflict merge keeps the field-level diff renderer.",
-            managerSource.substringAfter("private fun CommitDiffPanel(")
-                .substringBefore("private data class FieldChange(")
-                .contains("CommitObjectChangeCard(diff)") &&
-                managerSource.substringAfter("private fun CommitDiffPanel(")
-                    .substringBefore("private data class FieldChange(")
-                    .contains("此提交没有可显示的对象变更") &&
-                !managerSource.substringAfter("private fun CommitDiffPanel(")
-                    .substringBefore("private data class FieldChange(")
-                    .contains("FieldDiffPanel(") &&
+            "Commit history should lazily group object cards and explain non-object system commits.",
+            managerSource.contains("private fun CommitChangeGroupHeader(") &&
+                managerSource.contains("private fun CommitEventExplanationCard(") &&
+                managerSource.contains("items = diffs") &&
+                managerSource.contains("CommitObjectChangeCard(diff)") &&
+                !managerSource.contains("private fun CommitDiffPanel(") &&
+                !managerSource.contains("此提交没有可显示的对象变更") &&
                 managerSource.substringAfter("private fun ConflictDiffDetail(")
                     .substringBefore("@Composable\nprivate fun MdbxSnapshotPage(")
                     .contains("FieldDiffPanel(")
@@ -2106,28 +2112,32 @@ class MultiPasswordSaveRegressionGuardTest {
                 storeSource.contains(".thenBy { structureNodeTypeSortRank(it) }")
         )
         assertTrue(
-            "Diff data must be built from parsed fields instead of raw payload/code hunks.",
+            "Diff data must use readable paths and redact sensitive payload values.",
             managerSource.contains("private fun MdbxCommitDiff.toFieldChanges()") &&
                 managerSource.contains("private fun CommitObjectChangeCard(") &&
                 managerSource.contains("private enum class ObjectChangeKind") &&
                 managerSource.contains("ObjectChangeKind.DELETED -> \"删除了${'$'}objectLabel\"") &&
-                managerSource.contains("private fun MdbxCommitDiff.displayObjectPath()") &&
+                managerSource.contains("private fun MdbxCommitDiff.displayObjectTitle()") &&
                 managerSource.contains("private fun MdbxConflictSummary.toFieldChanges()") &&
                 managerSource.contains("displayTitle?.takeIf") &&
                 managerSource.contains("storagePath?.takeIf") &&
                 managerSource.contains("\"标题\"") &&
-                managerSource.contains("\"内容摘要\"") &&
+                managerSource.contains("fieldLabel = \"内容\"") &&
+                managerSource.contains("sensitive = true") &&
+                managerSource.contains("内容已更新，敏感值已隐藏") &&
                 storeSource.contains("val displayTitle: String?") &&
                 storeSource.contains("val storagePath: String?") &&
                 storeSource.contains("private fun readDiffDisplayInfo(") &&
                 storeSource.contains("private fun folderDisplayPath(") &&
                 storeSource.contains("displayTitle = displayInfo.title") &&
                 storeSource.contains("storagePath = displayInfo.storagePath") &&
+                mdbx2RepositorySource.contains("storagePath = diff.collectionId?.let(collectionPaths::get)") &&
+                mdbx2RepositorySource.contains("contentType = objectSummary?.objectTypeId") &&
                 !managerSource.contains("@@ payload") &&
                 !managerSource.contains("@@ title")
         )
         assertTrue(
-            "History detail should use the top app bar back path and avoid duplicate in-content titles.",
+            "History detail should preserve the top app bar back path and use progressive disclosure.",
             managerSource.contains("val deltaState = deltaDialogState as? MdbxViewModel.MdbxDeltaDialogState.Visible") &&
                 managerSource.contains("deltaState?.selectedDiffCommitId != null") &&
                 managerSource.contains("viewModel.closeCommitDiff()") &&
@@ -2137,10 +2147,15 @@ class MultiPasswordSaveRegressionGuardTest {
                 managerSource.contains("private fun MdbxCommitHistoryPage(") &&
                 managerSource.contains("MdbxNavigationActionRow(Icons.Default.Restore, \"快照\", onShowSnapshots)") &&
                 managerSource.contains("MdbxNavigationActionRow(Icons.Default.History, \"提交历史\", onShowCommitHistory)") &&
-                managerSource.contains("delta.changedObjectPreview.ifBlank") &&
-                managerSource.contains("delta.changedFieldSummary.ifBlank") &&
+                managerSource.contains("selectedDelta?.toHistoryPresentation()") &&
+                managerSource.contains("private fun CommitTechnicalInfoCard(") &&
+                managerSource.contains("private fun CommitDetailHeader(") &&
+                managerSource.contains("撤销这次更改？") &&
+                historyPresentationSource.contains("fun MdbxDeltaSummary.toHistoryPresentation()") &&
                 storeSource.contains("val changedObjectPreview: String") &&
                 storeSource.contains("val changedFieldSummary: String") &&
+                storeSource.contains("val operationKind: String? = null") &&
+                storeSource.contains("val changes: List<MdbxCommitChangeSummary> = emptyList()") &&
                 storeSource.contains("private fun readCommitChangePreview(") &&
                 storeSource.contains("private fun summarizeCommitObjects(") &&
                 storeSource.contains("private fun summarizeCommitFields(") &&
@@ -2572,8 +2587,8 @@ class MultiPasswordSaveRegressionGuardTest {
         )
         assertTrue(
             "The normal password-page copy flow must invoke bound-TOTP copy for MDBX targets using the source->new idPairs returned by the batch insert.",
-            moveSupportSource.contains("viewModel.copyBoundTotpsForPasswordCopies(copyResult.idPairs)") &&
-                moveSupportSource.contains("target is UnifiedMoveCategoryTarget.MdbxDatabaseTarget")
+            moveSupportSource.contains("viewModel.copyBoundTotpsForPasswordCopies(copiedIdPairs)") &&
+                moveSupportSource.contains("target.passwordBatchStorageKey()?.startsWith(\"mdbx:\") == true")
         )
         assertTrue(
             "Mixed aggregate copy uses a separate MDBX password batch path, so it must build the same source->new idPairs and copy bound TOTP there too.",

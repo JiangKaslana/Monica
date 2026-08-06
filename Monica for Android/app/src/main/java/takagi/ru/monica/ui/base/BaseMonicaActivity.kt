@@ -13,16 +13,13 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import takagi.ru.monica.data.AppSettings
-import takagi.ru.monica.data.Language
 import takagi.ru.monica.security.SessionManager
 import takagi.ru.monica.utils.LocaleHelper
 import takagi.ru.monica.utils.ScreenshotProtectionUtil
 import takagi.ru.monica.utils.SettingsManager
+import takagi.ru.monica.utils.StartupLanguageCache
 
 /**
  * Monica 应用的统一基类 Activity
@@ -46,22 +43,7 @@ abstract class BaseMonicaActivity : FragmentActivity() {
     
     override fun attachBaseContext(newBase: Context?) {
         if (newBase != null) {
-            val tempSettingsManager = SettingsManager(newBase)
-            // 使用超时保护，防止 ANR
-            val language = try {
-                runBlocking {
-                    withTimeout(200) {
-                        try {
-                            tempSettingsManager.settingsFlow.first().language
-                        } catch (e: Exception) {
-                            Language.SYSTEM
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // 超时或出错，回退到默认
-                Language.SYSTEM
-            }
+            val language = StartupLanguageCache.read(newBase)
             super.attachBaseContext(LocaleHelper.setLocale(newBase, language))
         } else {
             super.attachBaseContext(newBase)
@@ -81,6 +63,7 @@ abstract class BaseMonicaActivity : FragmentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 settingsManager.settingsFlow.collect { settings ->
                     cachedSettings = settings
+                    StartupLanguageCache.write(applicationContext, settings.language)
                     
                     // 更新截图保护
                     applyScreenshotProtection(settings.screenshotProtectionEnabled)
@@ -121,6 +104,13 @@ abstract class BaseMonicaActivity : FragmentActivity() {
         super.onUserInteraction()
         // 用户交互时刷新会话时间戳，确保“非空闲”不会被错误锁定
         SessionManager.refreshSession()
+    }
+
+    override fun onStop() {
+        // 将节流窗口内最后一次活动时间交给 SharedPreferences 异步写入。
+        // 主动锁定仍由 SessionManager 使用同步提交，安全语义保持不变。
+        SessionManager.flushPendingRefresh()
+        super.onStop()
     }
     
     /**

@@ -135,6 +135,7 @@ import takagi.ru.monica.ui.screens.MdbxWebDavCreateScreen
 import takagi.ru.monica.ui.screens.MdbxWebDavOpenScreen
 import takagi.ru.monica.ui.screens.KeePassKdbxViewModel
 import takagi.ru.monica.ui.theme.MonicaTheme
+import takagi.ru.monica.ui.scale.ProvideMonicaInterfaceScale
 import takagi.ru.monica.utils.LocaleHelper
 import takagi.ru.monica.steam.ui.SteamQrScannerScreen
 import takagi.ru.monica.viewmodel.BankCardViewModel
@@ -683,61 +684,63 @@ fun MonicaApp(
         ThemeMode.DARK -> true
     }
 
-    MonicaTheme(
-        darkTheme = darkTheme,
-        oledPureBlackEnabled = settings.oledPureBlackEnabled,
-        colorScheme = settings.colorScheme,
-        customPrimaryColor = settings.customPrimaryColor,
-        customSecondaryColor = settings.customSecondaryColor,
-        customTertiaryColor = settings.customTertiaryColor,
-        customNeutralColor = settings.customNeutralColor,
-        customNeutralVariantColor = settings.customNeutralVariantColor
-    ) {
-        // 应用防截屏保护
-        ScreenshotProtection(enabled = settings.screenshotProtectionEnabled)
-
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
+    ProvideMonicaInterfaceScale(settings.interfaceScalePercent) {
+        MonicaTheme(
+            darkTheme = darkTheme,
+            oledPureBlackEnabled = settings.oledPureBlackEnabled,
+            colorScheme = settings.colorScheme,
+            customPrimaryColor = settings.customPrimaryColor,
+            customSecondaryColor = settings.customSecondaryColor,
+            customTertiaryColor = settings.customTertiaryColor,
+            customNeutralColor = settings.customNeutralColor,
+            customNeutralVariantColor = settings.customNeutralVariantColor
         ) {
-            val authState = startupAuthState
-            if (authState == null) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            } else {
-                MonicaContent(
-                    navController = navController,
-                    viewModel = viewModel,
-                    totpViewModel = totpViewModel,
-                    bankCardViewModel = bankCardViewModel,
-                    documentViewModel = documentViewModel,
-                    billingAddressViewModel = billingAddressViewModel,
-                    settingsViewModel = settingsViewModel,
-                    generatorViewModel = generatorViewModel,
-                    noteViewModel = noteViewModel,
-                    bitwardenViewModel = bitwardenViewModel,
-                    passkeyViewModel = passkeyViewModel,
-                    keePassViewModel = keePassViewModel,
-                    localKeePassViewModel = localKeePassViewModel,
-                    mdbxViewModel = mdbxViewModel,
-                    mdbxRepository = mdbxRepository,
-                    securityManager = securityManager,
-                    repository = repository,
-                    database = database,
-                    secureItemRepository = secureItemRepository,
-                    passwordHistoryManager = passwordHistoryManager,
-                    pendingExternalTotpImport = pendingExternalTotpImport,
-                    onConsumeExternalTotpImport = externalTotpImportController::consume,
-                    initialAuthState = authState,
-                    onPermissionRequested = { permission, callback ->
-                        pendingSupportPermissionCallback = callback
-                        sharedSupportPermissionLauncher.launch(permission)
+            // 应用防截屏保护
+            ScreenshotProtection(enabled = settings.screenshotProtectionEnabled)
+
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                val authState = startupAuthState
+                if (authState == null) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
                     }
-                )
+                } else {
+                    MonicaContent(
+                        navController = navController,
+                        viewModel = viewModel,
+                        totpViewModel = totpViewModel,
+                        bankCardViewModel = bankCardViewModel,
+                        documentViewModel = documentViewModel,
+                        billingAddressViewModel = billingAddressViewModel,
+                        settingsViewModel = settingsViewModel,
+                        generatorViewModel = generatorViewModel,
+                        noteViewModel = noteViewModel,
+                        bitwardenViewModel = bitwardenViewModel,
+                        passkeyViewModel = passkeyViewModel,
+                        keePassViewModel = keePassViewModel,
+                        localKeePassViewModel = localKeePassViewModel,
+                        mdbxViewModel = mdbxViewModel,
+                        mdbxRepository = mdbxRepository,
+                        securityManager = securityManager,
+                        repository = repository,
+                        database = database,
+                        secureItemRepository = secureItemRepository,
+                        passwordHistoryManager = passwordHistoryManager,
+                        pendingExternalTotpImport = pendingExternalTotpImport,
+                        onConsumeExternalTotpImport = externalTotpImportController::consume,
+                        initialAuthState = authState,
+                        onPermissionRequested = { permission, callback ->
+                            pendingSupportPermissionCallback = callback
+                            sharedSupportPermissionLauncher.launch(permission)
+                        }
+                    )
+                }
             }
         }
     }

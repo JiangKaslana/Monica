@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ReportProblem
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Science
@@ -91,6 +92,9 @@ import takagi.ru.monica.repository.MdbxStructurePreview
 import takagi.ru.monica.repository.MdbxVaultDiagnostics
 import takagi.ru.monica.utils.ClipboardUtils
 import takagi.ru.monica.viewmodel.MdbxViewModel
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -1644,13 +1648,106 @@ private fun MdbxSnapshotPage(
 ) {
     var snapshotName by rememberSaveable(state?.databaseId ?: -1L) { mutableStateOf("") }
     var fullSnapshot by rememberSaveable(state?.databaseId ?: -1L) { mutableStateOf(false) }
+    var pendingRevertSnapshot by remember { mutableStateOf<MdbxSnapshotSummary?>(null) }
+    var pendingDeleteSnapshot by remember { mutableStateOf<MdbxSnapshotSummary?>(null) }
+    var showPruneAutomaticConfirmation by remember { mutableStateOf(false) }
     val manualSnapshots = state?.snapshots?.filterNot { it.autoPrune }.orEmpty()
     val automaticSnapshots = state?.snapshots?.filter { it.autoPrune }.orEmpty()
 
+    pendingRevertSnapshot?.let { snapshot ->
+        AlertDialog(
+            onDismissRequest = { pendingRevertSnapshot = null },
+            icon = { Icon(Icons.Default.Restore, contentDescription = null) },
+            title = { Text("回滚到此快照？") },
+            text = {
+                Text(
+                    "数据库将恢复到“${snapshot.displayName()}”保存时的状态。" +
+                        "此操作会修改当前数据库，并保留新的恢复记录。"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingRevertSnapshot = null
+                        onRevertSnapshot(snapshot.snapshotId)
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("确认回滚")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRevertSnapshot = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    pendingDeleteSnapshot?.let { snapshot ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteSnapshot = null },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
+            title = { Text("删除此快照？") },
+            text = {
+                Text("“${snapshot.displayName()}”将从快照列表中移除，此操作无法撤销。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeleteSnapshot = null
+                        onDeleteSnapshot(snapshot.snapshotId)
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteSnapshot = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showPruneAutomaticConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showPruneAutomaticConfirmation = false },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
+            title = { Text("清理自动快照？") },
+            text = {
+                Text("将删除现有的 ${automaticSnapshots.size} 个自动快照，手动快照会保留。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPruneAutomaticConfirmation = false
+                        onPruneAutomaticSnapshots()
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("确认清理")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPruneAutomaticConfirmation = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (
             state == null ||
@@ -1664,45 +1761,75 @@ private fun MdbxSnapshotPage(
             val selectedCommitId = visibleState.selectedDiffCommitId
             if (selectedCommitId != null) {
                 item {
-                    CommitDiffPanel(
+                    CommitDetailHeader(
                         commitId = selectedCommitId,
-                        diffItems = visibleState.diffItems,
-                        isLoading = visibleState.isDiffLoading
+                        delta = visibleState.deltas.firstOrNull { it.commitId == selectedCommitId },
+                        diffItems = visibleState.diffItems
+                    )
+                }
+                if (visibleState.diffError != null && !visibleState.isDiffLoading) {
+                    item { CommitDiffErrorCard(visibleState.diffError) }
+                } else if (visibleState.diffItems.isEmpty() && !visibleState.isDiffLoading) {
+                    item {
+                        CommitEventExplanationCard(
+                            presentation = visibleState.deltas
+                                .firstOrNull { it.commitId == selectedCommitId }
+                                ?.toHistoryPresentation(),
+                            commitId = selectedCommitId
+                        )
+                    }
+                } else {
+                    items(
+                        items = visibleState.diffItems,
+                        key = { diff -> "snapshot-diff:${diff.objectType}:${diff.objectId}" }
+                    ) { diff ->
+                        CommitObjectChangeCard(diff)
+                    }
+                }
+                item {
+                    CommitTechnicalInfoCard(
+                        commitId = selectedCommitId,
+                        delta = visibleState.deltas.firstOrNull { it.commitId == selectedCommitId }
                     )
                 }
             } else {
                 item {
-                    MdbxSectionHeader(
-                        icon = Icons.Default.Restore,
-                        title = "快照",
-                        subtitle = if (visibleState.snapshots.isEmpty()) {
-                            "还没有快照"
-                        } else {
-                            "手动 ${manualSnapshots.size} · 自动 ${automaticSnapshots.size}"
-                        },
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                item {
-                    SnapshotManagerPanel(
+                    SnapshotCreationCard(
                         snapshotName = snapshotName,
                         onSnapshotNameChange = { snapshotName = it },
                         fullSnapshot = fullSnapshot,
                         onFullSnapshotChange = { fullSnapshot = it },
-                        snapshots = visibleState.snapshots,
-                        manualSnapshotCount = manualSnapshots.size,
-                        automaticSnapshotCount = automaticSnapshots.size,
                         enabled = !visibleState.isLoading && !visibleState.isSnapshotLoading,
                         onCreateSnapshot = {
                             onCreateSnapshot(snapshotName, fullSnapshot)
                             snapshotName = ""
-                        },
-                        onShowSnapshotDiff = onShowDiff,
-                        onShowSnapshotStructure = onShowSnapshotStructure,
-                        onPruneAutomaticSnapshots = onPruneAutomaticSnapshots,
-                        onDeleteSnapshot = onDeleteSnapshot,
-                        onRevertSnapshot = onRevertSnapshot
+                        }
                     )
+                }
+                item {
+                    SnapshotListHeader(
+                        manualSnapshotCount = manualSnapshots.size,
+                        automaticSnapshotCount = automaticSnapshots.size,
+                        enabled = !visibleState.isLoading && !visibleState.isSnapshotLoading,
+                        onPruneAutomaticSnapshots = { showPruneAutomaticConfirmation = true }
+                    )
+                }
+                if (visibleState.snapshots.isEmpty() && !visibleState.isSnapshotLoading) {
+                    item { SnapshotEmptyState() }
+                } else {
+                    items(
+                        items = visibleState.snapshots.take(30),
+                        key = MdbxSnapshotSummary::snapshotId
+                    ) { snapshot ->
+                        SnapshotRow(
+                            snapshot = snapshot,
+                            enabled = !visibleState.isLoading && !visibleState.isSnapshotLoading,
+                            onShowDiff = { onShowDiff(snapshot.baseCommitId) },
+                            onOpenStructure = { onShowSnapshotStructure(snapshot.snapshotId) },
+                            onDelete = { pendingDeleteSnapshot = snapshot },
+                            onRevert = { pendingRevertSnapshot = snapshot }
+                        )
+                    }
                 }
             }
         }
@@ -1715,55 +1842,202 @@ private fun MdbxCommitHistoryPage(
     onShowDiff: (String) -> Unit,
     onRevert: (String) -> Unit
 ) {
+    var pendingRevert by remember { mutableStateOf<MdbxDeltaSummary?>(null) }
+    var expandedGroups by remember { mutableStateOf<Set<ObjectChangeKind>>(emptySet()) }
+    val selectedCommitId = state?.selectedDiffCommitId
+    val selectedDelta = remember(state?.deltas, selectedCommitId) {
+        state?.deltas?.firstOrNull { it.commitId == selectedCommitId }
+    }
+    val groupedDiffs = remember(state?.diffItems) {
+        state?.diffItems.orEmpty()
+            .groupBy(MdbxCommitDiff::objectChangeKind)
+            .toSortedMap(compareBy { it.sortOrder })
+    }
+
+    LaunchedEffect(selectedCommitId, state?.isDiffLoading, groupedDiffs.keys) {
+        if (selectedCommitId == null || state?.isDiffLoading == true) {
+            expandedGroups = emptySet()
+        } else if (state?.diffItems.orEmpty().size <= AUTO_EXPAND_COMMIT_OBJECT_LIMIT) {
+            expandedGroups = groupedDiffs.keys
+        }
+    }
+
+    pendingRevert?.let { delta ->
+        val presentation = delta.toHistoryPresentation()
+        AlertDialog(
+            onDismissRequest = { pendingRevert = null },
+            icon = { Icon(Icons.Default.Restore, contentDescription = null) },
+            title = { Text("撤销这次更改？") },
+            text = {
+                Text(
+                    "将恢复或移除这次提交涉及的 ${presentation.objectCount} 个条目。" +
+                        "此操作会生成一条新的恢复记录，不会删除原有历史。"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingRevert = null
+                        onRevert(delta.commitId)
+                    }
+                ) {
+                    Text("确认撤销")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRevert = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (state == null || state.isLoading || state.isDiffLoading) {
+        if (state == null || state.isLoading) {
             item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
         }
         state?.let { visibleState ->
-            val selectedCommitId = visibleState.selectedDiffCommitId
             if (selectedCommitId != null) {
                 item {
-                    CommitDiffPanel(
+                    CommitDetailHeader(
                         commitId = selectedCommitId,
-                        diffItems = visibleState.diffItems,
-                        isLoading = visibleState.isDiffLoading
+                        delta = selectedDelta,
+                        diffItems = visibleState.diffItems
                     )
                 }
-            } else {
-                item {
-                    MdbxSectionHeader(
-                        icon = Icons.Default.History,
-                        title = "提交历史",
-                        subtitle = if (visibleState.deltas.isEmpty()) {
-                            "还没有可查看的提交"
-                        } else {
-                            "${visibleState.deltas.size} 次提交 · 点击查看字段变更"
-                        },
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                if (visibleState.deltas.isEmpty() && !visibleState.isLoading) {
+                if (visibleState.isDiffLoading) {
+                    item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                } else if (visibleState.diffError != null) {
+                    item { CommitDiffErrorCard(visibleState.diffError) }
+                } else if (visibleState.diffItems.isEmpty()) {
                     item {
-                        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                "还没有增量提交记录",
-                                modifier = Modifier.padding(16.dp),
-                                style = MaterialTheme.typography.bodyMedium
+                        CommitEventExplanationCard(
+                            presentation = selectedDelta?.toHistoryPresentation(),
+                            commitId = selectedCommitId
+                        )
+                    }
+                } else {
+                    groupedDiffs.forEach { (kind, diffs) ->
+                        val expanded = kind in expandedGroups
+                        item(key = "group-${kind.name}") {
+                            CommitChangeGroupHeader(
+                                kind = kind,
+                                count = diffs.size,
+                                expanded = expanded,
+                                onToggle = {
+                                    expandedGroups = if (expanded) {
+                                        expandedGroups - kind
+                                    } else {
+                                        expandedGroups + kind
+                                    }
+                                }
                             )
                         }
+                        if (expanded) {
+                            items(
+                                items = diffs,
+                                key = { diff -> "${kind.name}:${diff.objectType}:${diff.objectId}" }
+                            ) { diff ->
+                                CommitObjectChangeCard(diff)
+                            }
+                        }
                     }
+                }
+                item {
+                    CommitTechnicalInfoCard(
+                        commitId = selectedCommitId,
+                        delta = selectedDelta
+                    )
+                }
+                selectedDelta
+                    ?.takeIf { it.toHistoryPresentation().canRevert }
+                    ?.let { revertableDelta ->
+                        item {
+                            OutlinedButton(
+                                onClick = { pendingRevert = revertableDelta },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                            ) {
+                                Icon(Icons.Default.Restore, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("撤销这次更改")
+                            }
+                        }
+                    }
+            } else {
+                item {
+                    CommitHistoryListHeader(commitCount = visibleState.deltas.size)
+                }
+                if (visibleState.deltas.isEmpty() && !visibleState.isLoading) {
+                    item { CommitHistoryEmptyState() }
                 }
                 items(items = visibleState.deltas, key = { it.commitId }) { delta ->
                     DeltaRow(
                         delta = delta,
-                        onShowDiff = { onShowDiff(delta.commitId) },
-                        onRevert = { onRevert(delta.commitId) }
+                        onShowDiff = { onShowDiff(delta.commitId) }
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommitHistoryListHeader(commitCount: Int) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            "共 $commitCount 条记录",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            "按时间倒序排列，点击卡片查看字段变化",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun CommitHistoryEmptyState() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.History,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "还没有提交记录",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "数据库产生更改后，记录会显示在这里",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -3124,73 +3398,47 @@ private fun AdvancedToolSection(
 }
 
 @Composable
-private fun SnapshotManagerPanel(
+private fun SnapshotCreationCard(
     snapshotName: String,
     onSnapshotNameChange: (String) -> Unit,
     fullSnapshot: Boolean,
     onFullSnapshotChange: (Boolean) -> Unit,
-    snapshots: List<MdbxSnapshotSummary>,
-    manualSnapshotCount: Int,
-    automaticSnapshotCount: Int,
     enabled: Boolean,
-    onCreateSnapshot: () -> Unit,
-    onShowSnapshotDiff: (String) -> Unit,
-    onShowSnapshotStructure: (String) -> Unit,
-    onPruneAutomaticSnapshots: () -> Unit,
-    onDeleteSnapshot: (String) -> Unit,
-    onRevertSnapshot: (String) -> Unit
+    onCreateSnapshot: () -> Unit
 ) {
-    var pendingRevertSnapshot by remember { mutableStateOf<MdbxSnapshotSummary?>(null) }
-    pendingRevertSnapshot?.let { snapshot ->
-        AlertDialog(
-            onDismissRequest = { pendingRevertSnapshot = null },
-            icon = {
-                Icon(Icons.Default.Restore, contentDescription = null)
-            },
-            title = { Text("确认回滚快照") },
-            text = {
-                Text(
-                    "回滚会把当前 MDBX 数据库恢复到“${snapshot.name.ifBlank { shortId(snapshot.snapshotId) }}”对应的状态。此操作会修改当前数据库，请确认后继续。"
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingRevertSnapshot = null
-                        onRevertSnapshot(snapshot.snapshotId)
-                    }
-                ) {
-                    Text("确认回滚")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRevertSnapshot = null }) {
-                    Text("取消")
-                }
-            }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
-    }
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+    ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Restore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(10.dp).size(22.dp)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "快照",
-                        style = MaterialTheme.typography.bodyMedium,
+                        "创建快照",
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "手动 $manualSnapshotCount · 自动 $automaticSnapshotCount",
+                        "保存当前数据库状态，便于之后查看或恢复",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -3201,59 +3449,133 @@ private fun SnapshotManagerPanel(
                 onValueChange = onSnapshotNameChange,
                 enabled = enabled,
                 singleLine = true,
-                label = { Text("快照名称") },
+                label = { Text("名称") },
+                placeholder = { Text("留空时自动生成") },
                 modifier = Modifier.fillMaxWidth()
             )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainer
             ) {
-                Switch(
-                    checked = fullSnapshot,
-                    onCheckedChange = onFullSnapshotChange,
-                    enabled = enabled
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            if (fullSnapshot) "完整快照" else "增量快照",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            if (fullSnapshot) {
+                                "保存完整状态，文件体积较大"
+                            } else {
+                                "仅保存相对基线的变化，体积更小"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = fullSnapshot,
+                        onCheckedChange = onFullSnapshotChange,
+                        enabled = enabled
+                    )
+                }
+            }
+            Button(
+                onClick = onCreateSnapshot,
+                enabled = enabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("创建快照")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SnapshotListHeader(
+    manualSnapshotCount: Int,
+    automaticSnapshotCount: Int,
+    enabled: Boolean,
+    onPruneAutomaticSnapshots: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "已保存 ${manualSnapshotCount + automaticSnapshotCount} 个",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "手动 $manualSnapshotCount · 自动 $automaticSnapshotCount",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (automaticSnapshotCount > 0) {
+            TextButton(
+                onClick = onPruneAutomaticSnapshots,
+                enabled = enabled,
+                modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("清理自动")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SnapshotEmptyState() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Restore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "还没有保存的快照",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    if (fullSnapshot) "完整快照" else "增量快照",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = onCreateSnapshot,
-                    enabled = enabled,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("创建")
-                }
-                OutlinedButton(
-                    onClick = onPruneAutomaticSnapshots,
-                    enabled = enabled && automaticSnapshotCount > 0,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("清空自动")
-                }
-            }
-            if (snapshots.isEmpty()) {
-                Text(
-                    "还没有快照",
+                    "创建后可查看当时的结构、变更并恢复数据库",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            snapshots.take(30).forEach { snapshot ->
-                SnapshotRow(
-                    snapshot = snapshot,
-                    enabled = enabled,
-                    onShowDiff = { onShowSnapshotDiff(snapshot.baseCommitId) },
-                    onOpenStructure = { onShowSnapshotStructure(snapshot.snapshotId) },
-                    onDelete = { onDeleteSnapshot(snapshot.snapshotId) },
-                    onRevert = { pendingRevertSnapshot = snapshot }
                 )
             }
         }
@@ -3298,7 +3620,8 @@ private fun MdbxSnapshotStructurePage(
         }
         SnapshotStructurePreviewPage(
             preview = preview,
-            compareMode = compareMode
+            compareMode = compareMode,
+            modifier = Modifier.weight(1f)
         )
     }
 }
@@ -3306,10 +3629,11 @@ private fun MdbxSnapshotStructurePage(
 @Composable
 private fun SnapshotStructurePreviewPage(
     preview: MdbxStructurePreview?,
-    compareMode: Boolean
+    compareMode: Boolean,
+    modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = Modifier.fillMaxSize()
+        modifier = modifier.fillMaxSize()
     ) {
         if (preview == null) {
             Text(
@@ -3321,7 +3645,7 @@ private fun SnapshotStructurePreviewPage(
         } else if (compareMode) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .verticalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
@@ -3340,12 +3664,18 @@ private fun SnapshotStructurePreviewPage(
                 )
             }
         } else {
-            StructureTreePanel(
-                title = "",
-                nodes = preview.snapshotNodes,
-                modifier = Modifier.fillMaxWidth(),
-                framed = false
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                StructureTreePanel(
+                    title = "",
+                    nodes = preview.snapshotNodes,
+                    modifier = Modifier.fillMaxWidth(),
+                    framed = false
+                )
+            }
         }
     }
 }
@@ -3569,85 +3899,144 @@ private fun SnapshotRow(
     onDelete: () -> Unit,
     onRevert: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onOpenStructure),
-        shape = MaterialTheme.shapes.extraSmall,
-        color = MaterialTheme.colorScheme.surface
+    var actionMenuExpanded by remember { mutableStateOf(false) }
+    Card(
+        onClick = onOpenStructure,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (snapshot.autoPrune) Icons.Default.History else Icons.Default.Restore,
-                    contentDescription = null,
-                    tint = if (snapshot.integrityOk) {
-                        MaterialTheme.colorScheme.primary
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (snapshot.integrityOk) {
+                        MaterialTheme.colorScheme.primaryContainer
                     } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
+                        MaterialTheme.colorScheme.errorContainer
+                    }
+                ) {
+                    Icon(
+                        if (snapshot.autoPrune) Icons.Default.History else Icons.Default.Restore,
+                        contentDescription = null,
+                        tint = if (snapshot.integrityOk) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        },
+                        modifier = Modifier.padding(10.dp).size(21.dp)
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
                     Text(
-                        snapshot.name.ifBlank { shortId(snapshot.snapshotId) },
-                        style = MaterialTheme.typography.bodySmall,
+                        snapshot.displayName(),
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        "${shortId(snapshot.baseCommitId)} · ${snapshot.createdAt}",
-                        style = MaterialTheme.typography.labelSmall,
+                        formatMdbxHistoryTime(snapshot.createdAt),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "查看快照结构",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Text(
-                "${if (snapshot.autoPrune) "自动" else "手动"} · ${if (snapshot.isFull) "完整" else "增量"} · ${formatBytes(snapshot.payloadBytes)} · ${if (snapshot.integrityOk) "校验正常" else "校验失败"}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SnapshotInfoPill(if (snapshot.autoPrune) "自动" else "手动")
+                SnapshotInfoPill(if (snapshot.isFull) "完整" else "增量")
+                SnapshotInfoPill(formatBytes(snapshot.payloadBytes))
+                SnapshotInfoPill(
+                    label = if (snapshot.integrityOk) "校验正常" else "校验失败",
+                    emphasized = true,
+                    error = !snapshot.integrityOk
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 TextButton(
                     onClick = onShowDiff,
-                    enabled = enabled
+                    enabled = enabled,
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
-                    Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("查看变更")
+                    Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("变更")
                 }
                 TextButton(
                     onClick = onOpenStructure,
-                    enabled = enabled
+                    enabled = enabled,
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
-                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text("结构")
                 }
-                TextButton(
-                    onClick = onRevert,
-                    enabled = enabled && snapshot.integrityOk
-                ) {
-                    Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("回滚")
-                }
-                TextButton(
-                    onClick = onDelete,
-                    enabled = enabled
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("删除")
+                Spacer(modifier = Modifier.weight(1f))
+                Box {
+                    IconButton(
+                        onClick = { actionMenuExpanded = true },
+                        enabled = enabled
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "更多快照操作")
+                    }
+                    DropdownMenu(
+                        expanded = actionMenuExpanded,
+                        onDismissRequest = { actionMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("回滚到此快照") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Restore, contentDescription = null)
+                            },
+                            enabled = enabled && snapshot.integrityOk,
+                            onClick = {
+                                actionMenuExpanded = false
+                                onRevert()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text("删除快照", color = MaterialTheme.colorScheme.error)
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            },
+                            enabled = enabled,
+                            onClick = {
+                                actionMenuExpanded = false
+                                onDelete()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -3655,29 +4044,321 @@ private fun SnapshotRow(
 }
 
 @Composable
-private fun CommitDiffPanel(
-    commitId: String,
-    diffItems: List<MdbxCommitDiff>,
-    isLoading: Boolean
+private fun SnapshotInfoPill(
+    label: String,
+    emphasized: Boolean = false,
+    error: Boolean = false
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val containerColor = when {
+        error -> MaterialTheme.colorScheme.errorContainer
+        emphasized -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainer
+    }
+    val contentColor = when {
+        error -> MaterialTheme.colorScheme.onErrorContainer
+        emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = containerColor
+    ) {
         Text(
-            "提交 ${shortId(commitId)} · ${diffItems.size} 个对象",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            label,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = contentColor
         )
-        if (diffItems.isEmpty() && !isLoading) {
-            OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+    }
+}
+
+@Composable
+private fun CommitDetailHeader(
+    commitId: String,
+    delta: MdbxDeltaSummary?,
+    diffItems: List<MdbxCommitDiff>
+) {
+    val presentation = delta?.toHistoryPresentation()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = presentation?.primaryAction.historyContainerColor()
+                    ?: MaterialTheme.colorScheme.secondaryContainer
+            ) {
+                Icon(
+                    imageVector = presentation?.primaryAction?.historyIcon() ?: Icons.Default.History,
+                    contentDescription = null,
+                    tint = presentation?.primaryAction.historyContentColor()
+                        ?: MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(10.dp).size(22.dp)
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = presentation?.title ?: "提交 ${shortId(commitId)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (presentation?.isSystemCommit == true) {
+                        HistoryStatusPill("系统")
+                    }
+                }
                 Text(
-                    "此提交没有可显示的对象变更",
-                    modifier = Modifier.padding(14.dp),
-                    style = MaterialTheme.typography.bodyMedium
+                    text = presentation?.supportingText
+                        ?: "${diffItems.size} 个对象变更",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                delta?.let {
+                    Text(
+                        text = "${formatMdbxHistoryTime(it.createdAt)} · 设备 ${shortId(it.deviceId)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryStatusPill(label: String) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.secondaryContainer
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+    }
+}
+
+@Composable
+private fun CommitEventExplanationCard(
+    presentation: MdbxCommitPresentation?,
+    commitId: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (presentation?.isSystemCommit == true) {
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.48f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = if (presentation?.isSystemCommit == true) {
+                    Icons.Default.Security
+                } else {
+                    Icons.Default.Info
+                },
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = if (presentation?.isSystemCommit == true) {
+                        "数据库级记录"
+                    } else {
+                        "没有字段版本可展开"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = presentation?.systemDescription
+                        ?: "提交 ${shortId(commitId)} 记录了元数据或兼容性变更，不代表数据损坏。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
-        diffItems.forEach { diff ->
-            CommitObjectChangeCard(diff)
+    }
+}
+
+@Composable
+private fun CommitDiffErrorCard(message: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.48f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                Icons.Default.ReportProblem,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "详情暂时无法展开",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun CommitChangeGroupHeader(
+    kind: ObjectChangeKind,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    val tone = kind.groupTone()
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clickable(onClick = onToggle),
+        shape = MaterialTheme.shapes.medium,
+        color = tone.containerColor
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = kind.icon(),
+                contentDescription = null,
+                tint = tone.contentColor,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = "${kind.label()} $count",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = tone.contentColor,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "收起" else "展开",
+                tint = tone.contentColor
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommitTechnicalInfoCard(
+    commitId: String,
+    delta: MdbxDeltaSummary?
+) {
+    var expanded by rememberSaveable(commitId) { mutableStateOf(false) }
+    OutlinedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    "技术信息",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "收起技术信息" else "展开技术信息"
+                )
+            }
+            if (expanded) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    TechnicalInfoLine("Commit ID", commitId)
+                    delta?.operationId?.takeIf { it.isNotBlank() }?.let {
+                        TechnicalInfoLine("操作 ID", it)
+                    }
+                    delta?.operationKind?.takeIf { it.isNotBlank() }?.let {
+                        TechnicalInfoLine("操作类型", it)
+                    }
+                    delta?.let {
+                        TechnicalInfoLine("提交类型", "${it.commitKind} / ${it.changeScope}")
+                        TechnicalInfoLine("设备", it.deviceId)
+                        TechnicalInfoLine("序号", it.localSeq.toString())
+                        TechnicalInfoLine("父提交", it.parentCount.toString())
+                        it.branchName?.takeIf(String::isNotBlank)?.let { branch ->
+                            TechnicalInfoLine("分支", branch)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TechnicalInfoLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -3687,56 +4368,61 @@ private fun CommitObjectChangeCard(
 ) {
     val fieldChanges = diff.toFieldChanges()
     val actionTone = diff.objectChangeTone()
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
         Column {
-            Surface(color = actionTone.containerColor) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = actionTone.containerColor
                 ) {
                     Icon(
                         diff.objectChangeIcon(),
                         contentDescription = null,
                         tint = actionTone.contentColor,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.padding(9.dp).size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
                     Text(
-                        diff.objectChangeTitle(),
-                        style = MaterialTheme.typography.bodyMedium,
+                        diff.displayObjectTitle(),
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = actionTone.contentColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    diff.storagePath?.takeIf { it.isNotBlank() }?.let { path ->
+                        Text(
+                            path,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(
+                        diff.objectChangeMeta(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    diff.displayObjectPath(),
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    diff.objectChangeMeta(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
             if (fieldChanges.isNotEmpty()) {
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
                     Text(
                         "字段变更",
                         modifier = Modifier
@@ -3765,8 +4451,18 @@ private data class ObjectChangeTone(
 private enum class ObjectChangeKind {
     CREATED,
     MODIFIED,
+    MOVED,
     DELETED,
-    RESTORED
+    RESTORED;
+
+    val sortOrder: Int
+        get() = when (this) {
+            CREATED -> 0
+            MODIFIED -> 1
+            MOVED -> 2
+            DELETED -> 3
+            RESTORED -> 4
+        }
 }
 
 private data class FieldChange(
@@ -3774,7 +4470,8 @@ private data class FieldChange(
     val objectPath: String?,
     val fieldLabel: String,
     val before: String,
-    val after: String
+    val after: String,
+    val sensitive: Boolean = false
 )
 
 private data class FieldChangeGroup(
@@ -3890,18 +4587,41 @@ private fun FieldChangeRow(change: FieldChange) {
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold
         )
-        VersionValueRow(
-            marker = "-",
-            value = change.before,
-            color = MaterialTheme.colorScheme.error,
-            backgroundColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.28f)
-        )
-        VersionValueRow(
-            marker = "+",
-            value = change.after,
-            color = MaterialTheme.colorScheme.primary,
-            backgroundColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f)
-        )
+        if (change.sensitive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Security,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    "内容已更新，敏感值已隐藏",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        } else {
+            VersionValueRow(
+                marker = "-",
+                value = change.before,
+                color = MaterialTheme.colorScheme.error,
+                backgroundColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.28f)
+            )
+            VersionValueRow(
+                marker = "+",
+                value = change.after,
+                color = MaterialTheme.colorScheme.primary,
+                backgroundColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f)
+            )
+        }
     }
 }
 
@@ -3938,14 +4658,26 @@ private fun VersionValueRow(
 
 private fun MdbxCommitDiff.toFieldChanges(): List<FieldChange> {
     if (objectChangeKind() != ObjectChangeKind.MODIFIED) return emptyList()
-    val objectTitle = displayTitle?.takeIf { it.isNotBlank() } ?: shortId(objectId)
+    val objectTitle = displayObjectTitle()
     val objectPath = storagePath?.takeIf { it.isNotBlank() }
     return buildList {
         if (previousTitle != currentTitle) {
             add(FieldChange(objectTitle, objectPath, "标题", previousTitle.orEmpty(), currentTitle.orEmpty()))
         }
-        if (previousPayloadPreview != currentPayloadPreview) {
-            add(FieldChange(objectTitle, objectPath, "内容摘要", previousPayloadPreview.orEmpty(), currentPayloadPreview.orEmpty()))
+        if (
+            previousPayloadPreview != currentPayloadPreview ||
+            changedFields.any { it.equals("payload", ignoreCase = true) }
+        ) {
+            add(
+                FieldChange(
+                    objectTitle = objectTitle,
+                    objectPath = objectPath,
+                    fieldLabel = "内容",
+                    before = "",
+                    after = "",
+                    sensitive = true
+                )
+            )
         }
     }
 }
@@ -3955,14 +4687,19 @@ private fun MdbxCommitDiff.objectChangeKind(): ObjectChangeKind =
         previousDeleted == null && !currentDeleted -> ObjectChangeKind.CREATED
         previousDeleted == true && !currentDeleted -> ObjectChangeKind.RESTORED
         currentDeleted -> ObjectChangeKind.DELETED
+        changedFields.any {
+            it.equals("collection", ignoreCase = true) ||
+                it.equals("project_id", ignoreCase = true)
+        } -> ObjectChangeKind.MOVED
         else -> ObjectChangeKind.MODIFIED
     }
 
 private fun MdbxCommitDiff.objectChangeTitle(): String {
-    val objectLabel = objectTypeLabel(objectType)
+    val objectLabel = mdbxHistoryObjectTypeLabel(objectType, contentType)
     return when (objectChangeKind()) {
         ObjectChangeKind.CREATED -> "新增了$objectLabel"
         ObjectChangeKind.MODIFIED -> "修改了$objectLabel"
+        ObjectChangeKind.MOVED -> "移动了$objectLabel"
         ObjectChangeKind.DELETED -> "删除了$objectLabel"
         ObjectChangeKind.RESTORED -> "恢复了$objectLabel"
     }
@@ -3972,9 +4709,83 @@ private fun MdbxCommitDiff.objectChangeIcon(): ImageVector =
     when (objectChangeKind()) {
         ObjectChangeKind.CREATED -> Icons.Default.Add
         ObjectChangeKind.MODIFIED -> Icons.Default.History
+        ObjectChangeKind.MOVED -> Icons.Default.SwapHoriz
         ObjectChangeKind.DELETED -> Icons.Default.Delete
         ObjectChangeKind.RESTORED -> Icons.Default.Restore
     }
+
+private fun ObjectChangeKind.label(): String = when (this) {
+    ObjectChangeKind.CREATED -> "新增"
+    ObjectChangeKind.MODIFIED -> "修改"
+    ObjectChangeKind.MOVED -> "移动"
+    ObjectChangeKind.DELETED -> "删除"
+    ObjectChangeKind.RESTORED -> "恢复"
+}
+
+private fun ObjectChangeKind.icon(): ImageVector = when (this) {
+    ObjectChangeKind.CREATED -> Icons.Default.Add
+    ObjectChangeKind.MODIFIED -> Icons.Default.History
+    ObjectChangeKind.MOVED -> Icons.Default.SwapHoriz
+    ObjectChangeKind.DELETED -> Icons.Default.Delete
+    ObjectChangeKind.RESTORED -> Icons.Default.Restore
+}
+
+@Composable
+private fun ObjectChangeKind.groupTone(): ObjectChangeTone = when (this) {
+    ObjectChangeKind.CREATED -> ObjectChangeTone(
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.58f),
+        MaterialTheme.colorScheme.onPrimaryContainer
+    )
+    ObjectChangeKind.MODIFIED -> ObjectChangeTone(
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.58f),
+        MaterialTheme.colorScheme.onSecondaryContainer
+    )
+    ObjectChangeKind.MOVED,
+    ObjectChangeKind.RESTORED -> ObjectChangeTone(
+        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.58f),
+        MaterialTheme.colorScheme.onTertiaryContainer
+    )
+    ObjectChangeKind.DELETED -> ObjectChangeTone(
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.58f),
+        MaterialTheme.colorScheme.onErrorContainer
+    )
+}
+
+private fun MdbxHistoryAction.historyIcon(): ImageVector = when (this) {
+    MdbxHistoryAction.CREATED -> Icons.Default.Add
+    MdbxHistoryAction.UPDATED -> Icons.Default.History
+    MdbxHistoryAction.MOVED -> Icons.Default.SwapHoriz
+    MdbxHistoryAction.COPIED -> Icons.Default.ContentCopy
+    MdbxHistoryAction.DELETED -> Icons.Default.Delete
+    MdbxHistoryAction.RESTORED -> Icons.Default.Restore
+    MdbxHistoryAction.MERGED -> Icons.AutoMirrored.Filled.CallMerge
+    MdbxHistoryAction.SYSTEM -> Icons.Default.Security
+}
+
+@Composable
+private fun MdbxHistoryAction?.historyContainerColor(): Color = when (this) {
+    MdbxHistoryAction.CREATED -> MaterialTheme.colorScheme.primaryContainer
+    MdbxHistoryAction.DELETED -> MaterialTheme.colorScheme.errorContainer
+    MdbxHistoryAction.MOVED,
+    MdbxHistoryAction.RESTORED -> MaterialTheme.colorScheme.tertiaryContainer
+    MdbxHistoryAction.SYSTEM -> MaterialTheme.colorScheme.secondaryContainer
+    else -> MaterialTheme.colorScheme.secondaryContainer
+}
+
+@Composable
+private fun MdbxHistoryAction?.historyContentColor(): Color = when (this) {
+    MdbxHistoryAction.CREATED -> MaterialTheme.colorScheme.onPrimaryContainer
+    MdbxHistoryAction.DELETED -> MaterialTheme.colorScheme.onErrorContainer
+    MdbxHistoryAction.MOVED,
+    MdbxHistoryAction.RESTORED -> MaterialTheme.colorScheme.onTertiaryContainer
+    else -> MaterialTheme.colorScheme.onSecondaryContainer
+}
+
+private fun formatMdbxHistoryTime(value: String): String = runCatching {
+    MDBX_HISTORY_TIME_FORMATTER.format(Instant.parse(value))
+}.getOrElse {
+    value.replace('T', ' ').removeSuffix("Z").take(16)
+}
 
 @Composable
 private fun MdbxCommitDiff.objectChangeTone(): ObjectChangeTone =
@@ -3987,6 +4798,10 @@ private fun MdbxCommitDiff.objectChangeTone(): ObjectChangeTone =
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.46f),
             contentColor = MaterialTheme.colorScheme.onSecondaryContainer
         )
+        ObjectChangeKind.MOVED -> ObjectChangeTone(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.46f),
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+        )
         ObjectChangeKind.DELETED -> ObjectChangeTone(
             containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
             contentColor = MaterialTheme.colorScheme.onErrorContainer
@@ -3997,14 +4812,12 @@ private fun MdbxCommitDiff.objectChangeTone(): ObjectChangeTone =
         )
     }
 
-private fun MdbxCommitDiff.displayObjectPath(): String =
-    listOfNotNull(
-        storagePath?.takeIf { it.isNotBlank() },
-        displayTitle?.takeIf { it.isNotBlank() } ?: shortId(objectId)
-    ).joinToString("/").ifBlank { shortId(objectId) }
+private fun MdbxCommitDiff.displayObjectTitle(): String =
+    displayTitle?.takeIf { it.isNotBlank() }
+        ?: mdbxHistoryObjectTypeLabel(objectType, contentType)
 
 private fun MdbxCommitDiff.objectChangeMeta(): String =
-    "${objectTypeLabel(objectType)} · ${shortId(objectId)} · ${createdAt}"
+    objectChangeTitle()
 
 private fun MdbxConflictSummary.toFieldChanges(): List<FieldChange> {
     val objectTitle = localTitle
@@ -4030,106 +4843,106 @@ private fun FieldChangeGroup.displayPath(): String =
     ).joinToString("/").ifBlank { "-" }
 
 private fun objectTypeLabel(type: String): String =
-    when (type.lowercase(Locale.US)) {
-        "entry" -> "密码条目"
-        "folder" -> "文件夹"
-        "passkey" -> "通行密钥"
-        else -> type
-    }
-
-@Composable
-private fun DeltaSummaryHeader(deltas: List<MdbxDeltaSummary>) {
-    val deviceCount = deltas.map { it.deviceId }.distinct().size
-    val changedObjectCount = deltas.sumOf { changedObjectCount(it.changedObjectIds) }
-    val mergeCommitCount = deltas.count { it.parentCount > 1 }
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("提交概览", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            DiagnosticLine(Icons.Default.History, "提交", "${deltas.size} 次")
-            DiagnosticLine(Icons.Default.Sync, "对象变更", changedObjectCount.toString())
-            DiagnosticLine(Icons.Default.Storage, "客户端", deviceCount.toString())
-            DiagnosticLine(Icons.AutoMirrored.Filled.CallMerge, "分叉提交", mergeCommitCount.toString())
-        }
-    }
-}
+    mdbxHistoryObjectTypeLabel(type)
 
 @Composable
 private fun DeltaRow(
     delta: MdbxDeltaSummary,
-    onShowDiff: () -> Unit,
-    onRevert: () -> Unit
+    onShowDiff: () -> Unit
 ) {
-    val objectCount = changedObjectCount(delta.changedObjectIds)
-    val objectPreview = delta.changedObjectPreview.ifBlank {
-        "${objectCount} 个对象变更"
-    }
-    val fieldSummary = delta.changedFieldSummary.ifBlank {
-        objectTypeLabel(delta.changeScope)
-    }
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        tonalElevation = 1.dp,
-        color = MaterialTheme.colorScheme.surface
+    val presentation = remember(delta) { delta.toHistoryPresentation() }
+    Card(
+        onClick = onShowDiff,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = presentation.primaryAction.historyContainerColor()
+            ) {
                 Icon(
-                    Icons.Default.History,
+                    presentation.primaryAction.historyIcon(),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
+                    tint = presentation.primaryAction.historyContentColor(),
+                    modifier = Modifier.padding(10.dp).size(21.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    presentation.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (presentation.supportingText.isNotBlank()) {
                     Text(
-                        objectPreview,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "修改：$fieldSummary",
+                        presentation.supportingText,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        formatMdbxHistoryTime(delta.createdAt),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (presentation.objectCount > 0) {
+                        HistoryStatusPill("${presentation.objectCount} 项")
+                    }
+                    if (presentation.isSystemCommit) {
+                        HistoryStatusPill("系统")
+                    }
+                }
             }
-            Text(
-                "#${delta.localSeq} · ${shortId(delta.commitId)} · ${delta.createdAt} · 客户端 ${shortId(delta.deviceId)} · parents ${delta.parentCount}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "查看提交详情",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onShowDiff) {
-                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("查看变更")
-                }
-                TextButton(onClick = onRevert) {
-                    Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("回滚")
-                }
-            }
         }
+    }
+}
+
+private fun MdbxSnapshotSummary.displayName(): String {
+    val rawName = name.trim()
+    return when {
+        rawName.isBlank() -> if (autoPrune) "自动快照" else "手动快照"
+        rawName.startsWith("Snapshot ", ignoreCase = true) -> "手动快照"
+        rawName.startsWith("Auto ", ignoreCase = true) -> "自动快照"
+        else -> rawName
     }
 }
 
 private fun shortId(value: String): String =
     value.take(8).ifBlank { "-" }
+
+private val MDBX_HISTORY_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter
+    .ofPattern("MM月dd日 HH:mm", Locale.getDefault())
+    .withZone(ZoneId.systemDefault())
+
+private const val AUTO_EXPAND_COMMIT_OBJECT_LIMIT = 12
 
 private fun Context.findActivity(): Activity? =
     when (this) {
@@ -4137,16 +4950,6 @@ private fun Context.findActivity(): Activity? =
         is ContextWrapper -> baseContext.findActivity()
         else -> null
     }
-
-private fun changedObjectCount(changedObjectIds: String): Int {
-    val normalized = changedObjectIds.trim()
-    if (normalized.isBlank() || normalized == "[]") return 0
-    return normalized
-        .trim('[', ']')
-        .split(',')
-        .map { it.trim().trim('"') }
-        .count { it.isNotBlank() }
-}
 
 private fun LocalMdbxDatabase.displayPath(context: Context): String {
     val raw = filePath.takeIf { it.isNotBlank() } ?: workingCopyPath.orEmpty()

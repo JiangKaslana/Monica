@@ -42,12 +42,12 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -76,6 +76,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -95,6 +96,7 @@ import takagi.ru.monica.steam.market.SteamMarketHistoryPoint
 import takagi.ru.monica.steam.market.SteamMarketListing
 import takagi.ru.monica.steam.market.SteamWalletInfo
 import takagi.ru.monica.ui.common.pull.PullToSearchStateHandle
+import takagi.ru.monica.ui.common.selection.SelectionActionBar
 import takagi.ru.monica.ui.components.MonicaModalBottomSheet
 
 @Composable
@@ -303,6 +305,7 @@ internal fun SteamMarketListingsContent(
     onLoadMore: () -> Unit,
     onToggleSelection: (SteamMarketListing) -> Unit,
     onClearSelection: () -> Unit,
+    onSelectAll: () -> Unit,
     onRequestCancelListings: (List<SteamMarketListing>) -> Unit
 ) {
     var showAccountPicker by remember { mutableStateOf(false) }
@@ -416,49 +419,49 @@ internal fun SteamMarketListingsContent(
         }
 
         if (selectedListingIds.isNotEmpty()) {
-            Surface(
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 3.dp,
-                shadowElevation = 4.dp
+                    .padding(start = 16.dp, end = 24.dp, bottom = 24.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TextButton(
-                        enabled = !state.actionLoading,
-                        onClick = onClearSelection
-                    ) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                    Text(
-                        text = stringResource(
-                            R.string.steam_inventory_selected_count,
-                            selectedListingIds.size
-                        ),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Button(
-                        enabled = !state.actionLoading,
-                        onClick = {
+                SelectionActionBar(
+                    selectedCount = selectedListingIds.size,
+                    onExit = onClearSelection,
+                    onSelectAll = onSelectAll,
+                    onDelete = null
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                FloatingActionButton(
+                    modifier = Modifier.semantics {
+                        if (state.actionLoading) disabled()
+                    },
+                    onClick = {
+                        if (!state.actionLoading) {
                             onRequestCancelListings(
                                 state.listings.filter { it.listingId in selectedListingIds }
                             )
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError
+                        }
+                    },
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ) {
+                    if (state.actionLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onErrorContainer
                         )
-                    ) {
-                        Text(stringResource(R.string.steam_market_batch_cancel))
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.RemoveCircleOutline,
+                            contentDescription = stringResource(
+                                R.string.steam_market_batch_cancel
+                            )
+                        )
                     }
                 }
             }

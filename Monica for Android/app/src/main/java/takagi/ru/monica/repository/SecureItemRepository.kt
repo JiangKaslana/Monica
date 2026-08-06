@@ -187,6 +187,35 @@ class SecureItemRepository(
     fun observeItemById(id: Long): Flow<SecureItem?> {
         return secureItemDao.observeItemById(id)
     }
+
+    suspend fun insertItems(items: List<SecureItem>): List<Long> {
+        if (items.isEmpty()) return emptyList()
+        require(items.all { it.id == 0L }) { "Batch insert only accepts new secure items" }
+
+        data class InsertedBatch(
+            val ids: List<Long>,
+            val items: List<SecureItem>
+        )
+
+        return commitRoomThenMirror(
+            roomCommit = {
+                val persistedItems = secureItemDao.insertItems(items)
+                check(persistedItems.size == items.size) {
+                    "Secure item batch insert returned an incomplete item list"
+                }
+                InsertedBatch(ids = persistedItems.map(SecureItem::id), items = persistedItems)
+            },
+            mirrorCommit = { batch ->
+                mdbxRepository?.upsertSecureItems(batch.items)
+            },
+            rollbackRoom = { batch ->
+                secureItemDao.deleteItemsByIds(batch.ids)
+            },
+            rollbackMirror = { batch ->
+                mdbxRepository?.deleteSecureItems(batch.items)
+            }
+        ).ids
+    }
     
     suspend fun insertItem(item: SecureItem): Long {
         return commitRoomThenMirror(
@@ -237,12 +266,55 @@ class SecureItemRepository(
             }
         )
     }
+
+    suspend fun updateItems(items: List<SecureItem>) {
+        if (items.isEmpty()) return
+        require(items.all { it.id > 0L }) { "Batch update requires persisted secure items" }
+        require(items.map(SecureItem::id).distinct().size == items.size) {
+            "Batch update contains duplicate secure item IDs"
+        }
+
+        val existingById = secureItemDao.getItemsByIds(items.map(SecureItem::id)).associateBy(SecureItem::id)
+        check(existingById.size == items.size) { "Batch update contains missing secure items" }
+        val normalizedItems = items.map { item ->
+            BitwardenMutationStateHelper.normalizeSecureItemUpdate(existingById.getValue(item.id), item)
+        }
+        val previousMdbxItems = items.map { existingById.getValue(it.id) }
+            .filter { it.mdbxDatabaseId != null }
+        val movedFromOtherMdbxDatabases = normalizedItems.mapNotNull { normalized ->
+            existingById.getValue(normalized.id).takeIf { existing ->
+                existing.mdbxDatabaseId != null &&
+                    existing.mdbxDatabaseId != normalized.mdbxDatabaseId
+            }
+        }
+
+        commitMirrorThenRoom(
+            mirrorCommit = {
+                mdbxRepository?.upsertSecureItems(normalizedItems.filter { it.mdbxDatabaseId != null })
+                mdbxRepository?.deleteSecureItems(movedFromOtherMdbxDatabases)
+            },
+            roomCommit = { secureItemDao.updateItems(normalizedItems) },
+            rollbackMirror = {
+                mdbxRepository?.deleteSecureItems(normalizedItems.filter { it.mdbxDatabaseId != null })
+                mdbxRepository?.upsertSecureItems(previousMdbxItems)
+            }
+        )
+    }
     
     suspend fun deleteItem(item: SecureItem) {
         commitMirrorThenRoom(
             mirrorCommit = { mdbxRepository?.deleteSecureItem(item) },
             roomCommit = { secureItemDao.deleteItem(item) },
             rollbackMirror = { mdbxRepository?.upsertSecureItem(item) }
+        )
+    }
+
+    suspend fun deleteItems(items: List<SecureItem>) {
+        if (items.isEmpty()) return
+        commitMirrorThenRoom(
+            mirrorCommit = { mdbxRepository?.deleteSecureItems(items) },
+            roomCommit = { secureItemDao.deleteItemsByIds(items.map(SecureItem::id)) },
+            rollbackMirror = { mdbxRepository?.upsertSecureItems(items) }
         )
     }
     

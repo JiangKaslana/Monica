@@ -9,6 +9,26 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 private const val MILLIS_PER_MINUTE = 60_000L
+private const val SESSION_ACTIVITY_UPDATE_INTERVAL_MS = 1_000L
+private const val SESSION_REFRESH_PERSIST_INTERVAL_MS = 15_000L
+
+internal fun shouldRefreshSessionActivity(
+    lastActivityElapsedRealtime: Long,
+    nowElapsedRealtime: Long,
+): Boolean {
+    if (lastActivityElapsedRealtime <= 0L) return true
+    val elapsed = nowElapsedRealtime - lastActivityElapsedRealtime
+    return elapsed < 0L || elapsed >= SESSION_ACTIVITY_UPDATE_INTERVAL_MS
+}
+
+internal fun shouldPersistSessionRefresh(
+    lastPersistElapsedRealtime: Long,
+    nowElapsedRealtime: Long,
+): Boolean {
+    if (lastPersistElapsedRealtime <= 0L) return true
+    val elapsed = nowElapsedRealtime - lastPersistElapsedRealtime
+    return elapsed < 0L || elapsed >= SESSION_REFRESH_PERSIST_INTERVAL_MS
+}
 
 /**
  * Returns the conservative age of a persisted session, or `null` when either
@@ -70,6 +90,7 @@ object SessionManager {
 
     private var unlockElapsedTimestamp: Long = 0L
     private var unlockWallTimestamp: Long = 0L
+    private var lastRefreshPersistElapsedTimestamp: Long = 0L
     private var autoLockMinutes: Int = 5
     private val processId: Int = android.os.Process.myPid()
 
@@ -83,16 +104,22 @@ object SessionManager {
         appContext = context.applicationContext
     }
 
-    private fun persistAll() {
-        val committed = prefs?.edit()?.apply {
-            putBoolean(KEY_UNLOCKED, _isUnlocked.value)
-            putLong(KEY_UNLOCK_ELAPSED_TS, unlockElapsedTimestamp)
-            putLong(KEY_UNLOCK_WALL_TS, unlockWallTimestamp)
-            putInt(KEY_AUTO_LOCK, autoLockMinutes)
-        }?.commit()
+    private fun persistedStateEditor(): SharedPreferences.Editor? = prefs?.edit()?.apply {
+        putBoolean(KEY_UNLOCKED, _isUnlocked.value)
+        putLong(KEY_UNLOCK_ELAPSED_TS, unlockElapsedTimestamp)
+        putLong(KEY_UNLOCK_WALL_TS, unlockWallTimestamp)
+        putInt(KEY_AUTO_LOCK, autoLockMinutes)
+    }
+
+    private fun persistAllSynchronously() {
+        val committed = persistedStateEditor()?.commit()
         if (committed == false) {
             android.util.Log.w(TAG, "Failed to persist session state")
         }
+    }
+
+    private fun persistAllAsync() {
+        persistedStateEditor()?.apply()
     }
 
     private fun restorePersistedState() {
@@ -109,6 +136,7 @@ object SessionManager {
             } else {
                 0L
             }
+            lastRefreshPersistElapsedTimestamp = unlockElapsedTimestamp
             autoLockMinutes = stored.getInt(KEY_AUTO_LOCK, autoLockMinutes)
         }
     }
@@ -117,7 +145,8 @@ object SessionManager {
         _isUnlocked.value = true
         unlockElapsedTimestamp = SystemClock.elapsedRealtime()
         unlockWallTimestamp = System.currentTimeMillis()
-        persistAll()
+        lastRefreshPersistElapsedTimestamp = unlockElapsedTimestamp
+        persistAllSynchronously()
         android.util.Log.d(
             TAG,
             "Session unlocked at elapsed=$unlockElapsedTimestamp, PID=$processId",
@@ -128,9 +157,10 @@ object SessionManager {
         _isUnlocked.value = false
         unlockElapsedTimestamp = 0L
         unlockWallTimestamp = 0L
+        lastRefreshPersistElapsedTimestamp = 0L
         // Persist synchronously before clearing in-memory key material so an
         // immediate process death cannot resurrect an explicitly locked session.
-        persistAll()
+        persistAllSynchronously()
         SecurityManager.clearRuntimeUnlockCache()
         if (clearSecondarySession) {
             SecondarySessionManager.markLocked(clearRuntimeUnlockCache = false)
@@ -139,8 +169,12 @@ object SessionManager {
     }
 
     fun updateAutoLockTimeout(minutes: Int) {
+        if (autoLockMinutes == minutes) return
         autoLockMinutes = minutes
-        prefs?.edit()?.putInt(KEY_AUTO_LOCK, minutes)?.commit()
+        // The persisted unlock state may not have been restored yet during a
+        // cold start. Update only this field so a valid restorable session is
+        // never replaced by the default in-memory locked state.
+        prefs?.edit()?.putInt(KEY_AUTO_LOCK, minutes)?.apply()
         android.util.Log.d(TAG, "Auto-lock timeout updated to $minutes minutes")
     }
 
@@ -180,12 +214,26 @@ object SessionManager {
     }
 
     fun refreshSession() {
-        if (_isUnlocked.value) {
-            unlockElapsedTimestamp = SystemClock.elapsedRealtime()
-            unlockWallTimestamp = System.currentTimeMillis()
-            persistAll()
-            android.util.Log.d(TAG, "Session refreshed at elapsed=$unlockElapsedTimestamp")
+        if (!_isUnlocked.value) return
+
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (!shouldRefreshSessionActivity(unlockElapsedTimestamp, nowElapsed)) return
+
+        unlockElapsedTimestamp = nowElapsed
+        unlockWallTimestamp = System.currentTimeMillis()
+        if (shouldPersistSessionRefresh(lastRefreshPersistElapsedTimestamp, nowElapsed)) {
+            lastRefreshPersistElapsedTimestamp = nowElapsed
+            persistAllAsync()
+            android.util.Log.d(TAG, "Session refresh scheduled at elapsed=$nowElapsed")
         }
+    }
+
+    fun flushPendingRefresh() {
+        if (!_isUnlocked.value) return
+        if (lastRefreshPersistElapsedTimestamp == unlockElapsedTimestamp) return
+
+        lastRefreshPersistElapsedTimestamp = unlockElapsedTimestamp
+        persistAllAsync()
     }
 
     fun isSessionExpired(): Boolean {

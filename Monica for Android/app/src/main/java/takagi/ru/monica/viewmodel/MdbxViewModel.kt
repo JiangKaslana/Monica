@@ -2488,17 +2488,34 @@ class MdbxViewModel(
             _deltaDialogState.value = current.copy(
                 selectedDiffCommitId = commitId,
                 diffItems = emptyList(),
-                isDiffLoading = true
+                isDiffLoading = true,
+                diffError = null
             )
-            val diffItems = withContext(Dispatchers.IO) {
-                vaultStore.listCommitDiff(databaseId, commitId)
-            }
-            val latest = _deltaDialogState.value as? MdbxDeltaDialogState.Visible
-                ?: return@launch
-            _deltaDialogState.value = latest.copy(
-                selectedDiffCommitId = commitId,
-                diffItems = diffItems,
-                isDiffLoading = false
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    vaultStore.listCommitDiff(databaseId, commitId)
+                }
+            }.fold(
+                onSuccess = { diffItems ->
+                    val latest = _deltaDialogState.value as? MdbxDeltaDialogState.Visible
+                        ?: return@fold
+                    _deltaDialogState.value = latest.copy(
+                        selectedDiffCommitId = commitId,
+                        diffItems = diffItems,
+                        isDiffLoading = false,
+                        diffError = null
+                    )
+                },
+                onFailure = { error ->
+                    val latest = _deltaDialogState.value as? MdbxDeltaDialogState.Visible
+                        ?: return@fold
+                    _deltaDialogState.value = latest.copy(
+                        selectedDiffCommitId = commitId,
+                        diffItems = emptyList(),
+                        isDiffLoading = false,
+                        diffError = error.toCommitDiffUserMessage()
+                    )
+                }
             )
         }
     }
@@ -2508,7 +2525,8 @@ class MdbxViewModel(
         _deltaDialogState.value = current.copy(
             selectedDiffCommitId = null,
             diffItems = emptyList(),
-            isDiffLoading = false
+            isDiffLoading = false,
+            diffError = null
         )
     }
 
@@ -2608,7 +2626,8 @@ class MdbxViewModel(
                     selectedDiffCommitId = null,
                     diffItems = emptyList(),
                     isLoading = false,
-                    isDiffLoading = false
+                    isDiffLoading = false,
+                    diffError = null
                 )?.let { clearSelectedStructureIfInvalid(it, refreshedSnapshots) }
                 _deltaDialogState.value = refreshedState ?: MdbxDeltaDialogState.Hidden
                 _operationState.value = OperationState.Success(
@@ -4306,6 +4325,7 @@ class MdbxViewModel(
             val selectedDiffCommitId: String? = null,
             val diffItems: List<MdbxCommitDiff> = emptyList(),
             val isDiffLoading: Boolean = false,
+            val diffError: String? = null,
             val isSnapshotLoading: Boolean = false,
             val selectedStructureSnapshotId: String? = null,
             val structurePreview: MdbxStructurePreview? = null,
@@ -4326,6 +4346,20 @@ class MdbxViewModel(
             val message: String? = null,
             val isLoading: Boolean = false
         ) : MdbxAdvancedDialogState()
+    }
+}
+
+private fun Throwable.toCommitDiffUserMessage(): String {
+    val diagnostic = generateSequence(this) { it.cause }
+        .mapNotNull(Throwable::message)
+        .joinToString(" ")
+    return if (
+        diagnostic.contains("commit diff objects", ignoreCase = true) ||
+        diagnostic.contains("resource limit", ignoreCase = true)
+    ) {
+        "这次提交包含的对象过多，当前版本无法一次展开全部详情。提交记录本身仍然有效。"
+    } else {
+        "无法读取提交详情：${message ?: "未知错误"}"
     }
 }
 

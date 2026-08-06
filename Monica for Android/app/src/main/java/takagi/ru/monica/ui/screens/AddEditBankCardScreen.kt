@@ -32,6 +32,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -68,6 +69,7 @@ import takagi.ru.monica.ui.components.MonicaExpressiveFilterChip
 import takagi.ru.monica.ui.components.buildMultiStorageTarget
 import takagi.ru.monica.ui.components.rememberCommonNameSuggestionState
 import takagi.ru.monica.ui.cardwallet.CardBrandIcon
+import takagi.ru.monica.ui.cardwallet.resolveCardWalletInitialStorageTarget
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.utils.RememberedStorageTarget
 import takagi.ru.monica.utils.SettingsManager
@@ -195,13 +197,6 @@ fun AddEditBankCardScreen(
         if (cardId != null) viewModel.allCards else flowOf(emptyList())
     }
     val allCards by allCardsFlow.collectAsState(initial = emptyList())
-    val rememberedStorageTarget by settingsManager
-        .rememberedStorageTargetFlow(SettingsManager.StorageTargetScope.BANK_CARD)
-        .collectAsState(initial = null as RememberedStorageTarget?)
-    val cardWalletCategoryFilterState by settingsManager
-        .categoryFilterStateFlow(SettingsManager.CategoryFilterScope.CARD_WALLET)
-        .collectAsState(initial = null)
-
     fun syncLegacyStorageState(targets: List<StorageTarget>) {
         when (val primaryTarget = targets.firstOrNull()) {
             is StorageTarget.MonicaLocal -> {
@@ -277,12 +272,9 @@ fun AddEditBankCardScreen(
         initialMdbxDatabaseId,
         initialMdbxFolderId,
         initialBitwardenVaultId,
-        initialBitwardenFolderId,
-        rememberedStorageTarget,
-        cardWalletCategoryFilterState
+        initialBitwardenFolderId
     ) {
         if (cardId != null || hasAppliedInitialStorage) return@LaunchedEffect
-        val remembered = rememberedStorageTarget
         val explicitGroupPath = initialKeePassGroupPath?.takeIf { it.isNotBlank() }
         val explicitMdbxFolderId = initialMdbxFolderId?.takeIf { it.isNotBlank() }
         val explicitFolderId = initialBitwardenFolderId?.takeIf { it.isNotBlank() }
@@ -293,65 +285,31 @@ fun AddEditBankCardScreen(
             explicitMdbxFolderId != null ||
             initialBitwardenVaultId != null ||
             explicitFolderId != null
-        val filterKeepassDatabaseId = when (cardWalletCategoryFilterState?.type) {
-            "keepass_database", "keepass_group", "keepass_database_starred", "keepass_database_uncategorized" ->
-                cardWalletCategoryFilterState?.primaryId
-            else -> null
-        }
-        val filterKeepassGroupPath = if (cardWalletCategoryFilterState?.type == "keepass_group") {
-            cardWalletCategoryFilterState?.text
+        val explicitTarget = if (hasExplicitInitialStorage) {
+            buildMultiStorageTarget(
+                categoryId = initialCategoryId,
+                keepassDatabaseId = initialKeePassDatabaseId,
+                keepassGroupPath = explicitGroupPath,
+                mdbxDatabaseId = initialMdbxDatabaseId,
+                mdbxFolderId = explicitMdbxFolderId,
+                bitwardenVaultId = initialBitwardenVaultId,
+                bitwardenFolderId = explicitFolderId
+            )
         } else {
             null
         }
-        if (!hasExplicitInitialStorage && remembered == null && filterKeepassDatabaseId == null && filterKeepassGroupPath == null) {
-            setSelectedStorageTargets(listOf(StorageTarget.MonicaLocal(null)))
-            return@LaunchedEffect
-        }
-        selectedCategoryId = if (hasExplicitInitialStorage) {
-            initialCategoryId
-        } else {
-            remembered?.categoryId
-        }
-        keepassDatabaseId = if (hasExplicitInitialStorage) {
-            initialKeePassDatabaseId
-        } else {
-            filterKeepassDatabaseId ?: remembered?.keepassDatabaseId
-        }
-        keepassGroupPath = if (hasExplicitInitialStorage) {
-            explicitGroupPath
-        } else {
-            filterKeepassGroupPath ?: remembered?.keepassGroupPath
-        }
-        mdbxDatabaseId = if (hasExplicitInitialStorage) {
-            initialMdbxDatabaseId
-        } else {
-            remembered?.mdbxDatabaseId
-        }
-        mdbxFolderId = if (hasExplicitInitialStorage) {
-            explicitMdbxFolderId
-        } else {
-            remembered?.mdbxFolderId
-        }
-        bitwardenVaultId = if (hasExplicitInitialStorage) {
-            initialBitwardenVaultId
-        } else {
-            remembered?.bitwardenVaultId
-        }
-        bitwardenFolderId = if (hasExplicitInitialStorage) {
-            explicitFolderId
-        } else {
-            remembered?.bitwardenFolderId
-        }
+        val filterState = settingsManager
+            .categoryFilterStateFlow(SettingsManager.CategoryFilterScope.CARD_WALLET)
+            .first()
+        val rememberedTarget = settingsManager
+            .rememberedStorageTargetFlow(SettingsManager.StorageTargetScope.BANK_CARD)
+            .first()
         setSelectedStorageTargets(
             listOf(
-                buildMultiStorageTarget(
-                    categoryId = selectedCategoryId,
-                    keepassDatabaseId = keepassDatabaseId,
-                    keepassGroupPath = keepassGroupPath,
-                    mdbxDatabaseId = mdbxDatabaseId,
-                    mdbxFolderId = mdbxFolderId,
-                    bitwardenVaultId = bitwardenVaultId,
-                    bitwardenFolderId = bitwardenFolderId
+                resolveCardWalletInitialStorageTarget(
+                    explicitTarget = explicitTarget,
+                    filterState = filterState,
+                    rememberedTarget = rememberedTarget
                 )
             )
         )

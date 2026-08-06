@@ -28,9 +28,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.app.Activity
@@ -46,17 +48,22 @@ import takagi.ru.monica.BuildConfig
 import takagi.ru.monica.R
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.BottomNavContentTab
+import takagi.ru.monica.data.InterfaceScale
 import takagi.ru.monica.data.Language
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.ui.components.TrashSettingsSheet
 import takagi.ru.monica.data.ThemeMode
 import takagi.ru.monica.ui.components.M3IdentityVerifyDialog
 import takagi.ru.monica.ui.components.UnifiedMoveAction
+import takagi.ru.monica.ui.common.pull.rememberPullToActionState
 import takagi.ru.monica.ui.main.navigation.SteamDockIcon
 import takagi.ru.monica.ui.password.PasswordBatchDeleteGlobalProgressState
 import takagi.ru.monica.ui.password.PasswordBatchDeleteProgressTracker
 import takagi.ru.monica.ui.password.PasswordBatchTransferGlobalProgressState
 import takagi.ru.monica.ui.password.PasswordBatchTransferProgressTracker
+import takagi.ru.monica.ui.settings.SecurityAnalysisPullCard
+import takagi.ru.monica.ui.settings.SecurityAnalysisPullMaxDistance
+import takagi.ru.monica.ui.settings.SecurityAnalysisPullTriggerDistance
 import takagi.ru.monica.utils.BiometricAuthHelper
 import takagi.ru.monica.utils.UpdateCheckResult
 import takagi.ru.monica.utils.UpdateChecker
@@ -131,6 +138,7 @@ fun SettingsScreen(
     var clearDataPasswordInput by remember { mutableStateOf("") }
     
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showInterfaceScaleSheet by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showVersionInfoDialog by remember { mutableStateOf(false) }
     var showUpdateCheckDialog by remember { mutableStateOf(false) }
@@ -369,6 +377,15 @@ fun SettingsScreen(
         context = context
     )
     val colorSchemeSubtitle = getColorSchemeDisplayName(settings.colorScheme, context)
+    val normalizedInterfaceScalePercent = InterfaceScale.normalizePercent(settings.interfaceScalePercent)
+    val interfaceScaleSubtitle = context.getString(
+        R.string.interface_scale_current,
+        normalizedInterfaceScalePercent,
+        InterfaceScale.calculateEffectiveDpi(
+            baseDensityDpi = LocalConfiguration.current.densityDpi,
+            percent = normalizedInterfaceScalePercent
+        )
+    )
     val languageSubtitle = getLanguageDisplayName(settings.language, context)
 
     fun searchTexts(vararg resIds: Int): Array<String> = resIds.map(context::getString).toTypedArray()
@@ -592,6 +609,20 @@ fun SettingsScreen(
         context.getString(R.string.security_analysis),
         context.getString(R.string.security_analysis_description)
     )
+    val density = LocalDensity.current
+    val securityPullTriggerDistance = remember(density) {
+        with(density) { SecurityAnalysisPullTriggerDistance.toPx() }
+    }
+    val securityPullMaxDistance = remember(density) {
+        with(density) { SecurityAnalysisPullMaxDistance.toPx() }
+    }
+    val securityPullState = rememberPullToActionState(
+        enabled = settingsSearchQuery.isBlank() && showSecurityAnalysisCard,
+        triggerDistance = securityPullTriggerDistance,
+        maxDragDistance = securityPullMaxDistance,
+        onTriggered = onSecurityAnalysis,
+        canStartPull = { scrollState.value == 0 }
+    )
 
     val showMasterPasswordLockingItem = matchesSettingsItem(
         securityTitle,
@@ -663,6 +694,13 @@ fun SettingsScreen(
         colorSchemeSubtitle,
         *colorSchemeSearchTexts
     )
+    val showInterfaceScaleItem = matchesSettingsItem(
+        appearanceTitle,
+        context.getString(R.string.interface_scale_title),
+        interfaceScaleSubtitle,
+        context.getString(R.string.interface_scale_description),
+        "DPI"
+    )
     val showLanguageItem = matchesSettingsItem(
         appearanceTitle,
         context.getString(R.string.language),
@@ -690,6 +728,7 @@ fun SettingsScreen(
     val showAppearanceSection = listOf(
         showThemeItem,
         showColorSchemeItem,
+        showInterfaceScaleItem,
         showLanguageItem,
         showBottomNavItem,
         showExtensionsItem,
@@ -776,10 +815,23 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .nestedScroll(securityPullState.nestedScrollConnection)
                 .verticalScroll(scrollState)
         ) {
             // Top padding spacer for edge-to-edge scrolling
             Spacer(modifier = Modifier.height(paddingValues.calculateTopPadding()))
+
+            if (showSecurityAnalysisCard) {
+                SecurityAnalysisPullCard(
+                    pullOffset = securityPullState.currentOffset,
+                    triggerDistance = securityPullTriggerDistance,
+                    isArmed = securityPullState.isArmed,
+                    onOpen = onSecurityAnalysis,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .then(getSharedModifier("security_analysis_card"))
+                )
+            }
 
             SettingsSearchField(
                 query = settingsSearchQuery,
@@ -806,52 +858,6 @@ fun SettingsScreen(
                 )
             }
 
-            // 安全分析入口卡片 - 置顶显示
-            if (showSecurityAnalysisCard) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                        .then(getSharedModifier("security_analysis_card"))
-                        .clickable { onSecurityAnalysis() },
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = context.getString(R.string.security_analysis),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = context.getString(R.string.security_analysis_description),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                            )
-                        }
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-            
             if (showSecuritySection) {
                 SettingsSection(title = securityTitle) {
                     if (showMasterPasswordLockingItem) {
@@ -952,6 +958,13 @@ fun SettingsScreen(
                             subtitle = colorSchemeSubtitle,
                             onClick = { onNavigateToColorScheme() },
                             modifier = getSharedModifier("color_scheme_card")
+                        )
+                    }
+
+                    if (showInterfaceScaleItem) {
+                        InterfaceScaleSettingsItem(
+                            scalePercent = settings.interfaceScalePercent,
+                            onClick = { showInterfaceScaleSheet = true }
                         )
                     }
 
@@ -1188,6 +1201,16 @@ fun SettingsScreen(
                 viewModel.updateOledPureBlackEnabled(enabled)
             },
             onDismiss = { showThemeDialog = false }
+        )
+    }
+
+    if (showInterfaceScaleSheet) {
+        InterfaceScaleSelectionSheet(
+            currentPercent = settings.interfaceScalePercent,
+            onPercentChanged = { percent ->
+                viewModel.updateInterfaceScalePercent(percent)
+            },
+            onDismiss = { showInterfaceScaleSheet = false }
         )
     }
     

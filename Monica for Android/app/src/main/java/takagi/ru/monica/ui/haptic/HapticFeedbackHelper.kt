@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import takagi.ru.monica.util.VibrationPatterns
 
 /**
  * Phase 9: 触觉反馈工具类
@@ -84,6 +85,23 @@ class HapticFeedbackHelper(
             view?.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         } else {
             performCustomVibration(10)  // 10ms 短震动
+        }
+    }
+
+    /**
+     * 下拉手势达到操作阈值时的反馈。
+     *
+     * 直接使用振动器，确保在不响应 View 层 CLOCK_TICK 的设备上，
+     * Steam 下拉搜索仍与其他列表页面保持一致的触觉反馈。
+     */
+    fun performPullThreshold() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(
+                VibrationEffect.createWaveform(VibrationPatterns.TICK, -1)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(20)
         }
     }
     

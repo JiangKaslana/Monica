@@ -331,7 +331,6 @@ internal fun BoxScope.MainScreenFabOverlay(
                                 onFabExpandedChange(false)
                             }
                         )
-                        .clip(RoundedCornerShape(12.dp))
                 ) {
                     Surface(
                         modifier = Modifier.size(40.dp),

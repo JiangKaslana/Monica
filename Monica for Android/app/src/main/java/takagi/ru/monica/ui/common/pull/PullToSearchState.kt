@@ -50,7 +50,7 @@ fun rememberPullToSearchState(
         if (oldOffset < searchTriggerDistance && currentOffset >= searchTriggerDistance) {
             if (!thresholdFeedbackSent) {
                 thresholdFeedbackSent = true
-                haptic.performLightClick()
+                haptic.performPullThreshold()
             }
         } else if (currentOffset < searchTriggerDistance) {
             thresholdFeedbackSent = false

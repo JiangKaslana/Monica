@@ -755,13 +755,16 @@ class Mdbx2Repository(
                     val pageSize = minOf(HISTORY_PAGE_SIZE, MAX_HISTORY_ITEMS - size).toUInt()
                     val page = vault.listCommitHistory(pageSize, cursor)
                     page.items.forEach { item ->
+                        val changes = item.changes.map { change ->
+                            MdbxCommitChangeSummary(
+                                objectType = change.objectType,
+                                objectId = change.objectId,
+                                action = change.action,
+                                fields = change.fields
+                            )
+                        }
                         val objectIds = item.changes.map { it.objectId }.distinct()
-                        val objectPreview = item.changes
-                            .take(MAX_HISTORY_PREVIEW_OBJECTS)
-                            .joinToString(separator = " · ") { change ->
-                                "${change.objectType}:${change.objectId.take(SHORT_ID_LENGTH)}"
-                            }
-                            .ifBlank { "No object changes" }
+                        val objectPreview = summarizeHistoryObjects(changes)
                         val fieldSummary = item.changes
                             .flatMap { change ->
                                 change.fields.ifEmpty { listOf(change.action) }
@@ -781,7 +784,13 @@ class Mdbx2Repository(
                                 changedObjectPreview = objectPreview,
                                 changedFieldSummary = fieldSummary,
                                 parentCount = item.parentIds.size,
-                                createdAt = item.createdAt
+                                createdAt = item.createdAt,
+                                operationId = item.operationId,
+                                operationKind = item.operationKind,
+                                branchName = item.branchName,
+                                message = item.message,
+                                changes = changes,
+                                legacy = item.legacy
                             )
                         )
                     }
@@ -793,13 +802,16 @@ class Mdbx2Repository(
 
     override suspend fun listCommitDiff(databaseId: Long, commitId: String): List<MdbxCommitDiff> =
         sessions.withVault(databaseId) { _, vault ->
+            val rootProjectId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
+            val collectionPaths = collectionDisplayPaths(vault, rootProjectId)
             vault.listCommitDiff(commitId).map { diff ->
+                val objectSummary = runCatching { vault.getObjectSummary(diff.objectId) }.getOrNull()
                 MdbxCommitDiff(
                     commitId = diff.commitId,
                     objectType = diff.objectType,
                     objectId = diff.objectId,
                     displayTitle = diff.currentTitle ?: diff.previousTitle,
-                    storagePath = diff.collectionId,
+                    storagePath = diff.collectionId?.let(collectionPaths::get),
                     previousTitle = diff.previousTitle,
                     currentTitle = diff.currentTitle,
                     previousPayloadPreview = diff.previousPayloadPreview,
@@ -807,7 +819,8 @@ class Mdbx2Repository(
                     previousDeleted = diff.previousDeleted,
                     currentDeleted = diff.currentDeleted,
                     changedFields = diff.changedFields,
-                    createdAt = diff.createdAt
+                    createdAt = diff.createdAt,
+                    contentType = objectSummary?.objectTypeId
                 )
             }
         }
@@ -1667,6 +1680,39 @@ class Mdbx2Repository(
         }.sortedWith(compareBy({ it.pathKey }, { it.name.lowercase() }, { it.folderId }))
     }
 
+    private fun collectionDisplayPaths(
+        vault: MdbxVault,
+        rootProjectId: String
+    ): Map<String, String> {
+        val summaries = vault.listAllProjects()
+        return buildMdbx2CollectionDisplayPaths(
+            rootCollectionId = rootProjectId,
+            rootDisplayName = ROOT_COLLECTION_DISPLAY_NAME,
+            nodes = summaries.map { summary ->
+                Mdbx2CollectionPathNode(
+                    collectionId = summary.collectionId,
+                    parentCollectionId = summary.groupId,
+                    title = summary.title
+                )
+            }
+        )
+    }
+
+    private fun summarizeHistoryObjects(changes: List<MdbxCommitChangeSummary>): String {
+        if (changes.isEmpty()) return ""
+        val distinctObjects = changes.distinctBy { it.objectType to it.objectId }
+        val objectTypes = distinctObjects.map { it.objectType.lowercase() }.distinct()
+        val label = when (objectTypes.singleOrNull()) {
+            "entry" -> "条目"
+            "project" -> "文件夹"
+            "attachment" -> "附件"
+            "object-relation" -> "关联"
+            "object-label", "object-label-assignment" -> "标签"
+            else -> "对象"
+        }
+        return "${distinctObjects.size} 个$label"
+    }
+
     private fun normalizeFolderParentId(parentFolderId: String?, rootProjectId: String): String? {
         val value = parentFolderId?.trim()?.takeIf { it.isNotBlank() } ?: return null
         return value.takeUnless {
@@ -1796,7 +1842,6 @@ class Mdbx2Repository(
         private const val COLLECTION_PAGE_SIZE = 200u
         private const val HISTORY_PAGE_SIZE = 100
         private const val MAX_HISTORY_ITEMS = 120
-        private const val MAX_HISTORY_PREVIEW_OBJECTS = 4
         private const val PENDING_SYNC_PAGE_SIZE = 100
         private const val MAX_PENDING_SYNC_ITEMS = 1_000
         private const val MAX_DIAGNOSTIC_ISSUE_PREVIEW = 3
@@ -1812,6 +1857,7 @@ class Mdbx2Repository(
         private const val MAX_MANUAL_SYNC_BASE64_CHARACTERS = 44_739_248
         private const val MAX_METADATA_BENCHMARK_OPERATIONS = 500
         private const val SHORT_ID_LENGTH = 8
+        private const val ROOT_COLLECTION_DISPLAY_NAME = "根目录"
         private const val ATTACHMENT_CHUNK_BYTES = 256L * 1024L
         private const val ATTACHMENT_BUFFER_BYTES = 8 * 1024
         private const val MAX_ATTACHMENT_BYTES = 64L * 1024L * 1024L

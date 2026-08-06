@@ -11,9 +11,14 @@ class PullToSearchStateGuardTest {
         val source = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/common/pull/PullToSearchState.kt"
         ).readText()
+        val hapticHelper = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/haptic/HapticFeedbackHelper.kt"
+        ).readText()
 
         assertTrue(source.contains("currentOffset >= searchTriggerDistance"))
-        assertTrue(source.contains("performLightClick()"))
+        assertTrue(source.contains("performPullThreshold()"))
+        assertTrue(hapticHelper.contains("fun performPullThreshold()"))
+        assertTrue(hapticHelper.contains("VibrationPatterns.TICK"))
         assertTrue(source.contains("nestedScrollConnection"))
         assertTrue(source.contains("onVerticalDrag"))
         assertTrue(source.contains("collapsePullOffsetSmoothly"))

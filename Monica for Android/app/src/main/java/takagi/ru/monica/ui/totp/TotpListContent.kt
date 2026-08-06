@@ -101,7 +101,6 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
 import takagi.ru.monica.repository.KeePassCompatibilityBridge
@@ -386,13 +385,12 @@ fun TotpListContent(
     val activity = context as? FragmentActivity
     val biometricHelper = remember { BiometricHelper(context) }
     val canUseBiometric = activity != null && appSettings.biometricEnabled && biometricHelper.isBiometricAvailable()
-    val sharedTickSeconds by produceState(initialValue = System.currentTimeMillis() / 1000) {
-        while (true) {
-            value = System.currentTimeMillis() / 1000
-            delay(1000)
-        }
+    val sharedTickSeconds = rememberTotpTickerMillis(smooth = false) / 1000L
+    val totpCardSettings = remember(appSettings) {
+        appSettings.copy(
+            iconCardsEnabled = appSettings.iconCardsEnabled && appSettings.authenticatorPageIconEnabled
+        )
     }
-    val sharedProgressTimeMillis = rememberTotpTickerMillis(appSettings.validatorSmoothProgress)
     
     // 添加单项删除对话框状态
     var itemToDelete by remember { mutableStateOf<takagi.ru.monica.data.SecureItem?>(null) }
@@ -1072,10 +1070,7 @@ fun TotpListContent(
                                     isSelectionMode = isSelectionMode,
                                     isSelected = selectedItems.contains(item.id),
                                     sharedTickSeconds = sharedTickSeconds,
-                                    sharedProgressTimeMillis = sharedProgressTimeMillis,
-                                    appSettings = appSettings.copy(
-                                        iconCardsEnabled = appSettings.iconCardsEnabled && appSettings.authenticatorPageIconEnabled
-                                    ),
+                                    appSettings = totpCardSettings,
                                     parsedTotpData = totpDataById[item.id]
                                 )
                             }

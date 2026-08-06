@@ -36,6 +36,9 @@ interface SecureItemDao {
     @Query("SELECT * FROM secure_items WHERE id = :id")
     suspend fun getItemById(id: Long): SecureItem?
 
+    @Query("SELECT * FROM secure_items WHERE id IN (:ids)")
+    suspend fun getItemsByIds(ids: List<Long>): List<SecureItem>
+
     @Query(
         """
         SELECT * FROM secure_items
@@ -72,10 +75,48 @@ interface SecureItemDao {
     // 插入项目
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItem(item: SecureItem): Long
+
+    @Transaction
+    suspend fun insertItems(items: List<SecureItem>): List<SecureItem> {
+        val persistedItems = items.zip(items.map { insertItem(it) }).map { (item, id) ->
+            item.withPersistedMdbxIdentity(id)
+        }
+        val itemsWithGeneratedReplicaIds = persistedItems.filterIndexed { index, item ->
+            item.replicaGroupId != items[index].replicaGroupId
+        }
+        if (itemsWithGeneratedReplicaIds.isNotEmpty()) {
+            updateItems(itemsWithGeneratedReplicaIds)
+        }
+        return persistedItems
+    }
+
+    private fun SecureItem.withPersistedMdbxIdentity(id: Long): SecureItem {
+        if (mdbxDatabaseId == null) return copy(id = id)
+        val prefix = when (itemType) {
+            ItemType.NOTE -> "note"
+            ItemType.TOTP -> "totp"
+            ItemType.BANK_CARD -> "card"
+            ItemType.DOCUMENT -> "document-ref"
+            ItemType.BILLING_ADDRESS -> "billing-address"
+            ItemType.PAYMENT_ACCOUNT -> "payment-account"
+            ItemType.PASSWORD -> "password"
+        }
+        return copy(
+            id = id,
+            replicaGroupId = replicaGroupId
+                ?.takeIf { it.startsWith("$prefix:") }
+                ?: "$prefix:$id"
+        )
+    }
     
     // 更新项目
     @Update
     suspend fun updateItem(item: SecureItem)
+
+    @Transaction
+    suspend fun updateItems(items: List<SecureItem>) {
+        items.forEach { updateItem(it) }
+    }
     
     // 删除项目
     @Delete
@@ -84,6 +125,9 @@ interface SecureItemDao {
     // 根据ID删除
     @Query("DELETE FROM secure_items WHERE id = :id")
     suspend fun deleteItemById(id: Long)
+
+    @Query("DELETE FROM secure_items WHERE id IN (:ids)")
+    suspend fun deleteItemsByIds(ids: List<Long>)
     
     // 切换收藏状态
     @Query("UPDATE secure_items SET isFavorite = :isFavorite WHERE id = :id")

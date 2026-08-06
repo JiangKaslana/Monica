@@ -367,6 +367,33 @@ class LocalKeePassViewModel(
         }
     }
 
+    suspend fun ensureGroupPathAwait(
+        databaseId: Long,
+        parentPath: String?,
+        segments: List<String>
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            var currentParent = parentPath?.takeIf { it.isNotBlank() }
+            val groups = workspaceRepository.listGroups(databaseId).getOrThrow().toMutableList()
+            segments.map(String::trim).filter(String::isNotBlank).forEach { segment ->
+                val expectedPath = takagi.ru.monica.utils.buildKeePassPathKey(currentParent, segment)
+                val existing = groups.firstOrNull { group ->
+                    group.path.equals(expectedPath, ignoreCase = true)
+                }
+                val resolved = existing ?: workspaceRepository.createGroup(
+                    databaseId = databaseId,
+                    groupName = segment,
+                    parentPath = currentParent
+                ).getOrThrow()
+                if (existing == null) groups += resolved
+                currentParent = resolved.path
+            }
+            currentParent.orEmpty()
+        }.also { result ->
+            if (result.isSuccess) refreshGroups(databaseId)
+        }
+    }
+
     fun renameGroup(
         databaseId: Long,
         groupPath: String,

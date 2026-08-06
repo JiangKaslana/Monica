@@ -3,8 +3,8 @@ package takagi.ru.monica.ui.components
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -58,7 +58,9 @@ import takagi.ru.monica.util.VibrationPatterns
 import takagi.ru.monica.bitwarden.sync.SyncStatus
 import takagi.ru.monica.ui.icons.UnmatchedIconFallback
 import takagi.ru.monica.ui.icons.shouldShowFallbackSlot
+import takagi.ru.monica.ui.nextSmoothTotpProgressTarget
 import takagi.ru.monica.ui.rememberTotpTickerMillis
+import takagi.ru.monica.ui.shouldResetSmoothTotpProgress
 
 /**
  * TOTP验证码卡片
@@ -109,9 +111,18 @@ fun TotpCodeCard(
     }
     val totpData = remember(resolvedTotpData) { normalizeTotpData(resolvedTotpData) }
     
-    // 共享定时器（外部传入时不再单独启动）
-    val fallbackProgressTimeMillis = rememberTotpTickerMillis(settings.validatorSmoothProgress)
-    val progressTimeMillis = sharedProgressTimeMillis ?: fallbackProgressTimeMillis
+    // 列表页面提供共享秒级时间源时，卡片不再订阅 50ms 备用 ticker。
+    // 平滑视觉由进度条内部动画完成，验证码与卡片主体仅按秒更新。
+    val fallbackProgressTimeMillis = if (
+        sharedProgressTimeMillis == null && sharedTickSeconds == null
+    ) {
+        rememberTotpTickerMillis(settings.validatorSmoothProgress)
+    } else {
+        null
+    }
+    val progressTimeMillis = sharedProgressTimeMillis
+        ?: fallbackProgressTimeMillis
+        ?: ((sharedTickSeconds ?: System.currentTimeMillis() / 1000L) * 1000L)
     val progressSeconds = progressTimeMillis / 1000L
     val generationSeconds = sharedTickSeconds ?: progressSeconds
     val effectiveProgressTimeMillis = if (settings.validatorSmoothProgress) {
@@ -148,8 +159,24 @@ fun TotpCodeCard(
         }
     }
     
-    // 根据当前秒数计算验证码/倒计时/进度
-    val currentCode = remember(generationSeconds, totpData, settings.totpTimeOffset) {
+    // 同一个验证码周期内复用 HMAC 结果，倒计时仍按秒更新。
+    val generationWindow = remember(
+        generationSeconds,
+        totpData.otpType,
+        totpData.counter,
+        totpData.period,
+        settings.totpTimeOffset,
+    ) {
+        if (totpData.otpType == OtpType.HOTP) {
+            totpData.counter
+        } else {
+            val periodSeconds = totpData.period.coerceAtLeast(1).toLong()
+            (generationSeconds + settings.totpTimeOffset.toLong()) / periodSeconds
+        }
+    }
+
+    // 根据当前验证码周期计算验证码/倒计时/进度
+    val currentCode = remember(generationWindow, totpData, settings.totpTimeOffset) {
         when (totpData.otpType) {
             OtpType.HOTP -> TotpGenerator.generateOtp(totpData)
             else -> TotpGenerator.generateOtp(
@@ -161,7 +188,7 @@ fun TotpCodeCard(
     }
     
     // 下一个验证码（用于倒计时结束前5秒内复制）
-    val nextCode = remember(generationSeconds, totpData, settings.totpTimeOffset) {
+    val nextCode = remember(generationWindow, totpData, settings.totpTimeOffset) {
         when (totpData.otpType) {
             OtpType.HOTP -> currentCode // HOTP 不支持下一个
             else -> TotpGenerator.generateOtp(
@@ -799,6 +826,7 @@ fun TotpCodeCard(
                                 color = progressColor,
                                 style = settings.validatorProgressBarStyle,
                                 smoothProgress = settings.validatorSmoothProgress,
+                                periodSeconds = totpData.period,
                                 trackColor = if (hasImmersiveBackground) {
                                     Color.White.copy(alpha = 0.28f)
                                 } else {
@@ -859,22 +887,32 @@ private fun M3EProgressIndicator(
     color: Color,
     style: ProgressBarStyle,
     smoothProgress: Boolean,
+    periodSeconds: Int,
     modifier: Modifier = Modifier,
     trackHeight: Dp = 12.dp,
     trackColor: Color? = null
 ) {
     val safeProgress = if (progress.isFinite()) progress else 0f
     val clampedProgress = safeProgress.coerceIn(0f, 1f)
-    val animatedProgress by animateFloatAsState(
-        targetValue = clampedProgress,
-        animationSpec = tween(
-            durationMillis = if (smoothProgress) 50 else 280,
-            easing = if (smoothProgress) LinearEasing else FastOutSlowInEasing
-        ),
-        label = "m3e_progress"
-    )
+    val animatedProgress = remember { Animatable(clampedProgress) }
+    LaunchedEffect(clampedProgress, smoothProgress, periodSeconds) {
+        if (smoothProgress) {
+            if (shouldResetSmoothTotpProgress(animatedProgress.value, clampedProgress)) {
+                animatedProgress.snapTo(clampedProgress)
+            }
+            animatedProgress.animateTo(
+                targetValue = nextSmoothTotpProgressTarget(clampedProgress, periodSeconds),
+                animationSpec = tween(durationMillis = 1000, easing = LinearEasing),
+            )
+        } else {
+            animatedProgress.animateTo(
+                targetValue = clampedProgress,
+                animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+            )
+        }
+    }
 
-    val waveOffset = if (style == ProgressBarStyle.WAVE) {
+    val waveOffsetState = if (style == ProgressBarStyle.WAVE) {
         val waveTransition = rememberInfiniteTransition(label = "m3e_wave")
         waveTransition.animateFloat(
             initialValue = 0f,
@@ -884,12 +922,11 @@ private fun M3EProgressIndicator(
                 repeatMode = RepeatMode.Restart
             ),
             label = "m3e_wave_offset"
-        ).value
+        )
     } else {
-        0f
+        null
     }
 
-    val fillFraction = animatedProgress.coerceIn(0f, 1f)
     val resolvedTrackColor = trackColor
         ?: MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
 
@@ -902,6 +939,10 @@ private fun M3EProgressIndicator(
             val height = size.height
             if (width <= 0f || height <= 0f) return@Canvas
 
+            // Reading animation state inside the draw phase invalidates only
+            // this canvas instead of recomposing the surrounding card.
+            val fillFraction = animatedProgress.value.coerceIn(0f, 1f)
+            val waveOffset = waveOffsetState?.value ?: 0f
             val progressWidth = width * fillFraction
             if (!progressWidth.isFinite()) return@Canvas
             val centerY = height / 2f

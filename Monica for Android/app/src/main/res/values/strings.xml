@@ -531,6 +531,10 @@
     <string name="bottom_nav_move_up">Move tab up</string>
     <string name="bottom_nav_move_down">Move tab down</string>
     <string name="bottom_nav_settings_entry_subtitle">Choose which tabs appear and reorder them</string>
+    <string name="interface_scale_title">Interface scale</string>
+    <string name="interface_scale_current">%1$d%% · %2$d DPI</string>
+    <string name="interface_scale_description">Adjust Monica’s interface size without changing the system, keyboard, or autofill windows.</string>
+    <string name="interface_scale_reset">Reset to default</string>
     <string name="bottom_nav_auto_hide_single_tab_title">Hide navigation when only one tab remains</string>
     <string name="bottom_nav_auto_hide_single_tab_subtitle">With one tab, hide bottom nav and use the top-right Settings menu.</string>
     <string name="draggable_bottom_nav">Draggable Bottom Nav</string>
@@ -1864,6 +1868,8 @@
     <!-- Security Analysis -->
     <string name="security_analysis">Security Analysis</string>
     <string name="security_analysis_description">Check password security, breaches and 2FA status</string>
+    <string name="security_analysis_pull_hint">Pull down or tap to open Security Analysis</string>
+    <string name="security_analysis_pull_release">Release to open Security Analysis</string>
     <string name="start_security_analysis">Start Security Analysis</string>
     <string name="analysis_may_take_time">Analysis may take a few minutes</string>
     <string name="security_overview">Security Overview</string>

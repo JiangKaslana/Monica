@@ -24,6 +24,7 @@ import takagi.ru.monica.data.BottomNavContentTab
 import takagi.ru.monica.data.BottomNavVisibility
 import takagi.ru.monica.data.CategorySelectionUiMode
 import takagi.ru.monica.data.ColorScheme
+import takagi.ru.monica.data.InterfaceScale
 import takagi.ru.monica.data.Language
 import takagi.ru.monica.data.PasswordPageContentType
 import takagi.ru.monica.data.PasswordListQuickFilterItem
@@ -156,6 +157,7 @@ class SettingsManager(private val context: Context) {
         private val CUSTOM_TERTIARY_COLOR_KEY = longPreferencesKey("custom_tertiary_color")
         private val CUSTOM_NEUTRAL_COLOR_KEY = longPreferencesKey("custom_neutral_color")
         private val CUSTOM_NEUTRAL_VARIANT_COLOR_KEY = longPreferencesKey("custom_neutral_variant_color")
+        private val INTERFACE_SCALE_PERCENT_KEY = intPreferencesKey("interface_scale_percent")
         private val LANGUAGE_KEY = stringPreferencesKey("language")
         private val BIOMETRIC_ENABLED_KEY = booleanPreferencesKey("biometric_enabled")
         private val QUICK_SETUP_COMPLETED_KEY = booleanPreferencesKey("quick_setup_completed")
@@ -511,6 +513,9 @@ class SettingsManager(private val context: Context) {
                 ?: (preferences[CUSTOM_PRIMARY_COLOR_KEY] ?: 0xFF605D66),
             customNeutralVariantColor = preferences[CUSTOM_NEUTRAL_VARIANT_COLOR_KEY]
                 ?: (preferences[CUSTOM_SECONDARY_COLOR_KEY] ?: 0xFF625B71),
+            interfaceScalePercent = InterfaceScale.normalizePercent(
+                preferences[INTERFACE_SCALE_PERCENT_KEY]
+            ),
             language = Language.valueOf(
                 preferences[LANGUAGE_KEY] ?: Language.SYSTEM.name
             ),
@@ -721,11 +726,18 @@ class SettingsManager(private val context: Context) {
             preferences[COLOR_SCHEME_KEY] = colorScheme.name
         }
     }
+
+    suspend fun updateInterfaceScalePercent(percent: Int) {
+        dataStore.edit { preferences ->
+            preferences[INTERFACE_SCALE_PERCENT_KEY] = InterfaceScale.normalizePercent(percent)
+        }
+    }
     
     suspend fun updateLanguage(language: Language) {
         dataStore.edit { preferences ->
             preferences[LANGUAGE_KEY] = language.name
         }
+        StartupLanguageCache.write(context, language)
     }
 
     suspend fun updateBitwardenUploadAll(enabled: Boolean) {
