@@ -94,6 +94,27 @@ class DockAndListFirstFramePerformanceGuardTest {
         assertTrue(noteContentSource.contains("rememberSaveableLazyListState()"))
     }
 
+    @Test
+    fun ordinaryDockSwitchesDoNotKeepTheOutgoingPageInASizeTransition() {
+        val animatedHostSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/AuthenticatorPasskeyAnimatedContent.kt"
+        ).readText()
+
+        assertTrue(
+            animatedHostSource.contains(
+                "(slideInFromRight() togetherWith parallaxExitToLeft()).using("
+            )
+        )
+        assertTrue(
+            animatedHostSource.contains(
+                "(parallaxEnterFromLeft() togetherWith slideOutToRight()).using("
+            )
+        )
+        assertFalse(
+            animatedHostSource.contains("transform.using(SizeTransform(clip = false))")
+        )
+    }
+
     private fun projectFile(relativePath: String): File {
         var directory = File(requireNotNull(System.getProperty("user.dir"))).canonicalFile
         while (

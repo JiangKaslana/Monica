@@ -26,16 +26,19 @@ internal fun AuthenticatorPasskeyAnimatedContent(
         targetState = currentTab,
         modifier = modifier,
         transitionSpec = {
-            val transform = when {
+            when {
                 initialState == BottomNavItem.Authenticator && targetState == BottomNavItem.Passkey ->
-                    slideInFromRight() togetherWith parallaxExitToLeft()
+                    (slideInFromRight() togetherWith parallaxExitToLeft()).using(
+                        SizeTransform(clip = false)
+                    )
 
                 initialState == BottomNavItem.Passkey && targetState == BottomNavItem.Authenticator ->
-                    parallaxEnterFromLeft() togetherWith slideOutToRight()
+                    (parallaxEnterFromLeft() togetherWith slideOutToRight()).using(
+                        SizeTransform(clip = false)
+                    )
 
                 else -> EnterTransition.None togetherWith ExitTransition.None
             }
-            transform.using(SizeTransform(clip = false))
         },
         contentKey = BottomNavItem::key,
         label = "authenticator_passkey_switch",

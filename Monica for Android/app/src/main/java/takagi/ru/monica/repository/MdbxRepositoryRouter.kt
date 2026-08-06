@@ -131,6 +131,21 @@ class MdbxRepositoryRouter(
     override suspend fun getPendingSyncCount(databaseId: Long): Int =
         repositoryFor(databaseId).getPendingSyncCount(databaseId)
 
+    override suspend fun planHealthRepair(databaseId: Long): MdbxHealthRepairPlan =
+        repositoryFor(databaseId).planHealthRepair(databaseId)
+
+    override suspend fun applyHealthRepair(
+        databaseId: Long,
+        planToken: String,
+        operationId: String,
+        decisions: List<MdbxHealthRepairDecision>
+    ): MdbxHealthRepairApplyResult = repositoryFor(databaseId).applyHealthRepair(
+        databaseId = databaseId,
+        planToken = planToken,
+        operationId = operationId,
+        decisions = decisions
+    )
+
     override suspend fun setProjectTags(databaseId: Long, projectId: String, tags: List<String>) =
         repositoryFor(databaseId).setProjectTags(databaseId, projectId, tags)
 

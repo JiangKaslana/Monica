@@ -205,6 +205,7 @@ import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.password.PasswordAggregateCardStyle
 import takagi.ru.monica.ui.password.PasswordAggregateListItemUi
 import takagi.ru.monica.ui.password.PasswordAggregateRetainedStateViewModel
+import takagi.ru.monica.ui.password.PasswordGroupingSnapshotKey
 import takagi.ru.monica.ui.password.PasswordAggregateWalletItemType
 import takagi.ru.monica.ui.password.PasswordListCardBadge
 import takagi.ru.monica.ui.password.PasswordGroupListItemUi
@@ -1153,40 +1154,56 @@ fun PasswordListContent(
     }
     
     // 根据分组模式对密码进行分组（后台线程计算，避免阻塞首滑）
-    var groupedPasswords by remember {
-        mutableStateOf<Map<String, List<takagi.ru.monica.data.PasswordEntry>>>(emptyMap())
-    }
-    var hasGroupedPasswordsReadyForCurrentInputs by remember {
-        mutableStateOf(false)
-    }
     val visiblePasswordsForAutoGrouping = remember(
         visiblePasswordEntries,
         manualAggregateStackBuildResult.stackedPasswordIds
     ) {
         visiblePasswordEntries.filter { it.id !in manualAggregateStackBuildResult.stackedPasswordIds }
     }
-    LaunchedEffect(
-        visiblePasswordsForAutoGrouping,
-        effectiveGroupMode,
-        appSettings.passwordWebsiteStackMatchMode,
-        effectiveStackCardMode,
-        effectiveManualStackGroupByEntryId,
-        effectiveNoStackEntryIds
-    ) {
+    val groupingSnapshotKey = remember(visiblePasswordsForAutoGrouping, groupingConfig) {
+        PasswordGroupingSnapshotKey(
+            sourceEntries = visiblePasswordsForAutoGrouping,
+            config = groupingConfig,
+        )
+    }
+    val retainedGroupingSeed = remember(groupingSnapshotKey) {
+        aggregateRetainedStateViewModel.retainedState.groupingSeed(groupingSnapshotKey)
+    }
+    var groupedPasswords by remember(groupingSnapshotKey) {
+        mutableStateOf(retainedGroupingSeed.groups)
+    }
+    var hasGroupedPasswordsReadyForCurrentInputs by remember(groupingSnapshotKey) {
+        mutableStateOf(retainedGroupingSeed.hasSnapshot)
+    }
+    LaunchedEffect(groupingSnapshotKey) {
+        val generation = aggregateRetainedStateViewModel.retainedState.currentGeneration()
         val sourceEntries = visiblePasswordsForAutoGrouping
         if (sourceEntries.isEmpty()) {
             groupedPasswords = emptyMap()
             hasGroupedPasswordsReadyForCurrentInputs = true
+            aggregateRetainedStateViewModel.retainedState.updateGroupingIfCurrent(
+                expectedGeneration = generation,
+                key = groupingSnapshotKey,
+                groups = emptyMap(),
+            )
             return@LaunchedEffect
         }
-        hasGroupedPasswordsReadyForCurrentInputs = false
-        groupedPasswords = withContext(Dispatchers.Default) {
+        if (!retainedGroupingSeed.hasSnapshot) {
+            hasGroupedPasswordsReadyForCurrentInputs = false
+        }
+        val computedGroups = withContext(Dispatchers.Default) {
             buildGroupedPasswordsForEntries(
                 sourceEntries = sourceEntries,
                 config = groupingConfig
             )
         }
+        groupedPasswords = computedGroups
         hasGroupedPasswordsReadyForCurrentInputs = true
+        aggregateRetainedStateViewModel.retainedState.updateGroupingIfCurrent(
+            expectedGeneration = generation,
+            key = groupingSnapshotKey,
+            groups = computedGroups,
+        )
     }
 
     val groupedPasswordsForRender = remember(

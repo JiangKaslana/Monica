@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import takagi.ru.monica.R
 import takagi.ru.monica.data.LocalMdbxDatabase
 import takagi.ru.monica.data.MdbxCapability
@@ -82,6 +84,7 @@ import takagi.ru.monica.repository.MdbxConflictResolution
 import takagi.ru.monica.repository.MdbxConflictSummary
 import takagi.ru.monica.repository.MdbxCommitDiff
 import takagi.ru.monica.repository.MdbxDeltaSummary
+import takagi.ru.monica.repository.MdbxHealthRepairChoice
 import takagi.ru.monica.repository.MdbxMigrationBlockerKind
 import takagi.ru.monica.repository.MdbxMigrationWarningKind
 import takagi.ru.monica.repository.MdbxSnapshotSummary
@@ -90,7 +93,9 @@ import takagi.ru.monica.repository.MdbxStructureNodeStatus
 import takagi.ru.monica.repository.MdbxStructureNodeType
 import takagi.ru.monica.repository.MdbxStructurePreview
 import takagi.ru.monica.repository.MdbxVaultDiagnostics
+import takagi.ru.monica.ui.components.M3IdentityVerifyDialog
 import takagi.ru.monica.utils.ClipboardUtils
+import takagi.ru.monica.utils.BiometricHelper
 import takagi.ru.monica.viewmodel.MdbxViewModel
 import java.time.Instant
 import java.time.ZoneId
@@ -117,6 +122,7 @@ fun MdbxManagerScreen(
     onNavigateToOneDriveCreate: () -> Unit,
     onNavigateToOneDriveOpen: () -> Unit
 ) {
+    val context = LocalContext.current
     val databases by viewModel.allDatabases.collectAsState()
     val databasesLoaded by viewModel.allDatabasesLoaded.collectAsState()
     val operationState by viewModel.operationState.collectAsState()
@@ -125,8 +131,13 @@ fun MdbxManagerScreen(
     val vaultDiagnostics by viewModel.vaultDiagnostics.collectAsState()
     val conflictDialogState by viewModel.conflictDialogState.collectAsState()
     val deltaDialogState by viewModel.deltaDialogState.collectAsState()
+    val healthRepairState by viewModel.healthRepairState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteDialog by remember { mutableStateOf<LocalMdbxDatabase?>(null) }
+    var showHealthRepairDeleteVerification by rememberSaveable { mutableStateOf(false) }
+    var healthRepairMasterPassword by rememberSaveable { mutableStateOf("") }
+    var healthRepairPasswordError by rememberSaveable { mutableStateOf(false) }
+    val healthRepairBiometricHelper = remember(context) { BiometricHelper(context) }
     var page by rememberSaveable(
         initialDatabaseId,
         initialPage,
@@ -174,10 +185,28 @@ fun MdbxManagerScreen(
             viewModel.activateMdbxDatabase(database.id)
         }
     }
+    LaunchedEffect(healthRepairState) {
+        if (healthRepairState !is MdbxViewModel.MdbxHealthRepairState.Reviewing) {
+            showHealthRepairDeleteVerification = false
+            healthRepairMasterPassword = ""
+            healthRepairPasswordError = false
+        }
+    }
     LaunchedEffect(page, selectedDatabase?.id, deltaDialogState) {
         when (val currentPage = page) {
             is MdbxManagerPage.Conflict -> viewModel.dismissDeltaDialog()
-            is MdbxManagerPage.Snapshots,
+            is MdbxManagerPage.Snapshots -> {
+                viewModel.dismissConflictDialog()
+                val currentDeltaState = deltaDialogState as? MdbxViewModel.MdbxDeltaDialogState.Visible
+                val database = selectedDatabase
+                if (
+                    database != null &&
+                    database.id == currentPage.databaseId &&
+                    currentDeltaState?.databaseId != currentPage.databaseId
+                ) {
+                    viewModel.showDeltaHistory(database)
+                }
+            }
             is MdbxManagerPage.SnapshotStructure -> viewModel.dismissConflictDialog()
             is MdbxManagerPage.CommitHistory -> {
                 viewModel.dismissConflictDialog()
@@ -562,6 +591,31 @@ fun MdbxManagerScreen(
                             onRefreshDiagnostics = { viewModel.refreshVaultDiagnostics(listOf(db)) },
                             onOpenMaintenance = {
                                 page = MdbxManagerPage.Maintenance(db.id, current.source)
+                            },
+                            onOpenSnapshots = {
+                                page = MdbxManagerPage.Snapshots(db.id, current.source)
+                            },
+                            onOpenCommitHistory = {
+                                page = MdbxManagerPage.CommitHistory(db.id, current.source)
+                            },
+                            onOpenAttachments = {
+                                page = MdbxManagerPage.Attachments(db.id, current.source)
+                            },
+                            onStartAutomaticRepair = if (db.engineTypeEnum == MdbxEngineType.RUST_MDBX2) {
+                                { viewModel.requestHealthRepair(db) }
+                            } else {
+                                null
+                            },
+                            repairInProgress = when (val repairState = healthRepairState) {
+                                MdbxViewModel.MdbxHealthRepairState.Hidden -> false
+                                is MdbxViewModel.MdbxHealthRepairState.Planning ->
+                                    repairState.databaseId == db.id
+                                is MdbxViewModel.MdbxHealthRepairState.Reviewing ->
+                                    repairState.databaseId == db.id
+                                is MdbxViewModel.MdbxHealthRepairState.Applying ->
+                                    repairState.databaseId == db.id
+                                is MdbxViewModel.MdbxHealthRepairState.Blocked -> false
+                                is MdbxViewModel.MdbxHealthRepairState.Failed -> false
                             }
                         )
                     }
@@ -607,6 +661,90 @@ fun MdbxManagerScreen(
             }
 
         }
+    }
+
+    if (!showHealthRepairDeleteVerification) {
+        MdbxHealthRepairDialog(
+            state = healthRepairState,
+            onCancel = {
+                healthRepairMasterPassword = ""
+                healthRepairPasswordError = false
+                viewModel.dismissHealthRepair()
+            },
+            onRetry = {
+                val databaseId = when (val state = healthRepairState) {
+                    is MdbxViewModel.MdbxHealthRepairState.Failed -> state.databaseId
+                    is MdbxViewModel.MdbxHealthRepairState.Blocked -> state.databaseId
+                    else -> null
+                }
+                databaseId?.let { id -> databases.firstOrNull { it.id == id } }
+                    ?.let(viewModel::requestHealthRepair)
+            },
+            onKeepContent = {
+                viewModel.chooseHealthRepairConflict(MdbxHealthRepairChoice.KEEP_CONTENT)
+            },
+            onDeleteObject = {
+                showHealthRepairDeleteVerification = true
+                healthRepairMasterPassword = ""
+                healthRepairPasswordError = false
+            }
+        )
+    }
+
+    if (showHealthRepairDeleteVerification) {
+        val activity = context.findActivity() as? FragmentActivity
+        val completeDeleteChoice = {
+            showHealthRepairDeleteVerification = false
+            healthRepairMasterPassword = ""
+            healthRepairPasswordError = false
+            viewModel.chooseHealthRepairConflict(MdbxHealthRepairChoice.DELETE_OBJECT)
+        }
+        val biometricAction = if (
+            activity != null && healthRepairBiometricHelper.isBiometricAvailable()
+        ) {
+            {
+                healthRepairBiometricHelper.authenticate(
+                    activity = activity,
+                    title = "验证删除冲突项",
+                    subtitle = "确认由 MDBX2 删除当前内容并保留规范删除记录",
+                    onSuccess = completeDeleteChoice,
+                    onError = { message ->
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                    },
+                    onFailed = {}
+                )
+            }
+        } else {
+            null
+        }
+        M3IdentityVerifyDialog(
+            title = "验证后删除冲突项",
+            message = "这会删除当前数据库内容，并保留一个用于同步的规范删除记录。处理开始前仍会自动创建恢复快照。",
+            passwordValue = healthRepairMasterPassword,
+            onPasswordChange = {
+                healthRepairMasterPassword = it
+                healthRepairPasswordError = false
+            },
+            onDismiss = {
+                showHealthRepairDeleteVerification = false
+                healthRepairMasterPassword = ""
+                healthRepairPasswordError = false
+            },
+            onConfirm = {
+                if (viewModel.verifyMasterPassword(healthRepairMasterPassword)) {
+                    completeDeleteChoice()
+                } else {
+                    healthRepairPasswordError = true
+                }
+            },
+            confirmText = "验证并删除",
+            icon = Icons.Default.Delete,
+            destructiveConfirm = true,
+            isPasswordError = healthRepairPasswordError,
+            passwordErrorText = "Monica 主密码不正确",
+            onBiometricClick = biometricAction,
+            biometricHintText = if (biometricAction == null) "当前设备无法使用生物识别" else null
+        )
     }
 
     MdbxMigrationDialog(

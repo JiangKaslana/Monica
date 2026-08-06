@@ -1,7 +1,9 @@
 package takagi.ru.monica.ui.password
 
 import androidx.lifecycle.ViewModel
+import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordPageContentType
+import takagi.ru.monica.ui.PasswordGroupingConfig
 import takagi.ru.monica.viewmodel.CategoryFilter
 
 internal data class PasswordAggregateSnapshotKey(
@@ -15,9 +17,21 @@ internal data class PasswordAggregateSnapshotSeed(
     val hasSnapshot: Boolean,
 )
 
+internal data class PasswordGroupingSnapshotKey(
+    val sourceEntries: List<PasswordEntry>,
+    val config: PasswordGroupingConfig,
+)
+
+internal data class PasswordGroupingSnapshotSeed(
+    val groups: Map<String, List<PasswordEntry>>,
+    val hasSnapshot: Boolean,
+)
+
 internal class PasswordAggregateRetainedState {
     private var snapshotKey: PasswordAggregateSnapshotKey? = null
     private var snapshotItems: List<PasswordAggregateListItemUi> = emptyList()
+    private var groupingSnapshotKey: PasswordGroupingSnapshotKey? = null
+    private var groupingSnapshotGroups: Map<String, List<PasswordEntry>> = emptyMap()
     private var generation: Long = 0L
 
     fun currentGeneration(): Long = generation
@@ -41,10 +55,31 @@ internal class PasswordAggregateRetainedState {
         return true
     }
 
+    fun groupingSeed(key: PasswordGroupingSnapshotKey): PasswordGroupingSnapshotSeed {
+        val matches = groupingSnapshotKey == key
+        return PasswordGroupingSnapshotSeed(
+            groups = if (matches) groupingSnapshotGroups else emptyMap(),
+            hasSnapshot = matches,
+        )
+    }
+
+    fun updateGroupingIfCurrent(
+        expectedGeneration: Long,
+        key: PasswordGroupingSnapshotKey,
+        groups: Map<String, List<PasswordEntry>>,
+    ): Boolean {
+        if (generation != expectedGeneration) return false
+        groupingSnapshotKey = key
+        groupingSnapshotGroups = groups
+        return true
+    }
+
     fun clear() {
         generation += 1L
         snapshotKey = null
         snapshotItems = emptyList()
+        groupingSnapshotKey = null
+        groupingSnapshotGroups = emptyMap()
     }
 }
 

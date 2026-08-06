@@ -91,6 +91,17 @@ interface MdbxRepository {
     suspend fun getVaultDiagnostics(databaseId: Long): MdbxVaultDiagnostics
     suspend fun getPendingSyncCount(databaseId: Long): Int
 
+    suspend fun planHealthRepair(databaseId: Long): MdbxHealthRepairPlan =
+        throw UnsupportedOperationException("MDBX health repair is only available for MDBX2")
+
+    suspend fun applyHealthRepair(
+        databaseId: Long,
+        planToken: String,
+        operationId: String,
+        decisions: List<MdbxHealthRepairDecision>
+    ): MdbxHealthRepairApplyResult =
+        throw UnsupportedOperationException("MDBX health repair is only available for MDBX2")
+
     suspend fun setProjectTags(databaseId: Long, projectId: String, tags: List<String>)
     suspend fun listProjectTags(databaseId: Long, projectId: String): List<String>
     suspend fun listAllProjectTags(databaseId: Long): List<MdbxProjectTagSummary>

@@ -800,6 +800,8 @@ external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_verify_integrity_root(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_verify_integrity_root_checkpoint(
 ): Short
+external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_apply_health_repair(
+): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_create_backup(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_diagnostics_summary(
@@ -815,6 +817,8 @@ external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_find_tombstone_by_target(
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_health_check(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_info(
+): Short
+external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_plan_health_repair(
 ): Short
 external fun uniffi_mdbx_ffi_checksum_method_mdbxvault_purge_tombstone(
 ): Short
@@ -1238,6 +1242,8 @@ external fun uniffi_mdbx_ffi_fn_method_mdbxvault_verify_integrity_root(`ptr`: Lo
 ): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_verify_integrity_root_checkpoint(`ptr`: Long,`checkpoint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_mdbx_ffi_fn_method_mdbxvault_apply_health_repair(`ptr`: Long,`planToken`: RustBuffer.ByValue,`operationId`: RustBuffer.ByValue,`decisions`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_create_backup(`ptr`: Long,`destination`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_diagnostics_summary(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1253,6 +1259,8 @@ external fun uniffi_mdbx_ffi_fn_method_mdbxvault_find_tombstone_by_target(`ptr`:
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_health_check(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_info(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+external fun uniffi_mdbx_ffi_fn_method_mdbxvault_plan_health_repair(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_mdbx_ffi_fn_method_mdbxvault_purge_tombstone(`ptr`: Long,`tombstoneId`: RustBuffer.ByValue,`device`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1974,6 +1982,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_verify_integrity_root_checkpoint() != 26904.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_apply_health_repair() != 41364.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_create_backup() != 14222.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1996,6 +2007,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_info() != 46826.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_plan_health_repair() != 4622.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_mdbx_ffi_checksum_method_mdbxvault_purge_tombstone() != 40625.toShort()) {
@@ -4382,6 +4396,8 @@ public interface MdbxVaultInterface {
 
     fun `verifyIntegrityRootCheckpoint`(`checkpoint`: MdbxAuthenticatedStateRootCheckpoint): MdbxIntegrityRootVerification
 
+    fun `applyHealthRepair`(`planToken`: kotlin.String, `operationId`: kotlin.String, `decisions`: List<MdbxHealthRepairDecision>): MdbxHealthRepairApplyResult
+
     fun `createBackup`(`destination`: kotlin.String): MdbxBackupInfo
 
     fun `diagnosticsSummary`(): MdbxVaultDiagnosticsSummary
@@ -4397,6 +4413,8 @@ public interface MdbxVaultInterface {
     fun `healthCheck`(): MdbxHealthCheckResult
 
     fun `info`(): VaultInfo
+
+    fun `planHealthRepair`(): MdbxHealthRepairPlan
 
     fun `purgeTombstone`(`tombstoneId`: kotlin.String, `device`: MdbxDeviceContext): MdbxPermanentPurgeReceipt
 
@@ -5619,6 +5637,20 @@ open class MdbxVault: Disposable, AutoCloseable, MdbxVaultInterface
 
 
 
+    @Throws(MdbxFfiException::class)override fun `applyHealthRepair`(`planToken`: kotlin.String, `operationId`: kotlin.String, `decisions`: List<MdbxHealthRepairDecision>): MdbxHealthRepairApplyResult {
+            return FfiConverterTypeMdbxHealthRepairApplyResult.lift(
+    callWithHandle {
+    uniffiRustCallWithError(MdbxFfiException) { _status ->
+    UniffiLib.uniffi_mdbx_ffi_fn_method_mdbxvault_apply_health_repair(
+        it,
+        FfiConverterString.lower(`planToken`),FfiConverterString.lower(`operationId`),FfiConverterSequenceTypeMdbxHealthRepairDecision.lower(`decisions`),_status)
+}
+    }
+    )
+    }
+
+
+
     @Throws(MdbxFfiException::class)override fun `createBackup`(`destination`: kotlin.String): MdbxBackupInfo {
             return FfiConverterTypeMdbxBackupInfo.lift(
     callWithHandle {
@@ -5721,6 +5753,20 @@ open class MdbxVault: Disposable, AutoCloseable, MdbxVaultInterface
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_mdbx_ffi_fn_method_mdbxvault_info(
+        it,
+        _status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(MdbxFfiException::class)override fun `planHealthRepair`(): MdbxHealthRepairPlan {
+            return FfiConverterTypeMdbxHealthRepairPlan.lift(
+    callWithHandle {
+    uniffiRustCallWithError(MdbxFfiException) { _status ->
+    UniffiLib.uniffi_mdbx_ffi_fn_method_mdbxvault_plan_health_repair(
         it,
         _status)
 }
@@ -9931,6 +9977,246 @@ public object FfiConverterTypeMdbxHealthIssue: FfiConverterRustBuffer<MdbxHealth
             FfiConverterTypeMdbxHealthIssueSeverity.write(value.`severity`, buf)
             FfiConverterString.write(value.`category`, buf)
             FfiConverterString.write(value.`description`, buf)
+    }
+}
+
+
+
+data class MdbxHealthRepairApplyResult (
+    var `status`: MdbxHealthRepairStatus
+    ,
+    var `snapshotId`: kotlin.String?
+    ,
+    var `commitId`: kotlin.String?
+    ,
+    var `repairedCount`: kotlin.ULong
+    ,
+    var `alreadyCommitted`: kotlin.Boolean
+    ,
+    var `health`: MdbxHealthCheckResult
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairApplyResult: FfiConverterRustBuffer<MdbxHealthRepairApplyResult> {
+    override fun read(buf: ByteBuffer): MdbxHealthRepairApplyResult {
+        return MdbxHealthRepairApplyResult(
+            FfiConverterTypeMdbxHealthRepairStatus.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterTypeMdbxHealthCheckResult.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairApplyResult) = (
+            FfiConverterTypeMdbxHealthRepairStatus.allocationSize(value.`status`) +
+            FfiConverterOptionalString.allocationSize(value.`snapshotId`) +
+            FfiConverterOptionalString.allocationSize(value.`commitId`) +
+            FfiConverterULong.allocationSize(value.`repairedCount`) +
+            FfiConverterBoolean.allocationSize(value.`alreadyCommitted`) +
+            FfiConverterTypeMdbxHealthCheckResult.allocationSize(value.`health`)
+    )
+
+    override fun write(value: MdbxHealthRepairApplyResult, buf: ByteBuffer) {
+            FfiConverterTypeMdbxHealthRepairStatus.write(value.`status`, buf)
+            FfiConverterOptionalString.write(value.`snapshotId`, buf)
+            FfiConverterOptionalString.write(value.`commitId`, buf)
+            FfiConverterULong.write(value.`repairedCount`, buf)
+            FfiConverterBoolean.write(value.`alreadyCommitted`, buf)
+            FfiConverterTypeMdbxHealthCheckResult.write(value.`health`, buf)
+    }
+}
+
+
+
+data class MdbxHealthRepairBlocker (
+    var `category`: kotlin.String
+    ,
+    var `description`: kotlin.String
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairBlocker: FfiConverterRustBuffer<MdbxHealthRepairBlocker> {
+    override fun read(buf: ByteBuffer): MdbxHealthRepairBlocker {
+        return MdbxHealthRepairBlocker(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairBlocker) = (
+            FfiConverterString.allocationSize(value.`category`) +
+            FfiConverterString.allocationSize(value.`description`)
+    )
+
+    override fun write(value: MdbxHealthRepairBlocker, buf: ByteBuffer) {
+            FfiConverterString.write(value.`category`, buf)
+            FfiConverterString.write(value.`description`, buf)
+    }
+}
+
+
+
+data class MdbxHealthRepairDecision (
+    var `repairId`: kotlin.String
+    ,
+    var `choice`: MdbxHealthRepairChoice
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairDecision: FfiConverterRustBuffer<MdbxHealthRepairDecision> {
+    override fun read(buf: ByteBuffer): MdbxHealthRepairDecision {
+        return MdbxHealthRepairDecision(
+            FfiConverterString.read(buf),
+            FfiConverterTypeMdbxHealthRepairChoice.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairDecision) = (
+            FfiConverterString.allocationSize(value.`repairId`) +
+            FfiConverterTypeMdbxHealthRepairChoice.allocationSize(value.`choice`)
+    )
+
+    override fun write(value: MdbxHealthRepairDecision, buf: ByteBuffer) {
+            FfiConverterString.write(value.`repairId`, buf)
+            FfiConverterTypeMdbxHealthRepairChoice.write(value.`choice`, buf)
+    }
+}
+
+
+
+data class MdbxHealthRepairItem (
+    var `repairId`: kotlin.String
+    ,
+    var `kind`: MdbxHealthRepairItemKind
+    ,
+    var `objectType`: kotlin.String
+    ,
+    var `objectId`: kotlin.String
+    ,
+    var `tombstoneCount`: kotlin.ULong
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairItem: FfiConverterRustBuffer<MdbxHealthRepairItem> {
+    override fun read(buf: ByteBuffer): MdbxHealthRepairItem {
+        return MdbxHealthRepairItem(
+            FfiConverterString.read(buf),
+            FfiConverterTypeMdbxHealthRepairItemKind.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairItem) = (
+            FfiConverterString.allocationSize(value.`repairId`) +
+            FfiConverterTypeMdbxHealthRepairItemKind.allocationSize(value.`kind`) +
+            FfiConverterString.allocationSize(value.`objectType`) +
+            FfiConverterString.allocationSize(value.`objectId`) +
+            FfiConverterULong.allocationSize(value.`tombstoneCount`)
+    )
+
+    override fun write(value: MdbxHealthRepairItem, buf: ByteBuffer) {
+            FfiConverterString.write(value.`repairId`, buf)
+            FfiConverterTypeMdbxHealthRepairItemKind.write(value.`kind`, buf)
+            FfiConverterString.write(value.`objectType`, buf)
+            FfiConverterString.write(value.`objectId`, buf)
+            FfiConverterULong.write(value.`tombstoneCount`, buf)
+    }
+}
+
+
+
+data class MdbxHealthRepairPlan (
+    var `token`: kotlin.String
+    ,
+    var `automaticItems`: List<MdbxHealthRepairItem>
+    ,
+    var `conflictItems`: List<MdbxHealthRepairItem>
+    ,
+    var `blockers`: List<MdbxHealthRepairBlocker>
+    ,
+    var `canApply`: kotlin.Boolean
+
+){
+
+
+
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairPlan: FfiConverterRustBuffer<MdbxHealthRepairPlan> {
+    override fun read(buf: ByteBuffer): MdbxHealthRepairPlan {
+        return MdbxHealthRepairPlan(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeMdbxHealthRepairItem.read(buf),
+            FfiConverterSequenceTypeMdbxHealthRepairItem.read(buf),
+            FfiConverterSequenceTypeMdbxHealthRepairBlocker.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairPlan) = (
+            FfiConverterString.allocationSize(value.`token`) +
+            FfiConverterSequenceTypeMdbxHealthRepairItem.allocationSize(value.`automaticItems`) +
+            FfiConverterSequenceTypeMdbxHealthRepairItem.allocationSize(value.`conflictItems`) +
+            FfiConverterSequenceTypeMdbxHealthRepairBlocker.allocationSize(value.`blockers`) +
+            FfiConverterBoolean.allocationSize(value.`canApply`)
+    )
+
+    override fun write(value: MdbxHealthRepairPlan, buf: ByteBuffer) {
+            FfiConverterString.write(value.`token`, buf)
+            FfiConverterSequenceTypeMdbxHealthRepairItem.write(value.`automaticItems`, buf)
+            FfiConverterSequenceTypeMdbxHealthRepairItem.write(value.`conflictItems`, buf)
+            FfiConverterSequenceTypeMdbxHealthRepairBlocker.write(value.`blockers`, buf)
+            FfiConverterBoolean.write(value.`canApply`, buf)
     }
 }
 
@@ -15152,6 +15438,117 @@ public object FfiConverterTypeMdbxHealthIssueSeverity: FfiConverterRustBuffer<Md
 
 
 
+enum class MdbxHealthRepairChoice {
+
+    KEEP_CONTENT,
+    DELETE_OBJECT,
+    CANCEL;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairChoice: FfiConverterRustBuffer<MdbxHealthRepairChoice> {
+    override fun read(buf: ByteBuffer) = try {
+
+        MdbxHealthRepairChoice.entries[buf.getInt() - 1]
+
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairChoice) = 4UL
+
+    override fun write(value: MdbxHealthRepairChoice, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class MdbxHealthRepairItemKind {
+
+    MISSING_TOMBSTONE,
+    DUPLICATE_TOMBSTONES,
+    ACTIVE_OBJECT_TOMBSTONE_CONFLICT;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairItemKind: FfiConverterRustBuffer<MdbxHealthRepairItemKind> {
+    override fun read(buf: ByteBuffer) = try {
+
+        MdbxHealthRepairItemKind.entries[buf.getInt() - 1]
+
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairItemKind) = 4UL
+
+    override fun write(value: MdbxHealthRepairItemKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class MdbxHealthRepairStatus {
+
+    APPLIED,
+    CANCELLED,
+    NO_CHANGES;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMdbxHealthRepairStatus: FfiConverterRustBuffer<MdbxHealthRepairStatus> {
+    override fun read(buf: ByteBuffer) = try {
+
+        MdbxHealthRepairStatus.entries[buf.getInt() - 1]
+
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: MdbxHealthRepairStatus) = 4UL
+
+    override fun write(value: MdbxHealthRepairStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
 enum class MdbxIntegrityRootCheckpointRelation {
 
     UNCHANGED,
@@ -17430,6 +17827,90 @@ public object FfiConverterSequenceTypeMdbxHealthIssue: FfiConverterRustBuffer<Li
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeMdbxHealthIssue.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeMdbxHealthRepairBlocker: FfiConverterRustBuffer<List<MdbxHealthRepairBlocker>> {
+    override fun read(buf: ByteBuffer): List<MdbxHealthRepairBlocker> {
+        val len = buf.getInt()
+        return List<MdbxHealthRepairBlocker>(len) {
+            FfiConverterTypeMdbxHealthRepairBlocker.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<MdbxHealthRepairBlocker>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMdbxHealthRepairBlocker.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<MdbxHealthRepairBlocker>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMdbxHealthRepairBlocker.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeMdbxHealthRepairDecision: FfiConverterRustBuffer<List<MdbxHealthRepairDecision>> {
+    override fun read(buf: ByteBuffer): List<MdbxHealthRepairDecision> {
+        val len = buf.getInt()
+        return List<MdbxHealthRepairDecision>(len) {
+            FfiConverterTypeMdbxHealthRepairDecision.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<MdbxHealthRepairDecision>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMdbxHealthRepairDecision.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<MdbxHealthRepairDecision>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMdbxHealthRepairDecision.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeMdbxHealthRepairItem: FfiConverterRustBuffer<List<MdbxHealthRepairItem>> {
+    override fun read(buf: ByteBuffer): List<MdbxHealthRepairItem> {
+        val len = buf.getInt()
+        return List<MdbxHealthRepairItem>(len) {
+            FfiConverterTypeMdbxHealthRepairItem.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<MdbxHealthRepairItem>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMdbxHealthRepairItem.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<MdbxHealthRepairItem>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMdbxHealthRepairItem.write(it, buf)
         }
     }
 }

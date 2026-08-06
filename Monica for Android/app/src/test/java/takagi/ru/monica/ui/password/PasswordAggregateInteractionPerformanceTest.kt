@@ -9,6 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordPageContentType
+import takagi.ru.monica.ui.PasswordGroupingConfig
 import takagi.ru.monica.viewmodel.CategoryFilter
 
 class PasswordAggregateInteractionPerformanceTest {
@@ -54,6 +55,41 @@ class PasswordAggregateInteractionPerformanceTest {
         assertFalse(state.updateIfCurrent(generation, key, items))
         assertFalse(state.seed(key).hasSnapshot)
         assertEquals(emptyList<PasswordAggregateListItemUi>(), state.seed(key).items)
+    }
+
+    @Test
+    fun `retained password grouping snapshot survives dock removal and clears on lock`() {
+        val state = PasswordAggregateRetainedState()
+        val first = password(1L, "github.com")
+        val second = password(2L, "github.com")
+        val config = PasswordGroupingConfig(
+            isLocalOnlyView = false,
+            effectiveStackCardMode = StackCardMode.AUTO,
+            effectiveGroupMode = "website",
+            websiteStackMatchMode = "domain",
+            effectiveNoStackEntryIds = emptySet(),
+            effectiveManualStackGroupByEntryId = emptyMap(),
+            untitledLabel = "Untitled",
+        )
+        val key = PasswordGroupingSnapshotKey(
+            sourceEntries = listOf(first, second),
+            config = config,
+        )
+        val groups = mapOf("github.com" to listOf(first, second))
+
+        assertFalse(state.groupingSeed(key).hasSnapshot)
+        val generation = state.currentGeneration()
+        assertTrue(state.updateGroupingIfCurrent(generation, key, groups))
+        assertSame(groups, state.groupingSeed(key).groups)
+        assertFalse(
+            state.groupingSeed(
+                key.copy(config = config.copy(effectiveGroupMode = "title"))
+            ).hasSnapshot
+        )
+
+        state.clear()
+        assertFalse(state.updateGroupingIfCurrent(generation, key, groups))
+        assertFalse(state.groupingSeed(key).hasSnapshot)
     }
 
     @Test
@@ -122,6 +158,15 @@ class PasswordAggregateInteractionPerformanceTest {
         badgeText = type.name,
         badgeColor = Color.Blue,
         sortTime = 1L,
+    )
+
+    private fun password(id: Long, website: String): PasswordEntry = PasswordEntry(
+        id = id,
+        title = website,
+        website = website,
+        username = "user$id",
+        password = "password$id",
+        sortOrder = id.toInt(),
     )
 
     private fun source(relativePath: String): String {

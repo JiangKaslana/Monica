@@ -36,6 +36,15 @@ import uniffi.mdbx_ffi.MdbxAttachmentCreateRequest
 import uniffi.mdbx_ffi.MdbxConflictChoice
 import uniffi.mdbx_ffi.MdbxDeviceAssurance
 import uniffi.mdbx_ffi.MdbxDeviceContext
+import uniffi.mdbx_ffi.MdbxHealthIssue as NativeMdbxHealthIssue
+import uniffi.mdbx_ffi.MdbxHealthIssueSeverity as NativeMdbxHealthIssueSeverity
+import uniffi.mdbx_ffi.MdbxHealthRepairApplyResult as NativeMdbxHealthRepairApplyResult
+import uniffi.mdbx_ffi.MdbxHealthRepairChoice as NativeMdbxHealthRepairChoice
+import uniffi.mdbx_ffi.MdbxHealthRepairDecision as NativeMdbxHealthRepairDecision
+import uniffi.mdbx_ffi.MdbxHealthRepairItem as NativeMdbxHealthRepairItem
+import uniffi.mdbx_ffi.MdbxHealthRepairItemKind as NativeMdbxHealthRepairItemKind
+import uniffi.mdbx_ffi.MdbxHealthRepairPlan as NativeMdbxHealthRepairPlan
+import uniffi.mdbx_ffi.MdbxHealthRepairStatus as NativeMdbxHealthRepairStatus
 import uniffi.mdbx_ffi.MdbxSnapshotKind
 import uniffi.mdbx_ffi.MdbxSnapshotStructureNode
 import uniffi.mdbx_ffi.MdbxVault
@@ -575,7 +584,8 @@ class Mdbx2Repository(
             val status = runCatching { MdbxSyncStatus.valueOf(database.lastSyncStatus) }.getOrNull()
             val rootProjectId = Mdbx2VaultSessionExecutor.rootProjectId(vault.info().vaultId)
             val rootProjectCount = if (vault.getCollectionSummary(rootProjectId)?.deleted == false) 1 else 0
-            val issueSummary = health.issues
+            val healthIssues = health.issues.map(::toRepositoryDiagnostic)
+            val issueSummary = healthIssues
                 .take(MAX_DIAGNOSTIC_ISSUE_PREVIEW)
                 .joinToString(separator = "; ") { issue ->
                     "${issue.category}: ${issue.description}"
@@ -597,6 +607,7 @@ class Mdbx2Repository(
                 defaultTigaMode = database.tigaMode,
                 integrityOk = health.healthy,
                 integrityMessage = issueSummary,
+                healthIssues = healthIssues,
                 unresolvedConflictCount = native.unresolvedConflictCount.toDiagnosticInt(),
                 pendingSyncCount = pendingSyncCount(database, status, vault),
                 commitCount = native.commitCount.toDiagnosticInt(),
@@ -612,20 +623,51 @@ class Mdbx2Repository(
                 externalAttachmentCount = native.externalAttachmentCount.toDiagnosticInt(),
                 originalAttachmentBytes = native.originalAttachmentBytes.toDiagnosticLong(),
                 storedAttachmentBytes = native.storedAttachmentBytes.toDiagnosticLong(),
-                danglingParentCount = health.issues.count { it.category == "orphans" },
-                danglingBranchHeadCount = health.issues.count {
-                    it.category == "stale-heads" && it.description.contains("branch", ignoreCase = true)
+                danglingParentCount = healthIssues.count {
+                    it.category == "commit-chain" && it.description.contains("parent", ignoreCase = true)
                 },
-                danglingDeviceHeadCount = health.issues.count {
-                    it.category == "stale-heads" && it.description.contains("device", ignoreCase = true)
+                danglingBranchHeadCount = healthIssues.count {
+                    it.category == "commit-chain" && it.description.contains("branch", ignoreCase = true)
                 },
-                attachmentChunkMismatchCount = health.issues.count {
+                danglingDeviceHeadCount = healthIssues.count {
+                    it.category == "stale-heads" && it.severity.requiresAction
+                },
+                attachmentChunkMismatchCount = healthIssues.count {
                     it.category == "attachment-chunks"
                 },
                 lastSyncStatus = database.lastSyncStatus,
                 lastSyncError = database.lastSyncError
             )
         }
+
+    override suspend fun planHealthRepair(databaseId: Long): MdbxHealthRepairPlan =
+        sessions.withVault(databaseId) { _, vault ->
+            toRepositoryPlan(vault.planHealthRepair())
+        }
+
+    override suspend fun applyHealthRepair(
+        databaseId: Long,
+        planToken: String,
+        operationId: String,
+        decisions: List<MdbxHealthRepairDecision>
+    ): MdbxHealthRepairApplyResult {
+        val nativeDecisions = decisions.map { decision ->
+            NativeMdbxHealthRepairDecision(
+                repairId = decision.repairId,
+                choice = toNativeChoice(decision.choice)
+            )
+        }
+        val nativeResult = if (decisions.any { it.choice == MdbxHealthRepairChoice.CANCEL }) {
+            sessions.withVault(databaseId) { _, vault ->
+                vault.applyHealthRepair(planToken, operationId, nativeDecisions)
+            }
+        } else {
+            sessions.withMutatingVault(databaseId) { _, vault ->
+                vault.applyHealthRepair(planToken, operationId, nativeDecisions)
+            }
+        }
+        return toRepositoryResult(nativeResult)
+    }
 
     override suspend fun getPendingSyncCount(databaseId: Long): Int {
         val database = databaseDao.getDatabaseById(databaseId) ?: return 0
@@ -1813,6 +1855,72 @@ class Mdbx2Repository(
             metadata = metadata
         )
     }
+
+    private fun toRepositoryDiagnostic(issue: NativeMdbxHealthIssue): MdbxHealthIssueDiagnostic =
+        MdbxHealthIssueDiagnostic(
+            severity = when (issue.severity) {
+                NativeMdbxHealthIssueSeverity.INFO -> MdbxHealthSeverity.INFO
+                NativeMdbxHealthIssueSeverity.WARNING -> MdbxHealthSeverity.WARNING
+                NativeMdbxHealthIssueSeverity.ERROR -> MdbxHealthSeverity.ERROR
+                NativeMdbxHealthIssueSeverity.CRITICAL -> MdbxHealthSeverity.CRITICAL
+            },
+            category = issue.category,
+            description = issue.description
+        )
+
+    private fun toRepositoryItem(item: NativeMdbxHealthRepairItem): MdbxHealthRepairItem =
+        MdbxHealthRepairItem(
+            repairId = item.repairId,
+            kind = when (item.kind) {
+                NativeMdbxHealthRepairItemKind.MISSING_TOMBSTONE ->
+                    MdbxHealthRepairItemKind.MISSING_TOMBSTONE
+                NativeMdbxHealthRepairItemKind.DUPLICATE_TOMBSTONES ->
+                    MdbxHealthRepairItemKind.DUPLICATE_TOMBSTONES
+                NativeMdbxHealthRepairItemKind.ACTIVE_OBJECT_TOMBSTONE_CONFLICT ->
+                    MdbxHealthRepairItemKind.ACTIVE_OBJECT_TOMBSTONE_CONFLICT
+            },
+            objectType = item.objectType,
+            objectId = item.objectId,
+            tombstoneCount = item.tombstoneCount.toDiagnosticInt()
+        )
+
+    private fun toRepositoryPlan(plan: NativeMdbxHealthRepairPlan): MdbxHealthRepairPlan =
+        MdbxHealthRepairPlan(
+            token = plan.token,
+            automaticItems = plan.automaticItems.map(::toRepositoryItem),
+            conflictItems = plan.conflictItems.map(::toRepositoryItem),
+            blockers = plan.blockers.map { blocker ->
+                MdbxHealthRepairBlocker(
+                    category = blocker.category,
+                    description = blocker.description
+                )
+            },
+            canApply = plan.canApply
+        )
+
+    private fun toNativeChoice(choice: MdbxHealthRepairChoice): NativeMdbxHealthRepairChoice =
+        when (choice) {
+            MdbxHealthRepairChoice.KEEP_CONTENT -> NativeMdbxHealthRepairChoice.KEEP_CONTENT
+            MdbxHealthRepairChoice.DELETE_OBJECT -> NativeMdbxHealthRepairChoice.DELETE_OBJECT
+            MdbxHealthRepairChoice.CANCEL -> NativeMdbxHealthRepairChoice.CANCEL
+        }
+
+    private fun toRepositoryResult(
+        result: NativeMdbxHealthRepairApplyResult
+    ): MdbxHealthRepairApplyResult =
+        MdbxHealthRepairApplyResult(
+            status = when (result.status) {
+                NativeMdbxHealthRepairStatus.APPLIED -> MdbxHealthRepairStatus.APPLIED
+                NativeMdbxHealthRepairStatus.CANCELLED -> MdbxHealthRepairStatus.CANCELLED
+                NativeMdbxHealthRepairStatus.NO_CHANGES -> MdbxHealthRepairStatus.NO_CHANGES
+            },
+            snapshotId = result.snapshotId,
+            commitId = result.commitId,
+            repairedCount = result.repairedCount.toDiagnosticInt(),
+            alreadyCommitted = result.alreadyCommitted,
+            healthy = result.health.healthy,
+            remainingIssues = result.health.issues.map(::toRepositoryDiagnostic)
+        )
 
     private fun ULong.toDiagnosticInt(): Int = coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
 
