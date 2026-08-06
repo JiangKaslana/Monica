@@ -4200,4 +4200,17 @@
     <string name="passkey_binding_description">Linking keeps the passkey and its related account together.</string>
     <string name="timeline_show_sensitive_values">Show sensitive values</string>
     <string name="timeline_hide_sensitive_values">Hide sensitive values</string>
+    <string name="mdbx_create_snapshot_menu">Create MDBX snapshot</string>
+    <string name="mdbx_commit_history_menu">MDBX commit history</string>
+    <string name="mdbx_quick_snapshot_name">Quick snapshot · %1$s</string>
+    <string name="mdbx_quick_snapshot_created">Snapshot “%1$s” created</string>
+    <string name="mdbx_quick_snapshot_failed">Could not create snapshot: %1$s</string>
+    <string name="mdbx_snapshot_unavailable">Snapshots are unavailable for this MDBX database</string>
+    <string name="mdbx_snapshot_create_when_changed">Create when changed</string>
+    <string name="mdbx_snapshot_create_when_changed_description">Create a full snapshot after new database changes and avoid duplicate copies of the same state</string>
+    <string name="mdbx_snapshot_always_create_full">Always create full snapshot</string>
+    <string name="mdbx_snapshot_always_create_full_description">Save a new full snapshot even when the database state is unchanged</string>
+    <string name="mdbx_snapshot_no_changes_title">No new database changes</string>
+    <string name="mdbx_snapshot_no_changes_message">The latest snapshot already represents the current database state, so there are no incremental changes to save. Create a full snapshot anyway?</string>
+    <string name="mdbx_snapshot_create_full_anyway">Create full snapshot</string>
 </resources>

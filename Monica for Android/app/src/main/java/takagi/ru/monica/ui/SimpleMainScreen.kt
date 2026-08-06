@@ -726,6 +726,7 @@ fun SimpleMainScreen(
     onNavigateToNoteDetail: (Long) -> Unit = {},
     onNavigateToPasswordDetail: (Long) -> Unit = {},
     onNavigateToPasskeyDetail: (Long) -> Unit,
+    onNavigateToMdbxCommitHistory: (Long) -> Unit = {},
     onNavigateToBankCardDetail: (Long) -> Unit, // Add this
     onNavigateToDocumentDetail: (Long) -> Unit, // Keep this
     onNavigateToBillingAddressDetail: (Long) -> Unit,
@@ -1947,6 +1948,7 @@ fun SimpleMainScreen(
                     onNavigateToDocumentDetail = onNavigateToDocumentDetail,
                     onNavigateToBillingAddressDetail = handleBillingAddressOpen,
                     onNavigateToPasskeyDetail = onNavigateToPasskeyDetail,
+                    onNavigateToMdbxCommitHistory = onNavigateToMdbxCommitHistory,
                     onNoteSelectionModeChange = { isSelectionMode ->
                         isNoteSelectionMode = isSelectionMode
                     },
@@ -2125,6 +2127,7 @@ fun SimpleMainScreen(
                     onOpenDocument = handleDocumentOpen,
                     onOpenNote = { handleNoteOpen(it) },
                     onOpenPasskey = onNavigateToPasskeyDetail,
+                    onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
                     onOpenHistory = {
                         openHistoryPage()
                     },
@@ -2169,13 +2172,14 @@ fun SimpleMainScreen(
                             )
                         },
                         onPasswordOpen = handlePasswordDetailOpen,
-                    onNavigateToAddTotp = onNavigateToAddTotp,
-                    onNavigateToBankCardDetail = onNavigateToBankCardDetail,
-                    onNavigateToDocumentDetail = onNavigateToDocumentDetail,
-                    onNavigateToBillingAddressDetail = handleBillingAddressOpen,
-                    onNavigateToAddNote = handleNoteOpen,
+                        onNavigateToAddTotp = onNavigateToAddTotp,
+                        onNavigateToBankCardDetail = onNavigateToBankCardDetail,
+                        onNavigateToDocumentDetail = onNavigateToDocumentDetail,
+                        onNavigateToBillingAddressDetail = handleBillingAddressOpen,
+                        onNavigateToAddNote = handleNoteOpen,
                         onNavigateToNoteDetail = onNavigateToNoteDetail,
                         onNavigateToPasskeyDetail = onNavigateToPasskeyDetail,
+                        onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
                         onOpenHistoryPage = openHistoryPage,
                         onOpenTrashPage = openTrashPage,
                         onOpenCommonAccountTemplatesPage = onNavigateToCommonAccountTemplates,
@@ -2538,6 +2542,7 @@ fun SimpleMainScreen(
                         onOpenDocument = handleDocumentOpen,
                         onOpenNote = { handleNoteOpen(it) },
                         onOpenPasskey = onNavigateToPasskeyDetail,
+                        onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
                         onOpenHistory = {
                             openHistoryPage()
                         },
@@ -2589,6 +2594,7 @@ fun SimpleMainScreen(
                             onNavigateToAddNote = handleNoteOpen,
                             onNavigateToNoteDetail = onNavigateToNoteDetail,
                             onNavigateToPasskeyDetail = onNavigateToPasskeyDetail,
+                            onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
                             onOpenHistoryPage = openHistoryPage,
                             onOpenTrashPage = openTrashPage,
                             onOpenCommonAccountTemplatesPage = onNavigateToCommonAccountTemplates,
@@ -3159,42 +3165,66 @@ private fun MainScreenTabResetEffects(
     onResetTimelineSelection: () -> Unit,
 ) {
     // Each effect owns one tab domain reset. Keep them split to avoid hidden coupling.
-    LaunchedEffect(currentTab.key, isCompactWidth) {
-        if (isCompactWidth || currentTab != BottomNavItem.Passwords) {
-            onResetPasswordPane()
-        }
-    }
     LaunchedEffect(currentTab.key) {
         if (currentTab != BottomNavItem.Passwords && currentTab != BottomNavItem.VaultV2) {
             onHideBackToTop()
         }
     }
     LaunchedEffect(currentTab.key, isCompactWidth) {
-        if (
-            isCompactWidth ||
-            (currentTab != BottomNavItem.Authenticator && currentTab != BottomNavItem.Passkey)
-        ) {
-            onResetTotpPane()
+        if (isCompactWidth && currentTab != BottomNavItem.Passwords) {
+            onResetPasswordPane()
         }
     }
-    LaunchedEffect(currentTab.key, isCompactWidth, cardWalletSubTab) {
-        if (isCompactWidth || currentTab != BottomNavItem.CardWallet) {
-            onResetCardWalletPaneAll()
-        } else {
-            when (cardWalletSubTab) {
-                CardWalletTab.BANK_CARDS -> {
-                    onResetCardWalletDocumentPane()
-                    onResetCardWalletBillingAddressPane()
+    if (!isCompactWidth) {
+        LaunchedEffect(currentTab.key) {
+            if (currentTab != BottomNavItem.Passwords) {
+                onResetPasswordPane()
+            }
+        }
+        LaunchedEffect(currentTab.key) {
+            if (currentTab != BottomNavItem.Authenticator && currentTab != BottomNavItem.Passkey) {
+                onResetTotpPane()
+            }
+        }
+        LaunchedEffect(currentTab.key, cardWalletSubTab) {
+            if (currentTab != BottomNavItem.CardWallet) {
+                onResetCardWalletPaneAll()
+            } else {
+                when (cardWalletSubTab) {
+                    CardWalletTab.BANK_CARDS -> {
+                        onResetCardWalletDocumentPane()
+                        onResetCardWalletBillingAddressPane()
+                    }
+                    CardWalletTab.DOCUMENTS -> {
+                        onResetCardWalletBankCardPane()
+                        onResetCardWalletBillingAddressPane()
+                    }
+                    CardWalletTab.BILLING_ADDRESSES -> {
+                        onResetCardWalletBankCardPane()
+                        onResetCardWalletDocumentPane()
+                    }
+                    CardWalletTab.ALL -> Unit
                 }
-                CardWalletTab.DOCUMENTS -> {
-                    onResetCardWalletBankCardPane()
-                    onResetCardWalletBillingAddressPane()
-                }
-                CardWalletTab.BILLING_ADDRESSES -> {
-                    onResetCardWalletBankCardPane()
-                    onResetCardWalletDocumentPane()
-                }
-                CardWalletTab.ALL -> Unit
+            }
+        }
+        LaunchedEffect(currentTab.key) {
+            if (currentTab != BottomNavItem.Notes) {
+                onResetNotePane()
+            }
+        }
+        LaunchedEffect(currentTab.key) {
+            if (currentTab != BottomNavItem.Authenticator && currentTab != BottomNavItem.Passkey) {
+                onResetPasskeyPane()
+            }
+        }
+        LaunchedEffect(currentTab.key) {
+            if (currentTab != BottomNavItem.Send) {
+                onResetSendPane()
+            }
+        }
+        LaunchedEffect(currentTab.key, passwordHistoryPageMode) {
+            if (currentTab != BottomNavItem.Passwords || !passwordHistoryPageMode.isVisible) {
+                onResetTimelineSelection()
             }
         }
     }
@@ -3205,29 +3235,6 @@ private fun MainScreenTabResetEffects(
             cardWalletSubTab == CardWalletTab.BILLING_ADDRESSES
         ) {
             onSyncWalletUnifiedAddType(cardWalletSubTab)
-        }
-    }
-    LaunchedEffect(currentTab.key, isCompactWidth) {
-        if (isCompactWidth || currentTab != BottomNavItem.Notes) {
-            onResetNotePane()
-        }
-    }
-    LaunchedEffect(currentTab.key, isCompactWidth) {
-        if (
-            isCompactWidth ||
-            (currentTab != BottomNavItem.Authenticator && currentTab != BottomNavItem.Passkey)
-        ) {
-            onResetPasskeyPane()
-        }
-    }
-    LaunchedEffect(currentTab.key, isCompactWidth) {
-        if (isCompactWidth || currentTab != BottomNavItem.Send) {
-            onResetSendPane()
-        }
-    }
-    LaunchedEffect(currentTab.key, isCompactWidth, passwordHistoryPageMode) {
-        if (isCompactWidth || currentTab != BottomNavItem.Passwords || !passwordHistoryPageMode.isVisible) {
-            onResetTimelineSelection()
         }
     }
 }

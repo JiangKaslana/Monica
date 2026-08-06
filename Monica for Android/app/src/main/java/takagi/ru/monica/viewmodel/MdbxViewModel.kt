@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import takagi.ru.monica.R
 import takagi.ru.monica.attachments.data.AttachmentDao
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
@@ -103,14 +104,41 @@ import takagi.ru.monica.utils.OneDriveMdbxRemoteTransport
 import takagi.ru.monica.util.TotpDataResolver
 import java.io.File
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
 import java.text.Normalizer
 import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.system.measureTimeMillis
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+internal sealed interface MdbxSnapshotCreationPlan {
+    data class Create(val fullSnapshot: Boolean) : MdbxSnapshotCreationPlan
+    data object ConfirmFullSnapshot : MdbxSnapshotCreationPlan
+}
+
+internal fun planMdbxSnapshotCreation(
+    requestedFullSnapshot: Boolean,
+    engineRequiresFullSnapshot: Boolean,
+    currentHeadCommitId: String?,
+    latestSnapshotBaseCommitId: String?
+): MdbxSnapshotCreationPlan {
+    if (requestedFullSnapshot) {
+        return MdbxSnapshotCreationPlan.Create(fullSnapshot = true)
+    }
+    val unchangedSinceLatestSnapshot =
+        !currentHeadCommitId.isNullOrBlank() &&
+            currentHeadCommitId == latestSnapshotBaseCommitId
+    if (unchangedSinceLatestSnapshot) {
+        return MdbxSnapshotCreationPlan.ConfirmFullSnapshot
+    }
+    return MdbxSnapshotCreationPlan.Create(
+        fullSnapshot = engineRequiresFullSnapshot
+    )
+}
 
 class MdbxViewModel(
     application: Application,
@@ -2643,9 +2671,21 @@ class MdbxViewModel(
         }
     }
 
-    fun createSnapshot(databaseId: Long, name: String, fullSnapshot: Boolean) {
+    fun createSnapshot(
+        databaseId: Long,
+        name: String,
+        fullSnapshot: Boolean,
+        onResult: ((Result<MdbxSnapshotSummary>) -> Unit)? = null
+    ) {
         viewModelScope.launch {
             if (!requireCapability(databaseId, MdbxCapability.SNAPSHOTS, "Snapshot creation")) {
+                onResult?.invoke(
+                    Result.failure(
+                        IllegalStateException(
+                            getApplication<Application>().getString(R.string.mdbx_snapshot_unavailable)
+                        )
+                    )
+                )
                 return@launch
             }
             val current = _deltaDialogState.value as? MdbxDeltaDialogState.Visible
@@ -2665,14 +2705,101 @@ class MdbxViewModel(
                 _operationState.value = OperationState.Success(
                     "Created MDBX snapshot ${snapshot.name}"
                 )
+                onResult?.invoke(Result.success(snapshot))
             } catch (e: Exception) {
                 _deltaDialogState.value = current?.copy(isSnapshotLoading = false)
                     ?: MdbxDeltaDialogState.Hidden
                 _operationState.value = OperationState.Error(
                     "Failed to create MDBX snapshot: ${e.message ?: "unknown error"}"
                 )
+                onResult?.invoke(Result.failure(e))
             }
         }
+    }
+
+    fun requestSnapshotCreation(
+        databaseId: Long,
+        name: String,
+        requestedFullSnapshot: Boolean,
+        onOutcome: (MdbxSnapshotCreateOutcome) -> Unit
+    ) {
+        viewModelScope.launch {
+            if (!requireCapability(databaseId, MdbxCapability.SNAPSHOTS, "Snapshot creation")) {
+                onOutcome(
+                    MdbxSnapshotCreateOutcome.Failed(
+                        IllegalStateException(
+                            getApplication<Application>().getString(R.string.mdbx_snapshot_unavailable)
+                        )
+                    )
+                )
+                return@launch
+            }
+            val current = _deltaDialogState.value as? MdbxDeltaDialogState.Visible
+            _deltaDialogState.value = current?.copy(isSnapshotLoading = true)
+                ?: MdbxDeltaDialogState.Hidden
+            try {
+                val plan = withContext(Dispatchers.IO) {
+                    val database = databaseDao.getDatabaseById(databaseId)
+                        ?: throw IllegalStateException("MDBX vault not found: $databaseId")
+                    val latestSnapshotBaseCommitId = vaultStore.listSnapshots(databaseId)
+                        .firstOrNull()
+                        ?.baseCommitId
+                    val currentHeadCommitId = vaultStore.getCurrentHeadCommitId(databaseId)
+                    planMdbxSnapshotCreation(
+                        requestedFullSnapshot = requestedFullSnapshot,
+                        engineRequiresFullSnapshot =
+                            database.engineTypeEnum == MdbxEngineType.RUST_MDBX2,
+                        currentHeadCommitId = currentHeadCommitId,
+                        latestSnapshotBaseCommitId = latestSnapshotBaseCommitId
+                    )
+                }
+                if (plan == MdbxSnapshotCreationPlan.ConfirmFullSnapshot) {
+                    _deltaDialogState.value = current?.copy(isSnapshotLoading = false)
+                        ?: MdbxDeltaDialogState.Hidden
+                    onOutcome(MdbxSnapshotCreateOutcome.NoChanges)
+                    return@launch
+                }
+                val fullSnapshot = (plan as MdbxSnapshotCreationPlan.Create).fullSnapshot
+                invalidateMdbxViewCaches(databaseId)
+                val snapshot = withContext(Dispatchers.IO) {
+                    vaultStore.createSnapshot(
+                        databaseId = databaseId,
+                        name = name,
+                        fullSnapshot = fullSnapshot,
+                        autoPrune = false
+                    )
+                }
+                refreshDeltaDialogAfterSnapshotMutation(databaseId, current)
+                _operationState.value = OperationState.Success(
+                    "Created MDBX snapshot ${snapshot.name}"
+                )
+                onOutcome(MdbxSnapshotCreateOutcome.Created(snapshot))
+            } catch (e: Exception) {
+                _deltaDialogState.value = current?.copy(isSnapshotLoading = false)
+                    ?: MdbxDeltaDialogState.Hidden
+                _operationState.value = OperationState.Error(
+                    "Failed to create MDBX snapshot: ${e.message ?: "unknown error"}"
+                )
+                onOutcome(MdbxSnapshotCreateOutcome.Failed(e))
+            }
+        }
+    }
+
+    fun createQuickSnapshot(
+        databaseId: Long,
+        onResult: ((Result<MdbxSnapshotSummary>) -> Unit)? = null
+    ) {
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        val name = getApplication<Application>().getString(
+            R.string.mdbx_quick_snapshot_name,
+            timestamp
+        )
+        createSnapshot(
+            databaseId = databaseId,
+            name = name,
+            fullSnapshot = true,
+            onResult = onResult
+        )
     }
 
     fun deleteSnapshot(databaseId: Long, snapshotId: String) {
@@ -4331,6 +4458,12 @@ class MdbxViewModel(
             val structurePreview: MdbxStructurePreview? = null,
             val isStructureLoading: Boolean = false
         ) : MdbxDeltaDialogState()
+    }
+
+    sealed interface MdbxSnapshotCreateOutcome {
+        data class Created(val snapshot: MdbxSnapshotSummary) : MdbxSnapshotCreateOutcome
+        data object NoChanges : MdbxSnapshotCreateOutcome
+        data class Failed(val error: Throwable) : MdbxSnapshotCreateOutcome
     }
 
     sealed class MdbxAdvancedDialogState {

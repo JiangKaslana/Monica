@@ -555,8 +555,8 @@ class MultiPasswordSaveRegressionGuardTest {
             "History UI must expose Diff and Revert controls.",
             managerSource.contains("onShowDiff") &&
                 managerSource.contains("onRevert") &&
-                managerSource.contains("Text(\"查看变更\")") &&
-                managerSource.contains("Text(\"回滚\")")
+                managerSource.contains("CommitObjectChangeCard(diff)") &&
+                managerSource.contains("Text(\"撤销这次更改\")")
         )
     }
 
@@ -762,7 +762,8 @@ class MultiPasswordSaveRegressionGuardTest {
         )
         assertTrue(
             "MDBX manager should stay on the format-management hub and only activate vaults after the user opens or navigates to them.",
-            managerSource.contains("mutableStateOf<MdbxManagerPage>(MdbxManagerPage.Hub)") &&
+            managerSource.contains("initialMdbxManagerPage(initialDatabaseId, initialPage)") &&
+                managerSource.contains("databaseId == null || initialPage == MdbxManagerInitialPage.HOME -> MdbxManagerPage.Hub") &&
                 managerSource.contains("viewModel.activateMdbxDatabase(database.id)") &&
                 managerSource.contains("viewModel.activateMdbxDatabase(db.id)")
         )
@@ -1248,7 +1249,8 @@ class MultiPasswordSaveRegressionGuardTest {
 
         assertTrue(
             "MDBX manager must expose a snapshot management panel.",
-            managerSource.contains("SnapshotManagerPanel(") &&
+            managerSource.contains("MdbxSnapshotPage(") &&
+                managerSource.contains("SnapshotCreationCard(") &&
                 managerSource.contains("SnapshotRow(") &&
                 managerSource.contains("onCreateSnapshot") &&
                 managerSource.contains("onRevertSnapshot") &&
@@ -1310,11 +1312,11 @@ class MultiPasswordSaveRegressionGuardTest {
                 syncBackupSource.contains("SyncBackupSection(title = \"MDBX\")") &&
                 syncBackupSource.contains("MDBX 数据库管理") &&
                 mainActivitySource.contains("onNavigateToMdbx = {") &&
-                mainActivitySource.contains("navController.navigate(Screen.MdbxManager.route)")
+                mainActivitySource.contains("navController.navigate(Screen.MdbxManager.createRoute())")
         )
         assertTrue(
             "MDBX format-management entry must discard any old MDBX manager back stack state so it always lands on the MDBX hub.",
-            mainActivitySource.contains("popUpTo(Screen.MdbxManager.route) { inclusive = true }") &&
+            mainActivitySource.contains("popUpTo(Screen.MdbxManager.routePattern) { inclusive = true }") &&
                 mainActivitySource.contains("launchSingleTop = true")
         )
         assertTrue(
@@ -2052,9 +2054,9 @@ class MultiPasswordSaveRegressionGuardTest {
         )
         assertTrue(
             "Snapshot rows should let the user inspect the snapshot base commit diff before reverting.",
-            managerSource.contains("onShowSnapshotDiff: (String) -> Unit") &&
-                managerSource.contains("onShowDiff = { onShowSnapshotDiff(snapshot.baseCommitId) }") &&
-                managerSource.contains("Text(\"查看变更\")")
+            managerSource.contains("onShowDiff: () -> Unit") &&
+                managerSource.contains("onShowDiff = { onShowDiff(snapshot.baseCommitId) }") &&
+                managerSource.contains("Text(\"变更\")")
         )
         val snapshotStructurePreviewBody = managerSource
             .substringAfter("private fun SnapshotStructurePreviewPage(")
@@ -2138,11 +2140,11 @@ class MultiPasswordSaveRegressionGuardTest {
         )
         assertTrue(
             "History detail should preserve the top app bar back path and use progressive disclosure.",
-            managerSource.contains("val deltaState = deltaDialogState as? MdbxViewModel.MdbxDeltaDialogState.Visible") &&
+                managerSource.contains("val deltaState = deltaDialogState as? MdbxViewModel.MdbxDeltaDialogState.Visible") &&
                 managerSource.contains("deltaState?.selectedDiffCommitId != null") &&
                 managerSource.contains("viewModel.closeCommitDiff()") &&
-                managerSource.contains("MdbxSectionHeader(") &&
-                managerSource.contains("title = \"提交历史\"") &&
+                managerSource.contains("is MdbxManagerPage.CommitHistory -> \"提交历史\"") &&
+                managerSource.contains("BackHandler(onBack = goBack)") &&
                 managerSource.contains("private fun MdbxSnapshotPage(") &&
                 managerSource.contains("private fun MdbxCommitHistoryPage(") &&
                 managerSource.contains("MdbxNavigationActionRow(Icons.Default.Restore, \"快照\", onShowSnapshots)") &&
@@ -3020,12 +3022,14 @@ class MultiPasswordSaveRegressionGuardTest {
             "The automatic snapshot button should clear automatic snapshots on demand instead of retaining the default 20 and looking like it did nothing.",
             mdbxViewModelSource.contains("vaultStore.pruneAutomaticSnapshots(databaseId, keepCount = 0)") &&
                 mdbxViewModelSource.contains("\"已清理 ${'$'}deletedCount 个自动快照\"") &&
-                managerSource.contains("Text(\"清空自动\")")
+                managerSource.contains("Text(\"清理自动\")")
         )
         assertTrue(
             "Snapshot UI should use user-facing increment/full wording and not expose the unexplained Delta label.",
-            managerSource.contains("if (fullSnapshot) \"完整快照\" else \"增量快照\"") &&
-                managerSource.contains("${'$'}{if (snapshot.isFull) \"完整\" else \"增量\"}") &&
+            managerSource.contains("\"完整快照\"") &&
+                managerSource.contains("\"增量快照\"") &&
+                managerSource.contains("SnapshotInfoPill(if (snapshot.isFull) \"完整\" else \"增量\")") &&
+                managerSource.contains("mdbx_snapshot_create_when_changed") &&
                 !managerSource.contains("Delta 快照") &&
                 !managerSource.contains("\"Delta\"")
         )
@@ -3033,7 +3037,7 @@ class MultiPasswordSaveRegressionGuardTest {
             "Snapshot rollback must require a second confirmation because it mutates the current MDBX database.",
             managerSource.contains("var pendingRevertSnapshot by remember { mutableStateOf<MdbxSnapshotSummary?>(null) }") &&
                 managerSource.contains("AlertDialog(") &&
-                managerSource.contains("title = { Text(\"确认回滚快照\") }") &&
+                managerSource.contains("title = { Text(\"回滚到此快照？\") }") &&
                 managerSource.contains("Text(\"确认回滚\")") &&
                 managerSource.contains("onRevertSnapshot(snapshot.snapshotId)") &&
                 managerSource.contains("onRevert = { pendingRevertSnapshot = snapshot }") &&

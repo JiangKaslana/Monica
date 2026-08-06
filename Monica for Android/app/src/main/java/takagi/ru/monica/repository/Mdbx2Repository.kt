@@ -747,6 +747,14 @@ class Mdbx2Repository(
             }
     }
 
+    override suspend fun getCurrentHeadCommitId(databaseId: Long): String? =
+        sessions.withVault(databaseId) { _, vault ->
+            val branches = vault.listBranches()
+            branches.firstOrNull { branch ->
+                branch.branchName.equals("main", ignoreCase = true)
+            }?.headCommitId ?: branches.maxByOrNull { it.updatedAt }?.headCommitId
+        }
+
     override suspend fun listDeltaHistory(databaseId: Long): List<MdbxDeltaSummary> =
         sessions.withVault(databaseId) { _, vault ->
             buildList {

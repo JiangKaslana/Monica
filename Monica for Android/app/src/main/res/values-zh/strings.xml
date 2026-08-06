@@ -4043,4 +4043,17 @@
     <string name="timeline_show_sensitive_values">显示敏感内容</string>
     <string name="timeline_hide_sensitive_values">隐藏敏感内容</string>
     <string name="timeline_restore_failed">无法恢复，条目可能在此版本之后又发生了修改。</string>
+    <string name="mdbx_create_snapshot_menu">创建 MDBX 快照</string>
+    <string name="mdbx_commit_history_menu">MDBX 提交历史</string>
+    <string name="mdbx_quick_snapshot_name">快速快照 · %1$s</string>
+    <string name="mdbx_quick_snapshot_created">快照“%1$s”创建成功</string>
+    <string name="mdbx_quick_snapshot_failed">创建快照失败：%1$s</string>
+    <string name="mdbx_snapshot_unavailable">当前 MDBX 数据库不支持快照</string>
+    <string name="mdbx_snapshot_create_when_changed">有变更时创建</string>
+    <string name="mdbx_snapshot_create_when_changed_description">检测到新的数据库变更后创建完整快照，避免重复保存相同状态</string>
+    <string name="mdbx_snapshot_always_create_full">始终创建完整快照</string>
+    <string name="mdbx_snapshot_always_create_full_description">即使数据库状态相同，也保存一个新的完整快照</string>
+    <string name="mdbx_snapshot_no_changes_title">没有新的数据库变更</string>
+    <string name="mdbx_snapshot_no_changes_message">最新快照已经对应当前数据库状态，增量创建没有可保存的内容。是否仍创建一个完整快照？</string>
+    <string name="mdbx_snapshot_create_full_anyway">创建完整快照</string>
 </resources>

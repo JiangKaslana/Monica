@@ -127,6 +127,7 @@ import takagi.ru.monica.ui.screens.SupportAuthorScreen
 import takagi.ru.monica.ui.screens.OneDriveBackupScreen
 import takagi.ru.monica.ui.screens.WebDavBackupScreen
 import takagi.ru.monica.ui.screens.MdbxManagerScreen
+import takagi.ru.monica.ui.screens.MdbxManagerInitialPage
 import takagi.ru.monica.ui.screens.MdbxLocalCreateScreen
 import takagi.ru.monica.ui.screens.MdbxLocalOpenScreen
 import takagi.ru.monica.ui.screens.MdbxOneDriveCreateScreen
@@ -1209,6 +1210,16 @@ fun MonicaContent(
                 },
                 onNavigateToPasswordDetail = { passwordId ->
                     navController.navigate(Screen.PasswordDetail.createRoute(passwordId)) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToMdbxCommitHistory = { databaseId ->
+                    navController.navigate(
+                        Screen.MdbxManager.createRoute(
+                            databaseId = databaseId,
+                            page = Screen.MdbxManager.PAGE_COMMIT_HISTORY
+                        )
+                    ) {
                         launchSingleTop = true
                     }
                 },
@@ -2810,8 +2821,8 @@ fun MonicaContent(
                     navController.navigate(Screen.PageAdjustmentCustomization.route)
                 },
                 onNavigateToMdbx = {
-                    navController.navigate(Screen.MdbxManager.route) {
-                        popUpTo(Screen.MdbxManager.route) { inclusive = true }
+                    navController.navigate(Screen.MdbxManager.createRoute()) {
+                        popUpTo(Screen.MdbxManager.routePattern) { inclusive = true }
                         launchSingleTop = true
                     }
                 },
@@ -3067,14 +3078,39 @@ fun MonicaContent(
         }
 
         composable(
-            route = Screen.MdbxManager.route,
+            route = Screen.MdbxManager.routePattern,
+            arguments = listOf(
+                navArgument(Screen.MdbxManager.ARG_DATABASE_ID) {
+                    type = NavType.LongType
+                    defaultValue = -1L
+                },
+                navArgument(Screen.MdbxManager.ARG_PAGE) {
+                    type = NavType.StringType
+                    defaultValue = Screen.MdbxManager.PAGE_HOME
+                }
+            ),
             enterTransition = { easyNotesScreenEnter() },
             exitTransition = { easyNotesScreenExit() },
             popEnterTransition = { easyNotesScreenEnter() },
             popExitTransition = { easyNotesScreenExit() }
-        ) {
+        ) { backStackEntry ->
+            val initialDatabaseId = backStackEntry.arguments
+                ?.getLong(Screen.MdbxManager.ARG_DATABASE_ID)
+                ?.takeIf { it > 0L }
+            val initialPage = when (
+                backStackEntry.arguments?.getString(Screen.MdbxManager.ARG_PAGE)
+            ) {
+                Screen.MdbxManager.PAGE_COMMIT_HISTORY -> MdbxManagerInitialPage.COMMIT_HISTORY
+                else -> if (initialDatabaseId != null) {
+                    MdbxManagerInitialPage.DETAIL
+                } else {
+                    MdbxManagerInitialPage.HOME
+                }
+            }
             MdbxManagerScreen(
                 viewModel = mdbxViewModel,
+                initialDatabaseId = initialDatabaseId,
+                initialPage = initialPage,
                 onNavigateBack = {
                     navController.popBackStack()
                 },
@@ -3397,8 +3433,8 @@ fun MonicaContent(
                     navController.popBackStack()
                 },
                 onNavigateToMdbx = {
-                    navController.navigate(Screen.MdbxManager.route) {
-                        popUpTo(Screen.MdbxManager.route) { inclusive = true }
+                    navController.navigate(Screen.MdbxManager.createRoute()) {
+                        popUpTo(Screen.MdbxManager.routePattern) { inclusive = true }
                         launchSingleTop = true
                     }
                 }
@@ -3654,8 +3690,8 @@ fun MonicaContent(
                     navController.navigate(Screen.LocalKeePass.route)
                 },
                 onNavigateToMdbx = {
-                    navController.navigate(Screen.MdbxManager.route) {
-                        popUpTo(Screen.MdbxManager.route) { inclusive = true }
+                    navController.navigate(Screen.MdbxManager.createRoute()) {
+                        popUpTo(Screen.MdbxManager.routePattern) { inclusive = true }
                         launchSingleTop = true
                     }
                 },

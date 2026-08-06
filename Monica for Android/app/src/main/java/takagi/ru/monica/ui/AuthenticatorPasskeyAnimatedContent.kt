@@ -6,6 +6,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import takagi.ru.monica.ui.main.navigation.BottomNavItem
 import takagi.ru.monica.ui.navigation.parallaxEnterFromLeft
@@ -19,6 +20,8 @@ internal fun AuthenticatorPasskeyAnimatedContent(
     modifier: Modifier = Modifier,
     content: @Composable (BottomNavItem) -> Unit
 ) {
+    val saveableStateHolder = rememberSaveableStateHolder()
+
     AnimatedContent(
         targetState = currentTab,
         modifier = modifier,
@@ -36,6 +39,10 @@ internal fun AuthenticatorPasskeyAnimatedContent(
         },
         contentKey = BottomNavItem::key,
         label = "authenticator_passkey_switch",
-        content = { targetTab -> content(targetTab) }
+        content = { targetTab ->
+            saveableStateHolder.SaveableStateProvider(targetTab.key) {
+                content(targetTab)
+            }
+        }
     )
 }

@@ -60,6 +60,7 @@ internal fun CompactDraggableTabContent(
     onNavigateToDocumentDetail: (Long) -> Unit,
     onNavigateToBillingAddressDetail: (Long) -> Unit,
     onNavigateToPasskeyDetail: (Long) -> Unit,
+    onNavigateToMdbxCommitHistory: (Long) -> Unit,
     onPasswordSelectionModeChange: (
         Boolean,
         Int,
@@ -213,6 +214,7 @@ internal fun CompactDraggableTabContent(
                     onOpenDocument = onDocumentOpen,
                     onOpenNote = onNoteOpen,
                     onOpenPasskey = onNavigateToPasskeyDetail,
+                    onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
                     onOpenHistory = onOpenVaultV2HistoryPage,
                     onOpenTrashPage = onOpenVaultV2TrashPage,
                     onOpenArchivePage = onOpenVaultV2ArchivePage,
@@ -256,6 +258,7 @@ internal fun CompactDraggableTabContent(
                     onNavigateToAddNote = onNavigateToAddNote,
                     onNavigateToNoteDetail = onNavigateToNoteDetail,
                     onNavigateToPasskeyDetail = onNavigateToPasskeyDetail,
+                    onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
                     onOpenHistoryPage = onOpenHistoryPage,
                     onOpenTrashPage = onOpenTrashPage,
                     onOpenCommonAccountTemplatesPage = onNavigateToCommonAccountTemplates,

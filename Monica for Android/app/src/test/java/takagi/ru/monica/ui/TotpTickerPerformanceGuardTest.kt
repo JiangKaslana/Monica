@@ -48,6 +48,18 @@ class TotpTickerPerformanceGuardTest {
         assertFalse(steamCodeContent.contains("sharedProgressTimeMillis = sharedProgressTimeMillis"))
     }
 
+    @Test
+    fun expiryBlinkUsesDedicatedDrawLayerAnimationInsteadOfSecondSampleParity() {
+        val cardSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/components/TotpCodeCard.kt"
+        ).readText()
+
+        assertTrue(cardSource.contains("rememberInfiniteTransition(label = \"totp_expiry_blink\")"))
+        assertTrue(cardSource.contains("RepeatMode.Reverse"))
+        assertTrue(cardSource.contains("alpha = expiryBlinkAlpha.value"))
+        assertFalse(cardSource.contains("progressTimeMillis / 500L"))
+    }
+
     private fun projectFile(relativePath: String): File {
         var directory = File(requireNotNull(System.getProperty("user.dir"))).canonicalFile
         while (

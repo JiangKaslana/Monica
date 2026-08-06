@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.sync.SyncStatus
 import takagi.ru.monica.data.SecureItem
+import takagi.ru.monica.notes.domain.DecodedNoteContent
 import takagi.ru.monica.notes.domain.NoteContentCodec
 import takagi.ru.monica.notes.ui.model.NoteListItemUiModel
 import takagi.ru.monica.ui.components.MarkdownPreviewText
@@ -316,7 +317,10 @@ fun NoteCard(
 }
 
 internal fun SecureItem.toNoteListItemUiModel(): NoteListItemUiModel {
-    val decoded = NoteContentCodec.decodeFromItem(this)
+    return toNoteListItemUiModel(NoteContentCodec.decodeFromItem(this))
+}
+
+internal fun SecureItem.toNoteListItemUiModel(decoded: DecodedNoteContent): NoteListItemUiModel {
     val resolvedSyncStatus = if (bitwardenVaultId != null) {
         when (syncStatus) {
             "PENDING" -> SyncStatus.PENDING

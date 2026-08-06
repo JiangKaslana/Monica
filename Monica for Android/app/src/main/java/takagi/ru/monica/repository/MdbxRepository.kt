@@ -100,6 +100,7 @@ interface MdbxRepository {
         requiredTags: List<String> = emptyList()
     ): List<MdbxProjectSearchResult>
 
+    suspend fun getCurrentHeadCommitId(databaseId: Long): String?
     suspend fun listDeltaHistory(databaseId: Long): List<MdbxDeltaSummary>
     suspend fun listCommitDiff(databaseId: Long, commitId: String): List<MdbxCommitDiff>
     suspend fun revertCommit(databaseId: Long, commitId: String): Int

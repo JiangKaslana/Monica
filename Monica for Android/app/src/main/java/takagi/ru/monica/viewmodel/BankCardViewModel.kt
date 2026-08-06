@@ -257,33 +257,65 @@ class BankCardViewModel(
             decryptStoredSensitiveValue(itemData) == decryptStoredSensitiveValue(imported.itemData)
     }
     
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-    
+    private val cardListSharingStarted = SharingStarted.WhileSubscribed(5000)
+    private val allCardsSource: SharedFlow<List<SecureItem>> =
+        repository.getItemsByType(ItemType.BANK_CARD)
+            .shareIn(
+                scope = viewModelScope,
+                started = cardListSharingStarted,
+                replay = 1,
+            )
+
     // 获取所有银行卡
-    val allCards: StateFlow<List<SecureItem>> = repository.getItemsByType(ItemType.BANK_CARD)
-        .onStart { _isLoading.value = true }
-        .onEach { _isLoading.value = false }
+    val allCards: StateFlow<List<SecureItem>> = allCardsSource
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = cardListSharingStarted,
             initialValue = emptyList()
         )
 
-    val parsedCards: StateFlow<List<ParsedBankCardItem>> = allCards
+    private val parsedCardsStateSource: Flow<LoadedListState<ParsedBankCardItem>> = allCardsSource
         .map { items ->
-            withContext(Dispatchers.Default) {
-                items.map { item ->
+            LoadedListState(
+                items = items.map { item ->
                     ParsedBankCardItem(
                         item = item,
                         cardData = parseCardData(item.itemData) ?: emptyBankCardData()
                     )
-                }
-            }
+                },
+                isReady = true,
+            )
         }
+        .flowOn(Dispatchers.Default)
+
+    val parsedCardsState: StateFlow<LoadedListState<ParsedBankCardItem>> = parsedCardsStateSource
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = cardListSharingStarted,
+            initialValue = LoadedListState(),
+        )
+
+    val parsedCardsReady: StateFlow<Boolean> = parsedCardsState
+        .map { state -> state.isReady }
+        .stateIn(
+            scope = viewModelScope,
+            started = cardListSharingStarted,
+            initialValue = false,
+        )
+
+    val isLoading: StateFlow<Boolean> = parsedCardsReady
+        .map { ready -> !ready }
+        .stateIn(
+            scope = viewModelScope,
+            started = cardListSharingStarted,
+            initialValue = true,
+        )
+
+    val parsedCards: StateFlow<List<ParsedBankCardItem>> = parsedCardsState
+        .map { state -> state.items }
+        .stateIn(
+            scope = viewModelScope,
+            started = cardListSharingStarted,
             initialValue = emptyList()
         )
     

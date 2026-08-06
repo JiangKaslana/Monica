@@ -215,7 +215,10 @@ fun NoteListScreen(
     }
     val biometricHelper = remember { BiometricHelper(context) }
     val canUseBiometric = activity != null && settings.biometricEnabled && biometricHelper.isBiometricAvailable()
-    val notes by viewModel.allNotes.collectAsState(initial = emptyList())
+    val parsedNotesState by viewModel.parsedNotesState.collectAsState()
+    val parsedNotes = parsedNotesState.items
+    val notes = remember(parsedNotes) { parsedNotes.map { it.item } }
+    val parsedNoteById = remember(parsedNotes) { parsedNotes.associateBy { it.item.id } }
     var selectedCategoryFilter by remember { mutableStateOf<NoteCategoryFilter>(NoteCategoryFilter.All) }
     val savedCategoryFilterState by settingsManager
         .categoryFilterStateFlow(SettingsManager.CategoryFilterScope.NOTE)
@@ -340,7 +343,7 @@ fun NoteListScreen(
             categoryFiltered
         } else {
             categoryFiltered.filter { item ->
-                val decoded = NoteContentCodec.decodeFromItem(item)
+                val decoded = parsedNoteById.getValue(item.id).content
                 item.title.contains(searchQuery, ignoreCase = true) ||
                     decoded.content.contains(searchQuery, ignoreCase = true) ||
                     decoded.tags.any { tag -> tag.contains(searchQuery, ignoreCase = true) }
@@ -350,15 +353,15 @@ fun NoteListScreen(
             searchFiltered
         } else {
             searchFiltered.filter { item ->
-                val decoded = NoteContentCodec.decodeFromItem(item)
+                val decoded = parsedNoteById.getValue(item.id).content
                 decoded.tags.any { tag -> tag.equals(selectedTag, ignoreCase = true) }
             }
         }
     }
-    val availableTags = remember(notes, selectedCategoryFilter) {
+    val availableTags = remember(notes, parsedNoteById, selectedCategoryFilter) {
         val categoryFiltered = filterNotesByCategory(notes, selectedCategoryFilter)
         categoryFiltered
-            .flatMap { NoteContentCodec.decodeFromItem(it).tags }
+            .flatMap { parsedNoteById.getValue(it.id).content.tags }
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinct()
@@ -369,8 +372,10 @@ fun NoteListScreen(
             selectedTag = null
         }
     }
-    val filteredNoteUiItems = remember(filteredNotes) {
-        filteredNotes.map { it.toNoteListItemUiModel() }
+    val filteredNoteUiItems = remember(filteredNotes, parsedNoteById) {
+        filteredNotes.map { item ->
+            item.toNoteListItemUiModel(parsedNoteById.getValue(item.id).content)
+        }
     }
 
     // 删除实际执行
@@ -917,6 +922,7 @@ fun NoteListScreen(
 
         NoteListContent(
             notes = filteredNoteUiItems,
+            isInitialLoading = !parsedNotesState.isReady,
             isGridLayout = isGridLayout,
             isSearchExpanded = isSearchExpanded,
             onRequestExpandSearch = { isSearchExpanded = true },

@@ -147,6 +147,9 @@ class MdbxRepositoryRouter(
     ): List<MdbxProjectSearchResult> =
         repositoryFor(databaseId).searchProjects(databaseId, query, requiredTags)
 
+    override suspend fun getCurrentHeadCommitId(databaseId: Long): String? =
+        repositoryFor(databaseId).getCurrentHeadCommitId(databaseId)
+
     override suspend fun listDeltaHistory(databaseId: Long): List<MdbxDeltaSummary> =
         repositoryFor(databaseId).listDeltaHistory(databaseId)
 

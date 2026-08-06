@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import takagi.ru.monica.keepass.KeePassCrossDatabaseTransfer
@@ -23,6 +24,7 @@ import takagi.ru.monica.data.resolveOwnership
 import takagi.ru.monica.data.bitwarden.BitwardenPendingOperation
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.toStorageTarget
+import takagi.ru.monica.notes.domain.DecodedNoteContent
 import takagi.ru.monica.notes.domain.NoteContentCodec
 import takagi.ru.monica.repository.KeePassCompatibilityBridge
 import takagi.ru.monica.repository.KeePassWorkspaceRepository
@@ -51,6 +53,11 @@ data class NoteDraftStorageTarget(
     val bitwardenVaultId: Long? = null,
     val bitwardenFolderId: String? = null,
     val mdbxDatabaseId: Long? = null
+)
+
+data class ParsedNoteItem(
+    val item: SecureItem,
+    val content: DecodedNoteContent,
 )
 
 class NoteViewModel(
@@ -98,9 +105,6 @@ class NoteViewModel(
         val entryUuid: String?,
         val groupUuid: String?
     )
-    
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     
     // 笔记列表布局偏好 (true = 网格, false = 列表)
     private val _isGridLayout = MutableStateFlow(true)
@@ -218,14 +222,66 @@ class NoteViewModel(
             decryptStoredSensitiveValue(itemData) == decryptStoredSensitiveValue(imported.itemData)
     }
     
+    private val noteListSharingStarted = SharingStarted.WhileSubscribed(5000)
+    private val allNotesSource: SharedFlow<List<SecureItem>> =
+        repository.getItemsByType(ItemType.NOTE)
+            .shareIn(
+                scope = viewModelScope,
+                started = noteListSharingStarted,
+                replay = 1,
+            )
+
     // 获取所有笔记
-    val allNotes: StateFlow<List<SecureItem>> = repository.getItemsByType(ItemType.NOTE)
-        .onStart { _isLoading.value = true }
-        .onEach { _isLoading.value = false }
+    val allNotes: StateFlow<List<SecureItem>> = allNotesSource
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = noteListSharingStarted,
             initialValue = emptyList()
+        )
+
+    private val parsedNotesStateSource: Flow<LoadedListState<ParsedNoteItem>> = allNotesSource
+        .map { items ->
+            LoadedListState(
+                items = items.map { item ->
+                    ParsedNoteItem(
+                        item = item,
+                        content = NoteContentCodec.decodeFromItem(item),
+                    )
+                },
+                isReady = true,
+            )
+        }
+        .flowOn(Dispatchers.Default)
+
+    val parsedNotesState: StateFlow<LoadedListState<ParsedNoteItem>> = parsedNotesStateSource
+        .stateIn(
+            scope = viewModelScope,
+            started = noteListSharingStarted,
+            initialValue = LoadedListState(),
+        )
+
+    val parsedNotesReady: StateFlow<Boolean> = parsedNotesState
+        .map { state -> state.isReady }
+        .stateIn(
+            scope = viewModelScope,
+            started = noteListSharingStarted,
+            initialValue = false,
+        )
+
+    val isLoading: StateFlow<Boolean> = parsedNotesReady
+        .map { ready -> !ready }
+        .stateIn(
+            scope = viewModelScope,
+            started = noteListSharingStarted,
+            initialValue = true,
+        )
+
+    val parsedNotes: StateFlow<List<ParsedNoteItem>> = parsedNotesState
+        .map { state -> state.items }
+        .stateIn(
+            scope = viewModelScope,
+            started = noteListSharingStarted,
+            initialValue = emptyList(),
         )
     
     // 根据ID获取笔记

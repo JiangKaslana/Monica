@@ -1042,6 +1042,26 @@ class MdbxVaultStore(
         }
     }
 
+    override suspend fun getCurrentHeadCommitId(databaseId: Long): String? =
+        withContext(Dispatchers.IO) {
+            val dbInfo = databaseDao.getDatabaseById(databaseId) ?: return@withContext null
+            val file = resolveWritableFile(dbInfo) ?: return@withContext null
+            if (!file.exists()) return@withContext null
+            runCatching {
+                openReadOnly(file).use { db ->
+                    if (missingRequiredTables(db).isNotEmpty()) return@withContext null
+                    queryString(
+                        db,
+                        "SELECT head_commit_id FROM branches WHERE branch_id = 'main' OR branch_name = 'main' LIMIT 1"
+                    ) ?: queryString(
+                        db,
+                        "SELECT head_commit_id FROM device_heads WHERE device_id = ? LIMIT 1",
+                        arrayOf(deviceId)
+                    )
+                }
+            }.getOrNull()
+        }
+
     override suspend fun listDeltaHistory(databaseId: Long): List<MdbxDeltaSummary> =
         withContext(Dispatchers.IO) {
             val dbInfo = databaseDao.getDatabaseById(databaseId) ?: return@withContext emptyList()

@@ -50,6 +50,24 @@ class MdbxHistorySnapshotUiRegressionGuardTest {
     }
 
     @Test
+    fun snapshotCreationExplainsMdbx2AndConfirmsUnchangedRequests() {
+        val source = managerSource()
+        val snapshotPage = source
+            .substringAfter("private fun MdbxSnapshotPage(")
+            .substringBefore("private fun MdbxCommitHistoryPage(")
+        val creationCard = source
+            .substringAfter("private fun SnapshotCreationCard(")
+            .substringBefore("private fun SnapshotListHeader(")
+
+        assertTrue(snapshotPage.contains("pendingNoChangesSnapshotRequest"))
+        assertTrue(snapshotPage.contains("MdbxSnapshotCreateOutcome.NoChanges"))
+        assertTrue(snapshotPage.contains("mdbx_snapshot_no_changes_title"))
+        assertTrue(snapshotPage.contains("mdbx_snapshot_create_full_anyway"))
+        assertTrue(creationCard.contains("engineAlwaysCreatesFullSnapshots"))
+        assertTrue(creationCard.contains("mdbx_snapshot_create_when_changed"))
+    }
+
+    @Test
     fun historyCardsKeepTechnicalIdentifiersOutOfTheList() {
         val source = managerSource()
         val deltaRow = source

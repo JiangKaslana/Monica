@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.DropdownMenu
@@ -177,6 +178,28 @@ internal fun MdbxSyncTopActionsMenuItem(
     DropdownMenuItem(
         text = { Text("同步 MDBX 数据库") },
         leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
+        onClick = onClick
+    )
+}
+
+@Composable
+internal fun MdbxCreateSnapshotTopActionsMenuItem(
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.mdbx_create_snapshot_menu)) },
+        leadingIcon = { Icon(Icons.Default.Restore, contentDescription = null) },
+        onClick = onClick
+    )
+}
+
+@Composable
+internal fun MdbxCommitHistoryTopActionsMenuItem(
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.mdbx_commit_history_menu)) },
+        leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
         onClick = onClick
     )
 }

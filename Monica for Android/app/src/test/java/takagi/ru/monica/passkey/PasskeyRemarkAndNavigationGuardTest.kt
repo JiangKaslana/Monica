@@ -56,7 +56,7 @@ class PasskeyRemarkAndNavigationGuardTest {
     fun detailPrioritizesCompactAccountHeroAndMovesBindingDown() {
         val detail = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/passkey/PasskeyDetailPanes.kt"
-        ).readText()
+        ).readText().replace("\r\n", "\n")
         val paneBody = detail.substringAfter("internal fun PasskeyDetailPane(")
             .substringBefore("private fun PasskeyHeroCard(")
         val heroBody = detail.substringAfter("private fun PasskeyHeroCard(")
@@ -76,7 +76,7 @@ class PasskeyRemarkAndNavigationGuardTest {
     fun authenticatorAndPasskeyShareOneDockDestinationWithBidirectionalControls() {
         val mainScreen = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/SimpleMainScreen.kt"
-        ).readText()
+        ).readText().replace("\r\n", "\n")
         val fab = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/MainScreenFab.kt"
         ).readText()

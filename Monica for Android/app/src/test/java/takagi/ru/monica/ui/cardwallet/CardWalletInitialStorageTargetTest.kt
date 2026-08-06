@@ -100,7 +100,7 @@ class CardWalletInitialStorageTargetTest {
             "app/src/main/java/takagi/ru/monica/ui/screens/AddEditBankCardScreen.kt",
             "app/src/main/java/takagi/ru/monica/ui/screens/AddEditDocumentScreen.kt"
         ).forEach { path ->
-            val source = projectFile(path).readText()
+            val source = projectFile(path).readText().replace("\r\n", "\n")
 
             assertTrue(source.contains("resolveCardWalletInitialStorageTarget("))
             assertTrue(

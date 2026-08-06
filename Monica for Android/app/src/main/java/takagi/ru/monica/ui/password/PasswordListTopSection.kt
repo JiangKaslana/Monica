@@ -71,6 +71,8 @@ import takagi.ru.monica.ui.password.BitwardenReunlockTopActionsMenuItem
 import takagi.ru.monica.ui.password.BitwardenSyncTopActionsMenuItem
 import takagi.ru.monica.ui.password.CommonPasswordTopActionsMenuItems
 import takagi.ru.monica.ui.password.KeepassRefreshTopActionsMenuItem
+import takagi.ru.monica.ui.password.MdbxCommitHistoryTopActionsMenuItem
+import takagi.ru.monica.ui.password.MdbxCreateSnapshotTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxSyncTopActionsMenuItem
 import takagi.ru.monica.ui.password.PasswordTopActionsDropdownMenu
 import takagi.ru.monica.viewmodel.MdbxViewModel
@@ -148,6 +150,7 @@ internal fun PasswordListTopSection(
     onRenameCategory: (Category) -> Unit,
     onDeleteCategory: (Category) -> Unit,
     onOpenCommonAccountTemplates: () -> Unit,
+    onOpenMdbxCommitHistory: (Long) -> Unit,
     onOpenHistory: () -> Unit,
     onOpenTrash: () -> Unit,
     onScanFidoQr: () -> Unit
@@ -164,6 +167,11 @@ internal fun PasswordListTopSection(
     var isBitwardenMaintenanceActionRunning by remember { mutableStateOf(false) }
     val selectedBitwardenVault = selectedBitwardenVaultId?.let { vaultId ->
         bitwardenVaults.find { it.id == vaultId }
+    }
+    val selectedMdbxDatabase = remember(selectedMdbxDatabaseId, mdbxDatabases) {
+        selectedMdbxDatabaseId?.let { databaseId ->
+            mdbxDatabases.find { it.id == databaseId }
+        }
     }
     Column {
         val title = when (val filter = currentFilter) {
@@ -377,11 +385,8 @@ internal fun PasswordListTopSection(
                             if (
                                 selectedMdbxDatabaseId != null &&
                                 mdbxViewModel != null &&
-                                mdbxDatabases.firstOrNull { it.id == selectedMdbxDatabaseId }
-                                    ?.supports(MdbxCapability.REMOTE_SYNC) == true
+                                selectedMdbxDatabase?.supports(MdbxCapability.REMOTE_SYNC) == true
                             ) {
-                                val selectedMdbxDatabase = mdbxDatabases
-                                    .firstOrNull { it.id == selectedMdbxDatabaseId }
                                 MdbxSyncTopActionsMenuItem(
                                     onClick = {
                                         onTopActionsMenuExpandedChange(false)
@@ -390,6 +395,46 @@ internal fun PasswordListTopSection(
                                         } else {
                                             mdbxViewModel.syncVault(selectedMdbxDatabaseId)
                                         }
+                                    }
+                                )
+                            }
+                            if (
+                                selectedMdbxDatabaseId != null &&
+                                mdbxViewModel != null &&
+                                selectedMdbxDatabase?.supports(MdbxCapability.SNAPSHOTS) == true
+                            ) {
+                                MdbxCreateSnapshotTopActionsMenuItem(
+                                    onClick = {
+                                        onTopActionsMenuExpandedChange(false)
+                                        mdbxViewModel.createQuickSnapshot(selectedMdbxDatabaseId) { result ->
+                                            val message = result.fold(
+                                                onSuccess = { snapshot ->
+                                                    context.getString(
+                                                        R.string.mdbx_quick_snapshot_created,
+                                                        snapshot.name
+                                                    )
+                                                },
+                                                onFailure = { error ->
+                                                    context.getString(
+                                                        R.string.mdbx_quick_snapshot_failed,
+                                                        error.message ?: context.getString(R.string.mdbx_snapshot_unavailable)
+                                                    )
+                                                }
+                                            )
+                                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                            mdbxViewModel.clearOperationState()
+                                        }
+                                    }
+                                )
+                            }
+                            if (
+                                selectedMdbxDatabaseId != null &&
+                                selectedMdbxDatabase?.supports(MdbxCapability.DELTA_HISTORY) == true
+                            ) {
+                                MdbxCommitHistoryTopActionsMenuItem(
+                                    onClick = {
+                                        onTopActionsMenuExpandedChange(false)
+                                        onOpenMdbxCommitHistory(selectedMdbxDatabaseId)
                                     }
                                 )
                             }

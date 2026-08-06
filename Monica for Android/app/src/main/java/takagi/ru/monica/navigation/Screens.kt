@@ -174,7 +174,17 @@ sealed class Screen(val route: String) {
     object SupportAuthor : Screen("support_author")
     object WebDavBackup : Screen("webdav_backup")
     object OneDriveBackup : Screen("onedrive_backup")
-    object MdbxManager : Screen("mdbx_manager")
+    object MdbxManager : Screen("mdbx_manager") {
+        const val ARG_DATABASE_ID = "databaseId"
+        const val ARG_PAGE = "page"
+        const val PAGE_HOME = "home"
+        const val PAGE_COMMIT_HISTORY = "commit_history"
+        const val routePattern = "mdbx_manager?databaseId={databaseId}&page={page}"
+
+        fun createRoute(databaseId: Long? = null, page: String = PAGE_HOME): String {
+            return "mdbx_manager?databaseId=${databaseId ?: -1L}&page=${Uri.encode(page)}"
+        }
+    }
     object MdbxLocalCreate : Screen("mdbx_local_create")
     object MdbxLocalOpen : Screen("mdbx_local_open")
     object MdbxWebDavCreate : Screen("mdbx_webdav_create")

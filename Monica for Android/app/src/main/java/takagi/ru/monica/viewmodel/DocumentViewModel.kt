@@ -110,33 +110,65 @@ class DocumentViewModel(
         }
     }
     
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-    
+    private val documentListSharingStarted = SharingStarted.WhileSubscribed(5000)
+    private val allDocumentsSource: SharedFlow<List<SecureItem>> =
+        repository.getItemsByType(ItemType.DOCUMENT)
+            .shareIn(
+                scope = viewModelScope,
+                started = documentListSharingStarted,
+                replay = 1,
+            )
+
     // 获取所有证件
-    val allDocuments: StateFlow<List<SecureItem>> = repository.getItemsByType(ItemType.DOCUMENT)
-        .onStart { _isLoading.value = true }
-        .onEach { _isLoading.value = false }
+    val allDocuments: StateFlow<List<SecureItem>> = allDocumentsSource
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = documentListSharingStarted,
             initialValue = emptyList()
         )
 
-    val parsedDocuments: StateFlow<List<ParsedDocumentItem>> = allDocuments
+    private val parsedDocumentsStateSource: Flow<LoadedListState<ParsedDocumentItem>> = allDocumentsSource
         .map { items ->
-            withContext(Dispatchers.Default) {
-                items.map { item ->
+            LoadedListState(
+                items = items.map { item ->
                     ParsedDocumentItem(
                         item = item,
                         documentData = parseDocumentData(item.itemData) ?: emptyDocumentData()
                     )
-                }
-            }
+                },
+                isReady = true,
+            )
         }
+        .flowOn(Dispatchers.Default)
+
+    val parsedDocumentsState: StateFlow<LoadedListState<ParsedDocumentItem>> =
+        parsedDocumentsStateSource.stateIn(
+            scope = viewModelScope,
+            started = documentListSharingStarted,
+            initialValue = LoadedListState(),
+        )
+
+    val parsedDocumentsReady: StateFlow<Boolean> = parsedDocumentsState
+        .map { state -> state.isReady }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = documentListSharingStarted,
+            initialValue = false,
+        )
+
+    val isLoading: StateFlow<Boolean> = parsedDocumentsReady
+        .map { ready -> !ready }
+        .stateIn(
+            scope = viewModelScope,
+            started = documentListSharingStarted,
+            initialValue = true,
+        )
+
+    val parsedDocuments: StateFlow<List<ParsedDocumentItem>> = parsedDocumentsState
+        .map { state -> state.items }
+        .stateIn(
+            scope = viewModelScope,
+            started = documentListSharingStarted,
             initialValue = emptyList()
         )
     

@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -684,11 +685,20 @@ fun TotpCodeCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val shouldBlink = remainingSeconds <= 5 && totpData.otpType != OtpType.HOTP
-                val blinkAlpha = if (shouldBlink) {
-                    if (((progressTimeMillis / 500L) % 2L) == 0L) 1f else 0.5f
+                val shouldBlink = remainingSeconds in 1..5 && totpData.otpType != OtpType.HOTP
+                val expiryBlinkAlpha: State<Float> = if (shouldBlink) {
+                    val blinkTransition = rememberInfiniteTransition(label = "totp_expiry_blink")
+                    blinkTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.5f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 500, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "totp_expiry_blink_alpha"
+                    )
                 } else {
-                    1f
+                    remember { mutableFloatStateOf(1f) }
                 }
                 
                 // 验证码（等宽字体）
@@ -713,6 +723,11 @@ fun TotpCodeCard(
                         fontSize = codeFontSize,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.graphicsLayer {
+                            // Read animation state in the layer phase so only
+                            // the code glyphs redraw during the final seconds.
+                            alpha = expiryBlinkAlpha.value
+                        },
                         color = when {
                             totpData.otpType == OtpType.STEAM && hasImmersiveBackground -> immersiveTertiaryColor
                             remainingSeconds <= 5 && hasImmersiveBackground -> immersiveErrorColor
@@ -720,7 +735,7 @@ fun TotpCodeCard(
                             totpData.otpType == OtpType.STEAM -> MaterialTheme.colorScheme.tertiary
                             remainingSeconds <= 5 -> MaterialTheme.colorScheme.error
                             else -> MaterialTheme.colorScheme.primary
-                        }.copy(alpha = blinkAlpha)
+                        }
                     )
                 }
                 

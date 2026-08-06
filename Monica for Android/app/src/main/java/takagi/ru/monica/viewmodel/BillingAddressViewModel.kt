@@ -4,11 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.OperationLogItemType
 import takagi.ru.monica.data.SecureItem
@@ -34,30 +37,69 @@ class BillingAddressViewModel(
 
     private val safeLogTitle = "账单地址"
 
-    val allBillingAddresses: StateFlow<List<SecureItem>> =
+    private val addressListSharingStarted = SharingStarted.WhileSubscribed(5000)
+    private val allBillingAddressesSource: SharedFlow<List<SecureItem>> =
         repository.getItemsByType(ItemType.BILLING_ADDRESS)
+            .shareIn(
+                scope = viewModelScope,
+                started = addressListSharingStarted,
+                replay = 1,
+            )
+
+    val allBillingAddresses: StateFlow<List<SecureItem>> =
+        allBillingAddressesSource
             .stateIn(
                 scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000),
+                started = addressListSharingStarted,
                 initialValue = emptyList()
             )
 
-    val parsedBillingAddresses: StateFlow<List<ParsedBillingAddressItem>> = allBillingAddresses
+    private val parsedBillingAddressesStateSource: Flow<LoadedListState<ParsedBillingAddressItem>> =
+        allBillingAddressesSource
         .map { items ->
-            withContext(Dispatchers.Default) {
-                items.map { item ->
+            LoadedListState(
+                items = items.map { item ->
                     ParsedBillingAddressItem(
                         item = item,
                         addressData = parseAddressData(item.itemData) ?: BillingAddressData()
                     )
-                }
-            }
+                },
+                isReady = true,
+            )
         }
+        .flowOn(Dispatchers.Default)
+
+    val parsedBillingAddressesState: StateFlow<LoadedListState<ParsedBillingAddressItem>> =
+        parsedBillingAddressesStateSource.stateIn(
+            scope = viewModelScope,
+            started = addressListSharingStarted,
+            initialValue = LoadedListState(),
+        )
+
+    val parsedBillingAddressesReady: StateFlow<Boolean> = parsedBillingAddressesState
+        .map { state -> state.isReady }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
+            started = addressListSharingStarted,
+            initialValue = false,
         )
+
+    val isLoading: StateFlow<Boolean> = parsedBillingAddressesReady
+        .map { ready -> !ready }
+        .stateIn(
+            scope = viewModelScope,
+            started = addressListSharingStarted,
+            initialValue = true,
+        )
+
+    val parsedBillingAddresses: StateFlow<List<ParsedBillingAddressItem>> =
+        parsedBillingAddressesState
+            .map { state -> state.items }
+            .stateIn(
+                scope = viewModelScope,
+                started = addressListSharingStarted,
+                initialValue = emptyList(),
+            )
 
     suspend fun getAddressById(id: Long): SecureItem? = repository.getItemById(id)
 

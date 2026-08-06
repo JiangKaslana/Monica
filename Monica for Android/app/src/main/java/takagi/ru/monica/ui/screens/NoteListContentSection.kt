@@ -22,11 +22,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Note
 import androidx.compose.material3.MaterialTheme
@@ -60,11 +58,16 @@ import takagi.ru.monica.bitwarden.sync.syncForUserVisibleRequest
 import takagi.ru.monica.notes.ui.model.NoteListItemUiModel
 import takagi.ru.monica.ui.components.PullActionVisualState
 import takagi.ru.monica.ui.common.pull.calculateDampedPullOffset
+import takagi.ru.monica.ui.common.state.InitialListRenderState
+import takagi.ru.monica.ui.common.state.rememberSaveableLazyListState
+import takagi.ru.monica.ui.common.state.rememberSaveableLazyStaggeredGridState
+import takagi.ru.monica.ui.common.state.resolveInitialListRenderState
 import takagi.ru.monica.util.VibrationPatterns
 
 @Composable
 fun NoteListContent(
     notes: List<NoteListItemUiModel>,
+    isInitialLoading: Boolean,
     isGridLayout: Boolean,
     isSearchExpanded: Boolean,
     onRequestExpandSearch: () -> Unit,
@@ -78,8 +81,8 @@ fun NoteListContent(
     val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
-    val gridState = rememberLazyStaggeredGridState()
+    val listState = rememberSaveableLazyListState()
+    val gridState = rememberSaveableLazyStaggeredGridState()
     var currentOffset by remember { mutableFloatStateOf(0f) }
     val searchTriggerDistance = remember(density, isBitwardenDatabaseView) {
         with(density) { (if (isBitwardenDatabaseView) 40.dp else 72.dp).toPx() }
@@ -377,95 +380,112 @@ fun NoteListContent(
     } else {
         currentOffset.toInt()
     }
+    val initialRenderState = resolveInitialListRenderState(
+        isReady = !isInitialLoading,
+        itemCount = notes.size,
+    )
 
     Column(
         modifier = modifier
             .fillMaxSize()
     ) {
-        if (notes.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .offset { IntOffset(0, contentPullOffset) }
-                    .then(emptyStateGestureModifier),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+        when (initialRenderState) {
+            InitialListRenderState.Loading -> {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    androidx.compose.material3.Icon(
-                        imageVector = Icons.Default.Note,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = stringResource(R.string.no_results),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    androidx.compose.material3.CircularProgressIndicator()
                 }
             }
-        } else {
-            if (isGridLayout) {
-                LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(2),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalItemSpacing = 12.dp,
+            InitialListRenderState.Empty -> {
+                Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .weight(1f)
+                        .fillMaxWidth()
                         .offset { IntOffset(0, contentPullOffset) }
-                        .nestedScroll(nestedScrollConnection)
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                val isAtTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
-                                canTriggerPullToSearch = isAtTop
-                            }
-                        },
-                    state = gridState
+                        .then(emptyStateGestureModifier),
+                    contentAlignment = Alignment.Center
                 ) {
-                    items(notes, key = { it.id }) { note ->
-                        ExpressiveNoteCard(
-                            note = note,
-                            isSelected = selectedNoteIds.contains(note.id),
-                            isGridMode = true,
-                            onClick = { onNoteClick(note.id) },
-                            onLongClick = { onNoteLongClick(note.id) }
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        androidx.compose.material3.Icon(
+                            imageVector = Icons.Default.Note,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = stringResource(R.string.no_results),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .offset { IntOffset(0, contentPullOffset) }
-                        .nestedScroll(nestedScrollConnection)
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
-                                canTriggerPullToSearch = isAtTop
-                            }
-                        },
-                    state = listState
-                ) {
-                    items(notes, key = { it.id }) { note ->
-                        ExpressiveNoteCard(
-                            note = note,
-                            isSelected = selectedNoteIds.contains(note.id),
-                            isGridMode = false,
-                            onClick = { onNoteClick(note.id) },
-                            onLongClick = { onNoteLongClick(note.id) }
-                        )
+            }
+            InitialListRenderState.Content -> {
+                if (isGridLayout) {
+                    LazyVerticalStaggeredGrid(
+                        columns = StaggeredGridCells.Fixed(2),
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalItemSpacing = 12.dp,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset { IntOffset(0, contentPullOffset) }
+                            .nestedScroll(nestedScrollConnection)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    val isAtTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
+                                    canTriggerPullToSearch = isAtTop
+                                }
+                            },
+                        state = gridState
+                    ) {
+                        items(notes, key = { it.id }) { note ->
+                            ExpressiveNoteCard(
+                                note = note,
+                                isSelected = selectedNoteIds.contains(note.id),
+                                isGridMode = true,
+                                onClick = { onNoteClick(note.id) },
+                                onLongClick = { onNoteLongClick(note.id) }
+                            )
+                        }
                     }
-                    item { Spacer(modifier = Modifier.height(80.dp)) }
+                } else {
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset { IntOffset(0, contentPullOffset) }
+                            .nestedScroll(nestedScrollConnection)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                                    canTriggerPullToSearch = isAtTop
+                                }
+                            },
+                        state = listState
+                    ) {
+                        items(notes, key = { it.id }) { note ->
+                            ExpressiveNoteCard(
+                                note = note,
+                                isSelected = selectedNoteIds.contains(note.id),
+                                isGridMode = false,
+                                onClick = { onNoteClick(note.id) },
+                                onLongClick = { onNoteLongClick(note.id) }
+                            )
+                        }
+                        item { Spacer(modifier = Modifier.height(80.dp)) }
+                    }
                 }
             }
         }

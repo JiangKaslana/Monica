@@ -334,6 +334,7 @@ fun PasswordListContent(
     ) -> Unit,
     onBackToTopVisibilityChange: (Boolean) -> Unit = {},
     scrollToTopRequestKey: Int = 0,
+    onOpenMdbxCommitHistory: (Long) -> Unit = {},
     onOpenHistory: () -> Unit = {},
     onOpenTrash: () -> Unit = {},
     onOpenCommonAccountTemplates: () -> Unit = {},
@@ -1617,6 +1618,7 @@ fun PasswordListContent(
             onRenameCategory = onRenameCategory,
             onDeleteCategory = onDeleteCategory,
             onOpenCommonAccountTemplates = onOpenCommonAccountTemplates,
+            onOpenMdbxCommitHistory = onOpenMdbxCommitHistory,
             onOpenHistory = onOpenHistory,
             onOpenTrash = onOpenTrash,
             onScanFidoQr = onScanFidoQr

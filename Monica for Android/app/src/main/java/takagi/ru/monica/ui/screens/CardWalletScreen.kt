@@ -121,6 +121,8 @@ import takagi.ru.monica.ui.category.CategoryManagementCreateDialog
 import takagi.ru.monica.ui.category.rememberCategoryManagementState
 import takagi.ru.monica.ui.components.PullActionVisualState
 import takagi.ru.monica.ui.common.pull.calculateDampedPullOffset
+import takagi.ru.monica.ui.common.state.InitialListRenderState
+import takagi.ru.monica.ui.common.state.resolveInitialListRenderState
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenu
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuDropdown
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuOffset
@@ -222,9 +224,15 @@ fun CardWalletScreen(
         }
     }
 
-    val parsedCards by bankCardViewModel.parsedCards.collectAsState(initial = emptyList())
-    val parsedDocuments by documentViewModel.parsedDocuments.collectAsState(initial = emptyList())
-    val parsedBillingAddresses by billingAddressViewModel.parsedBillingAddresses.collectAsState(initial = emptyList())
+    val parsedCardsState by bankCardViewModel.parsedCardsState.collectAsState()
+    val parsedDocumentsState by documentViewModel.parsedDocumentsState.collectAsState()
+    val parsedBillingAddressesState by billingAddressViewModel.parsedBillingAddressesState.collectAsState()
+    val parsedCards = parsedCardsState.items
+    val parsedDocuments = parsedDocumentsState.items
+    val parsedBillingAddresses = parsedBillingAddressesState.items
+    val walletItemsReady = parsedCardsState.isReady &&
+        parsedDocumentsState.isReady &&
+        parsedBillingAddressesState.isReady
     val cards = remember(parsedCards) { parsedCards.map { it.item } }
     val documents = remember(parsedDocuments) { parsedDocuments.map { it.item } }
     val billingAddresses = remember(parsedBillingAddresses) { parsedBillingAddresses.map { it.item } }
@@ -233,8 +241,6 @@ fun CardWalletScreen(
             parsedDocuments.map { it.item.toDocumentWalletListItem(it.documentData) } +
             parsedBillingAddresses.map { it.item.toBillingAddressWalletListItem(it.addressData) }
     }
-    val bankLoading by bankCardViewModel.isLoading.collectAsState()
-    val documentLoading by documentViewModel.isLoading.collectAsState()
     val bitwardenVaults by database.bitwardenVaultDao().getAllVaultsFlow().collectAsState(initial = emptyList())
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -891,6 +897,10 @@ fun CardWalletScreen(
             }
             .toList()
     }
+    val initialRenderState = resolveInitialListRenderState(
+        isReady = walletItemsReady,
+        itemCount = filteredItems.size,
+    )
 
     LaunchedEffect(filteredItems) {
         if (selectedIds.isEmpty()) return@LaunchedEffect
@@ -1205,8 +1215,8 @@ fun CardWalletScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
                 when {
-                    bankLoading || documentLoading -> LoadingIndicator()
-                    filteredItems.isEmpty() -> {
+                    initialRenderState == InitialListRenderState.Loading -> LoadingIndicator()
+                    initialRenderState == InitialListRenderState.Empty -> {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()

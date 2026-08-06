@@ -97,10 +97,18 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+enum class MdbxManagerInitialPage {
+    HOME,
+    DETAIL,
+    COMMIT_HISTORY
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MdbxManagerScreen(
     viewModel: MdbxViewModel,
+    initialDatabaseId: Long? = null,
+    initialPage: MdbxManagerInitialPage = MdbxManagerInitialPage.HOME,
     onNavigateBack: () -> Unit,
     onNavigateToLocalCreate: () -> Unit,
     onNavigateToLocalOpen: () -> Unit,
@@ -110,6 +118,7 @@ fun MdbxManagerScreen(
     onNavigateToOneDriveOpen: () -> Unit
 ) {
     val databases by viewModel.allDatabases.collectAsState()
+    val databasesLoaded by viewModel.allDatabasesLoaded.collectAsState()
     val operationState by viewModel.operationState.collectAsState()
     val migrationState by viewModel.migrationState.collectAsState()
     val conflictCounts by viewModel.conflictCounts.collectAsState()
@@ -118,9 +127,15 @@ fun MdbxManagerScreen(
     val deltaDialogState by viewModel.deltaDialogState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteDialog by remember { mutableStateOf<LocalMdbxDatabase?>(null) }
-    var page by rememberSaveable(stateSaver = MdbxManagerPageSaver) {
-        mutableStateOf<MdbxManagerPage>(MdbxManagerPage.Hub)
+    var page by rememberSaveable(
+        initialDatabaseId,
+        initialPage,
+        stateSaver = MdbxManagerPageSaver
+    ) {
+        mutableStateOf(initialMdbxManagerPage(initialDatabaseId, initialPage))
     }
+    val openedFromCommitHistoryShortcut =
+        initialDatabaseId != null && initialPage == MdbxManagerInitialPage.COMMIT_HISTORY
     val snapshotPage = page as? MdbxManagerPage.SnapshotStructure
     var snapshotCompareMode by rememberSaveable(snapshotPage?.databaseId, snapshotPage?.snapshotId) {
         mutableStateOf(false)
@@ -144,9 +159,13 @@ fun MdbxManagerScreen(
     LaunchedEffect(Unit) {
         viewModel.pruneMissingLocalVaults()
     }
-    LaunchedEffect(databases) {
+    LaunchedEffect(databasesLoaded, databases) {
         val databasePage = page as? MdbxManagerPage.DatabasePage
-        if (databasePage != null && databases.none { it.id == databasePage.databaseId }) {
+        if (
+            databasesLoaded &&
+            databasePage != null &&
+            databases.none { it.id == databasePage.databaseId }
+        ) {
             page = MdbxManagerPage.Hub
         }
     }
@@ -155,12 +174,25 @@ fun MdbxManagerScreen(
             viewModel.activateMdbxDatabase(database.id)
         }
     }
-    LaunchedEffect(page) {
-        when (page) {
+    LaunchedEffect(page, selectedDatabase?.id, deltaDialogState) {
+        when (val currentPage = page) {
             is MdbxManagerPage.Conflict -> viewModel.dismissDeltaDialog()
             is MdbxManagerPage.Snapshots,
-            is MdbxManagerPage.SnapshotStructure,
-            is MdbxManagerPage.CommitHistory -> viewModel.dismissConflictDialog()
+            is MdbxManagerPage.SnapshotStructure -> viewModel.dismissConflictDialog()
+            is MdbxManagerPage.CommitHistory -> {
+                viewModel.dismissConflictDialog()
+                val currentDeltaState = deltaDialogState as? MdbxViewModel.MdbxDeltaDialogState.Visible
+                val database = selectedDatabase
+                if (
+                    database != null &&
+                    database.id == currentPage.databaseId &&
+                    currentDeltaState?.databaseId != currentPage.databaseId
+                ) {
+                    viewModel.showDeltaHistory(database)
+                }
+            }
+            is MdbxManagerPage.Health,
+            is MdbxManagerPage.Attachments,
             is MdbxManagerPage.Maintenance -> {
                 viewModel.dismissConflictDialog()
                 viewModel.dismissDeltaDialog()
@@ -217,11 +249,17 @@ fun MdbxManagerScreen(
                 if (deltaState?.selectedDiffCommitId != null) {
                     viewModel.closeCommitDiff()
                     current
+                } else if (openedFromCommitHistoryShortcut) {
+                    viewModel.dismissDeltaDialog()
+                    onNavigateBack()
+                    MdbxManagerPage.Hub
                 } else {
                     viewModel.dismissDeltaDialog()
                     MdbxManagerPage.Detail(current.databaseId, current.source)
                 }
             }
+            is MdbxManagerPage.Health -> MdbxManagerPage.Detail(current.databaseId, current.source)
+            is MdbxManagerPage.Attachments -> MdbxManagerPage.Detail(current.databaseId, current.source)
             is MdbxManagerPage.Maintenance -> MdbxManagerPage.Detail(current.databaseId, current.source)
         }
     }
@@ -393,6 +431,10 @@ fun MdbxManagerScreen(
                                 viewModel.showConflicts(db)
                                 page = MdbxManagerPage.Conflict(db.id, current.source)
                             },
+                            onShowHealth = {
+                                viewModel.refreshVaultDiagnostics(listOf(db))
+                                page = MdbxManagerPage.Health(db.id, current.source)
+                            },
                             onShowSnapshots = {
                                 viewModel.showDeltaHistory(db)
                                 page = MdbxManagerPage.Snapshots(db.id, current.source)
@@ -400,6 +442,10 @@ fun MdbxManagerScreen(
                             onShowCommitHistory = {
                                 viewModel.showDeltaHistory(db)
                                 page = MdbxManagerPage.CommitHistory(db.id, current.source)
+                            },
+                            onShowAttachments = {
+                                viewModel.refreshVaultDiagnostics(listOf(db))
+                                page = MdbxManagerPage.Attachments(db.id, current.source)
                             },
                             onShowMaintenance = {
                                 viewModel.refreshVaultDiagnostics(listOf(db))
@@ -450,13 +496,20 @@ fun MdbxManagerScreen(
                     val state = deltaDialogState as? MdbxViewModel.MdbxDeltaDialogState.Visible
                     MdbxSnapshotPage(
                         state = state,
+                        engineAlwaysCreatesFullSnapshots =
+                            selectedDatabase?.engineTypeEnum == MdbxEngineType.RUST_MDBX2,
                         onShowDiff = { commitId -> viewModel.showCommitDiff(current.databaseId, commitId) },
                         onShowSnapshotStructure = { snapshotId ->
                             viewModel.showSnapshotStructure(current.databaseId, snapshotId)
                             page = MdbxManagerPage.SnapshotStructure(current.databaseId, current.source, snapshotId)
                         },
-                        onCreateSnapshot = { name, fullSnapshot ->
-                            viewModel.createSnapshot(current.databaseId, name, fullSnapshot)
+                        onCreateSnapshot = { name, fullSnapshot, onOutcome ->
+                            viewModel.requestSnapshotCreation(
+                                databaseId = current.databaseId,
+                                name = name,
+                                requestedFullSnapshot = fullSnapshot,
+                                onOutcome = onOutcome
+                            )
                         },
                         onDeleteSnapshot = { snapshotId ->
                             viewModel.deleteSnapshot(current.databaseId, snapshotId)
@@ -500,6 +553,27 @@ fun MdbxManagerScreen(
                         onShowDiff = { commitId -> viewModel.showCommitDiff(current.databaseId, commitId) },
                         onRevert = { commitId -> viewModel.revertCommit(current.databaseId, commitId) }
                     )
+                }
+                is MdbxManagerPage.Health -> {
+                    selectedDatabase?.let { db ->
+                        MdbxHealthDetailPage(
+                            database = db,
+                            diagnostics = vaultDiagnostics[db.id],
+                            onRefreshDiagnostics = { viewModel.refreshVaultDiagnostics(listOf(db)) },
+                            onOpenMaintenance = {
+                                page = MdbxManagerPage.Maintenance(db.id, current.source)
+                            }
+                        )
+                    }
+                }
+                is MdbxManagerPage.Attachments -> {
+                    selectedDatabase?.let { db ->
+                        MdbxAttachmentDetailPage(
+                            database = db,
+                            diagnostics = vaultDiagnostics[db.id],
+                            onRefreshDiagnostics = { viewModel.refreshVaultDiagnostics(listOf(db)) }
+                        )
+                    }
                 }
                 is MdbxManagerPage.Maintenance -> {
                     selectedDatabase?.let { db ->
@@ -830,6 +904,17 @@ private enum class MdbxManagerSource {
     ONEDRIVE
 }
 
+private fun initialMdbxManagerPage(
+    databaseId: Long?,
+    initialPage: MdbxManagerInitialPage
+): MdbxManagerPage = when {
+    databaseId == null || initialPage == MdbxManagerInitialPage.HOME -> MdbxManagerPage.Hub
+    initialPage == MdbxManagerInitialPage.COMMIT_HISTORY -> {
+        MdbxManagerPage.CommitHistory(databaseId, source = null)
+    }
+    else -> MdbxManagerPage.Detail(databaseId, source = null)
+}
+
 private sealed class MdbxManagerPage {
     data object Hub : MdbxManagerPage()
     data class Source(val source: MdbxManagerSource) : MdbxManagerPage()
@@ -843,6 +928,8 @@ private sealed class MdbxManagerPage {
         val snapshotId: String
     ) : DatabasePage(databaseId, source)
     data class CommitHistory(override val databaseId: Long, override val source: MdbxManagerSource?) : DatabasePage(databaseId, source)
+    data class Health(override val databaseId: Long, override val source: MdbxManagerSource?) : DatabasePage(databaseId, source)
+    data class Attachments(override val databaseId: Long, override val source: MdbxManagerSource?) : DatabasePage(databaseId, source)
     data class Maintenance(override val databaseId: Long, override val source: MdbxManagerSource?) : DatabasePage(databaseId, source)
 }
 
@@ -854,6 +941,8 @@ private fun MdbxManagerPage.depth(): Int = when (this) {
     is MdbxManagerPage.Snapshots -> 3
     is MdbxManagerPage.SnapshotStructure -> 4
     is MdbxManagerPage.CommitHistory -> 3
+    is MdbxManagerPage.Health -> 3
+    is MdbxManagerPage.Attachments -> 3
     is MdbxManagerPage.Maintenance -> 3
 }
 
@@ -872,6 +961,8 @@ private val MdbxManagerPageSaver: Saver<MdbxManagerPage, Any> = Saver(
                 page.snapshotId
             )
             is MdbxManagerPage.CommitHistory -> listOf("CommitHistory", page.databaseId, page.source?.name ?: "")
+            is MdbxManagerPage.Health -> listOf("Health", page.databaseId, page.source?.name ?: "")
+            is MdbxManagerPage.Attachments -> listOf("Attachments", page.databaseId, page.source?.name ?: "")
             is MdbxManagerPage.Maintenance -> listOf("Maintenance", page.databaseId, page.source?.name ?: "")
         }
     },
@@ -893,6 +984,8 @@ private val MdbxManagerPageSaver: Saver<MdbxManagerPage, Any> = Saver(
             )
             "CommitHistory",
             "History" -> MdbxManagerPage.CommitHistory(list[1] as Long, parseMdbxManagerSourceOrNull(list[2] as String))
+            "Health" -> MdbxManagerPage.Health(list[1] as Long, parseMdbxManagerSourceOrNull(list[2] as String))
+            "Attachments" -> MdbxManagerPage.Attachments(list[1] as Long, parseMdbxManagerSourceOrNull(list[2] as String))
             "Advanced" -> MdbxManagerPage.Detail(list[1] as Long, parseMdbxManagerSourceOrNull(list[2] as String))
             "Maintenance" -> MdbxManagerPage.Maintenance(list[1] as Long, parseMdbxManagerSourceOrNull(list[2] as String))
             else -> null
@@ -915,6 +1008,8 @@ private fun MdbxManagerPage.title(database: LocalMdbxDatabase?): String = when (
     is MdbxManagerPage.Snapshots -> "快照"
     is MdbxManagerPage.SnapshotStructure -> "快照详情"
     is MdbxManagerPage.CommitHistory -> "提交历史"
+    is MdbxManagerPage.Health -> "健康详情"
+    is MdbxManagerPage.Attachments -> "附件详情"
     is MdbxManagerPage.Maintenance -> "诊断 / 维护"
 }
 
@@ -1159,8 +1254,10 @@ private fun MdbxVaultDetailPage(
     diagnostics: MdbxVaultDiagnostics?,
     onSync: () -> Unit,
     onShowConflicts: () -> Unit,
+    onShowHealth: () -> Unit,
     onShowSnapshots: () -> Unit,
     onShowCommitHistory: () -> Unit,
+    onShowAttachments: () -> Unit,
     onShowMaintenance: () -> Unit,
     onMigrate: (() -> Unit)?,
     onSetDefault: () -> Unit,
@@ -1260,7 +1357,8 @@ private fun MdbxVaultDetailPage(
                     } else {
                         stringResource(R.string.mdbx_no_conflicts_short)
                     },
-                    isWarning = conflictCount > 0
+                    isWarning = conflictCount > 0,
+                    onClick = if (supportsConflicts) onShowConflicts else null
                 )
                 StatusTile(
                     modifier = Modifier.weight(1f),
@@ -1271,7 +1369,8 @@ private fun MdbxVaultDetailPage(
                     } else {
                         stringResource(R.string.mdbx_health_ok_short)
                     },
-                    isWarning = healthIssueCount > 0
+                    isWarning = healthIssueCount > 0,
+                    onClick = onShowHealth
                 )
             }
         }
@@ -1290,7 +1389,8 @@ private fun MdbxVaultDetailPage(
                     } else diagnostics?.let {
                         stringResource(R.string.mdbx_commit_tombstone_short, it.commitCount, it.tombstoneCount)
                     } ?: stringResource(R.string.mdbx_status_loading),
-                    isWarning = false
+                    isWarning = false,
+                    onClick = if (supportsHistory) onShowCommitHistory else null
                 )
                 StatusTile(
                     modifier = Modifier.weight(1f),
@@ -1304,7 +1404,8 @@ private fun MdbxVaultDetailPage(
                             formatBytes(it.storedAttachmentBytes)
                         )
                     } ?: stringResource(R.string.mdbx_status_loading),
-                    isWarning = false
+                    isWarning = false,
+                    onClick = onShowAttachments
                 )
             }
         }
@@ -1504,10 +1605,24 @@ private fun MdbxConflictPage(
                     Text("返回冲突列表")
                 }
             } else {
-                Text(
-                    "冲突管理 · ${state?.databaseName ?: databaseName}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                val visibleConflictCount = state?.conflicts?.size ?: 0
+                MdbxDetailHeroCard(
+                    icon = if (visibleConflictCount > 0) {
+                        Icons.AutoMirrored.Filled.CallMerge
+                    } else {
+                        Icons.Default.CheckCircle
+                    },
+                    title = when {
+                        state == null || state.isLoading -> "正在读取冲突状态"
+                        visibleConflictCount > 0 -> "$visibleConflictCount 个冲突等待处理"
+                        else -> "没有待处理冲突"
+                    },
+                    subtitle = when {
+                        state == null || state.isLoading -> "正在检查 ${state?.databaseName ?: databaseName} 的分支差异"
+                        visibleConflictCount > 0 -> "逐项查看字段差异，再选择保留本地或传入版本"
+                        else -> "${state.databaseName} 的提交分支保持一致"
+                    },
+                    warning = visibleConflictCount > 0
                 )
             }
         }
@@ -1522,24 +1637,12 @@ private fun MdbxConflictPage(
                     onResolve = onResolve
                 )
             }
-        } else if (state != null && state.conflicts.isEmpty() && !state.isLoading) {
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        stringResource(R.string.mdbx_conflict_queue_empty),
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        } else {
-            state?.conflicts?.let { conflicts ->
-                items(items = conflicts, key = { it.conflictId }) { conflict ->
-                    ConflictSummaryRow(
-                        conflict = conflict,
-                        onOpen = { selectedConflictId = conflict.conflictId }
-                    )
-                }
+        } else if (state != null && state.conflicts.isNotEmpty()) {
+            items(items = state.conflicts, key = { it.conflictId }) { conflict ->
+                ConflictSummaryRow(
+                    conflict = conflict,
+                    onOpen = { selectedConflictId = conflict.conflictId }
+                )
             }
         }
     }
@@ -1639,9 +1742,14 @@ private fun ConflictDiffDetail(
 @Composable
 private fun MdbxSnapshotPage(
     state: MdbxViewModel.MdbxDeltaDialogState.Visible?,
+    engineAlwaysCreatesFullSnapshots: Boolean,
     onShowDiff: (String) -> Unit,
     onShowSnapshotStructure: (String) -> Unit,
-    onCreateSnapshot: (String, Boolean) -> Unit,
+    onCreateSnapshot: (
+        String,
+        Boolean,
+        (MdbxViewModel.MdbxSnapshotCreateOutcome) -> Unit
+    ) -> Unit,
     onDeleteSnapshot: (String) -> Unit,
     onRevertSnapshot: (String) -> Unit,
     onPruneAutomaticSnapshots: () -> Unit
@@ -1650,6 +1758,9 @@ private fun MdbxSnapshotPage(
     var fullSnapshot by rememberSaveable(state?.databaseId ?: -1L) { mutableStateOf(false) }
     var pendingRevertSnapshot by remember { mutableStateOf<MdbxSnapshotSummary?>(null) }
     var pendingDeleteSnapshot by remember { mutableStateOf<MdbxSnapshotSummary?>(null) }
+    var pendingNoChangesSnapshotRequest by remember(state?.databaseId) {
+        mutableStateOf<String?>(null)
+    }
     var showPruneAutomaticConfirmation by remember { mutableStateOf(false) }
     val manualSnapshots = state?.snapshots?.filterNot { it.autoPrune }.orEmpty()
     val automaticSnapshots = state?.snapshots?.filter { it.autoPrune }.orEmpty()
@@ -1744,6 +1855,34 @@ private fun MdbxSnapshotPage(
         )
     }
 
+    pendingNoChangesSnapshotRequest?.let { pendingName ->
+        AlertDialog(
+            onDismissRequest = { pendingNoChangesSnapshotRequest = null },
+            icon = { Icon(Icons.Default.Info, contentDescription = null) },
+            title = { Text(stringResource(R.string.mdbx_snapshot_no_changes_title)) },
+            text = { Text(stringResource(R.string.mdbx_snapshot_no_changes_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingNoChangesSnapshotRequest = null
+                        onCreateSnapshot(pendingName, true) { outcome ->
+                            if (outcome is MdbxViewModel.MdbxSnapshotCreateOutcome.Created) {
+                                snapshotName = ""
+                            }
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.mdbx_snapshot_create_full_anyway))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingNoChangesSnapshotRequest = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
@@ -1799,10 +1938,21 @@ private fun MdbxSnapshotPage(
                         onSnapshotNameChange = { snapshotName = it },
                         fullSnapshot = fullSnapshot,
                         onFullSnapshotChange = { fullSnapshot = it },
+                        engineAlwaysCreatesFullSnapshots = engineAlwaysCreatesFullSnapshots,
                         enabled = !visibleState.isLoading && !visibleState.isSnapshotLoading,
                         onCreateSnapshot = {
-                            onCreateSnapshot(snapshotName, fullSnapshot)
-                            snapshotName = ""
+                            val requestedName = snapshotName
+                            onCreateSnapshot(requestedName, fullSnapshot) { outcome ->
+                                when (outcome) {
+                                    is MdbxViewModel.MdbxSnapshotCreateOutcome.Created -> {
+                                        snapshotName = ""
+                                    }
+                                    MdbxViewModel.MdbxSnapshotCreateOutcome.NoChanges -> {
+                                        pendingNoChangesSnapshotRequest = requestedName
+                                    }
+                                    is MdbxViewModel.MdbxSnapshotCreateOutcome.Failed -> Unit
+                                }
+                            }
                         }
                     )
                 }
@@ -3118,23 +3268,50 @@ private fun StatusTile(
     icon: ImageVector,
     label: String,
     value: String,
-    isWarning: Boolean
+    isWarning: Boolean,
+    onClick: (() -> Unit)? = null
 ) {
-    val color = when {
-        isWarning -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.primary
+    val accentColor = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val containerColor = if (isWarning) {
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.58f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val interactionModifier = if (onClick != null) {
+        Modifier.clickable(
+            onClickLabel = "查看${label}详情",
+            onClick = onClick
+        )
+    } else {
+        Modifier
     }
     Surface(
-        modifier = modifier.heightIn(min = 76.dp),
-        shape = MaterialTheme.shapes.small,
-        tonalElevation = 1.dp,
-        color = MaterialTheme.colorScheme.surface
+        modifier = modifier
+            .then(interactionModifier)
+            .heightIn(min = 88.dp),
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = if (onClick != null) 2.dp else 1.dp,
+        color = containerColor
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.weight(1f))
+                if (onClick != null) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
             Text(
                 label,
                 style = MaterialTheme.typography.labelSmall,
@@ -3144,7 +3321,7 @@ private fun StatusTile(
             )
             Text(
                 value,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -3403,6 +3580,7 @@ private fun SnapshotCreationCard(
     onSnapshotNameChange: (String) -> Unit,
     fullSnapshot: Boolean,
     onFullSnapshotChange: (Boolean) -> Unit,
+    engineAlwaysCreatesFullSnapshots: Boolean,
     enabled: Boolean,
     onCreateSnapshot: () -> Unit
 ) {
@@ -3469,12 +3647,28 @@ private fun SnapshotCreationCard(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
-                            if (fullSnapshot) "完整快照" else "增量快照",
+                            if (engineAlwaysCreatesFullSnapshots) {
+                                if (fullSnapshot) {
+                                    stringResource(R.string.mdbx_snapshot_always_create_full)
+                                } else {
+                                    stringResource(R.string.mdbx_snapshot_create_when_changed)
+                                }
+                            } else if (fullSnapshot) {
+                                "完整快照"
+                            } else {
+                                "增量快照"
+                            },
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            if (fullSnapshot) {
+                            if (engineAlwaysCreatesFullSnapshots) {
+                                if (fullSnapshot) {
+                                    stringResource(R.string.mdbx_snapshot_always_create_full_description)
+                                } else {
+                                    stringResource(R.string.mdbx_snapshot_create_when_changed_description)
+                                }
+                            } else if (fullSnapshot) {
                                 "保存完整状态，文件体积较大"
                             } else {
                                 "仅保存相对基线的变化，体积更小"
@@ -4995,7 +5189,7 @@ private fun mdbxCompatibilityValue(
         diagnostic.defaultTigaMode?.takeIf { it.isNotBlank() } ?: database.tigaMode
     ).filterNotNull().joinToString(" · ")
 
-private fun formatBytes(bytes: Long): String {
+internal fun formatBytes(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val units = arrayOf("KB", "MB", "GB", "TB")
     var value = bytes.toDouble() / 1024.0

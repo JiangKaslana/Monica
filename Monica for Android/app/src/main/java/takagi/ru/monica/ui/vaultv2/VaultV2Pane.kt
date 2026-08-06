@@ -185,6 +185,8 @@ import takagi.ru.monica.ui.password.BitwardenReunlockTopActionsMenuItem
 import takagi.ru.monica.ui.password.BitwardenSyncTopActionsMenuItem
 import takagi.ru.monica.ui.password.CommonPasswordTopActionsMenuItems
 import takagi.ru.monica.ui.password.KeepassRefreshTopActionsMenuItem
+import takagi.ru.monica.ui.password.MdbxCommitHistoryTopActionsMenuItem
+import takagi.ru.monica.ui.password.MdbxCreateSnapshotTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxSyncTopActionsMenuItem
 import takagi.ru.monica.ui.password.PasswordTopActionsDropdownMenu
 import takagi.ru.monica.ui.password.StackCardMode
@@ -1333,6 +1335,7 @@ fun VaultV2Pane(
 	onOpenDocument: (Long) -> Unit,
 	onOpenNote: (Long) -> Unit,
 	onOpenPasskey: (Long) -> Unit,
+	onOpenMdbxCommitHistory: (Long) -> Unit,
 	onOpenHistory: () -> Unit,
 	onOpenTrashPage: () -> Unit,
 	onOpenArchivePage: () -> Unit,
@@ -2770,6 +2773,46 @@ fun VaultV2Pane(
 										} else {
 											mdbxViewModel.syncVault(selectedMdbxDatabaseId)
 										}
+									}
+								)
+							}
+							if (
+								selectedMdbxDatabaseId != null &&
+								mdbxViewModel != null &&
+								selectedMdbxDatabase?.supports(MdbxCapability.SNAPSHOTS) == true
+							) {
+								MdbxCreateSnapshotTopActionsMenuItem(
+									onClick = {
+										isTopActionsMenuExpanded = false
+										mdbxViewModel.createQuickSnapshot(selectedMdbxDatabaseId) { result ->
+											val message = result.fold(
+												onSuccess = { snapshot ->
+													context.getString(
+														R.string.mdbx_quick_snapshot_created,
+														snapshot.name
+													)
+												},
+												onFailure = { error ->
+													context.getString(
+														R.string.mdbx_quick_snapshot_failed,
+														error.message ?: context.getString(R.string.mdbx_snapshot_unavailable)
+													)
+												}
+											)
+											Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+											mdbxViewModel.clearOperationState()
+										}
+									}
+								)
+							}
+							if (
+								selectedMdbxDatabaseId != null &&
+								selectedMdbxDatabase?.supports(MdbxCapability.DELTA_HISTORY) == true
+							) {
+								MdbxCommitHistoryTopActionsMenuItem(
+									onClick = {
+										isTopActionsMenuExpanded = false
+										onOpenMdbxCommitHistory(selectedMdbxDatabaseId)
 									}
 								)
 							}
