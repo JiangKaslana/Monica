@@ -61,9 +61,11 @@ class BitwardenSyncService(
     private val conflictDao = database.bitwardenConflictBackupDao()
     private val pendingOpDao = database.bitwardenPendingOperationDao()
     private val passwordEntryDao = database.passwordEntryDao()
+    private val customFieldDao = database.customFieldDao()
     private val secureItemDao = database.secureItemDao()
     private val passkeyDao = database.passkeyDao()
     private val securityManager = SecurityManager(context)
+    private val passwordCustomFieldSyncState = BitwardenPasswordCustomFieldSyncState(context)
     
     // 多类型 Cipher 同步处理器
     private val cipherSyncProcessor = CipherSyncProcessor(context)
@@ -1120,6 +1122,7 @@ class BitwardenSyncService(
                 updatedAt = Date()
             )
             passwordEntryDao.update(updatedEntry)
+            passwordCustomFieldSyncState.markInitialized(vault.id, createdCipher.id)
 
             android.util.Log.d(TAG, "Successfully uploaded entry ${entry.id} as cipher ${createdCipher.id}")
             return UploadAttemptResult(success = true)
@@ -1163,23 +1166,37 @@ class BitwardenSyncService(
         symmetricKey: SymmetricCryptoKey
     ): UploadAttemptResult {
         val vaultApi = apiManager.getVaultApi(vault)
-        var baselineCipher: CipherApiResponse? = null
-        val mergedFields = runCatching {
+        val customFieldsInitialized = passwordCustomFieldSyncState.isInitialized(vault.id, cipherId)
+        val baselineCipher = try {
             val remote = vaultApi.getCipher(
                 authorization = "Bearer $accessToken",
                 cipherId = cipherId
             )
-            if (remote.isSuccessful) {
-                baselineCipher = remote.body()
-                mergeCipherFieldsPreservingUnknown(
-                    localFields = buildEncryptedPasswordCustomFields(entry, symmetricKey),
-                    remoteFields = baselineCipher?.fields,
-                    symmetricKey = symmetricKey
+            if (!remote.isSuccessful) {
+                android.util.Log.w(
+                    TAG,
+                    "Fetch cipher baseline failed before update: cipherId=$cipherId code=${remote.code()}"
                 )
-            } else {
                 null
+            } else {
+                remote.body()
             }
-        }.getOrNull()
+        } catch (error: Exception) {
+            android.util.Log.w(TAG, "Fetch cipher baseline exception before update: cipherId=$cipherId", error)
+            null
+        }
+        if (baselineCipher == null && !customFieldsInitialized) {
+            // 首次适配前缺少服务端基线时延后更新；随后执行的 /sync 会先导入远程字段。
+            return UploadAttemptResult(success = false)
+        }
+        val mergedFields = baselineCipher?.let { baseline ->
+            mergeCipherFieldsPreservingUnknown(
+                entry = entry,
+                remoteFields = baseline.fields,
+                symmetricKey = symmetricKey,
+                initialized = customFieldsInitialized
+            )
+        }
 
         val updateRequest = passwordEntryToCipherUpdateRequest(
             entry = entry,
@@ -1264,6 +1281,7 @@ class BitwardenSyncService(
                 updatedAt = Date()
             )
             passwordEntryDao.update(updatedEntry)
+            passwordCustomFieldSyncState.markInitialized(vault.id, cipherId)
 
             logBitwardenPasswordEditHistory(
                 vaultId = vault.id,
@@ -1623,7 +1641,7 @@ class BitwardenSyncService(
      * 降级为 Type 1 并丢弃 sshKey 数据，导致同步回来后 SSH 密钥丢失。
      * 使用 Type 1 + 自定义字段可确保数据在服务端完整保留并正确往返。
      */
-    private fun passwordEntryToCipherRequest(
+    private suspend fun passwordEntryToCipherRequest(
         entry: PasswordEntry,
         symmetricKey: SymmetricCryptoKey
     ): CipherCreateRequest {
@@ -1634,7 +1652,6 @@ class BitwardenSyncService(
             val encryptedNotes = entry.notes.takeIf { it.isNotBlank() }?.let {
                 crypto.encryptString(it, symmetricKey)
             }
-            val sshFields = buildEncryptedSshKeyCustomFields(entry, symmetricKey)
             return CipherCreateRequest(
                 type = 1,
                 folderId = entry.bitwardenFolderId,
@@ -1644,7 +1661,7 @@ class BitwardenSyncService(
                     uris = emptyList(),
                     fido2Credentials = emptyList()
                 ),
-                fields = sshFields,
+                fields = buildEncryptedPasswordCustomFields(entry, symmetricKey),
                 favorite = entry.isFavorite,
                 archivedDate = toBitwardenArchivedDate(entry)
             )
@@ -1691,7 +1708,7 @@ class BitwardenSyncService(
     /**
      * 将 PasswordEntry 转换为加密的 CipherUpdateRequest
      */
-    private fun passwordEntryToCipherUpdateRequest(
+    private suspend fun passwordEntryToCipherUpdateRequest(
         entry: PasswordEntry,
         symmetricKey: SymmetricCryptoKey,
         mergedFields: List<CipherFieldApiData>? = null
@@ -1703,7 +1720,6 @@ class BitwardenSyncService(
             val encryptedNotes = entry.notes.takeIf { it.isNotBlank() }?.let {
                 crypto.encryptString(it, symmetricKey)
             }
-            val sshFields = buildEncryptedSshKeyCustomFields(entry, symmetricKey)
             return CipherUpdateRequest(
                 type = 1,
                 folderId = entry.bitwardenFolderId,
@@ -1713,7 +1729,7 @@ class BitwardenSyncService(
                     uris = emptyList(),
                     fido2Credentials = emptyList()
                 ),
-                fields = sshFields,
+                fields = mergedFields ?: buildEncryptedPasswordCustomFields(entry, symmetricKey),
                 favorite = entry.isFavorite,
                 archivedDate = toBitwardenArchivedDate(entry)
             )
@@ -1783,26 +1799,48 @@ class BitwardenSyncService(
         return runCatching { Instant.parse(revisionDate).toEpochMilli() }.getOrNull()
     }
 
-    private fun mergeCipherFieldsPreservingUnknown(
-        localFields: List<CipherFieldApiData>?,
+    private suspend fun mergeCipherFieldsPreservingUnknown(
+        entry: PasswordEntry,
         remoteFields: List<CipherFieldApiData>?,
-        symmetricKey: SymmetricCryptoKey
+        symmetricKey: SymmetricCryptoKey,
+        initialized: Boolean
     ): List<CipherFieldApiData>? {
-        if (localFields.isNullOrEmpty()) return remoteFields
-        if (remoteFields.isNullOrEmpty()) return localFields
-
-        val localFieldNames = localFields.mapNotNull { field ->
-            decryptOrPlain(field.name, symmetricKey)?.trim()?.takeIf { it.isNotEmpty() }
-        }.toSet()
-
-        val preservedRemote = remoteFields.filter { remote ->
-            val remoteName = decryptOrPlain(remote.name, symmetricKey)?.trim()
-            if (remoteName.isNullOrEmpty()) {
-                true
-            } else {
-                remoteName !in localFieldNames
-            }
+        val remoteApiFields = remoteFields.orEmpty()
+        val remotePlainFields = remoteApiFields.map { field ->
+            BitwardenPlainCustomField(
+                name = decryptOrPlain(field.name, symmetricKey)?.trim(),
+                value = decryptOrPlain(field.value, symmetricKey),
+                type = field.type,
+                linkedId = field.linkedId
+            )
         }
+        val localUserFields = loadPasswordCustomFields(entry.id)
+        val outgoingUserFields = if (initialized) {
+            localUserFields
+        } else {
+            BitwardenPasswordCustomFieldAdapter.mergeIncoming(
+                local = localUserFields,
+                remote = BitwardenPasswordCustomFieldAdapter.extractUserFields(remotePlainFields),
+                sameRevision = true
+            ).fields
+        }
+        if (outgoingUserFields != localUserFields) {
+            replacePasswordCustomFields(entry.id, outgoingUserFields)
+        }
+
+        val localFields = buildEncryptedPasswordCustomFields(
+            entry = entry,
+            symmetricKey = symmetricKey,
+            userFieldsOverride = outgoingUserFields
+        ).orEmpty()
+        val localSystemFieldNames = buildPasswordSystemFields(entry).mapTo(linkedSetOf()) { it.name }
+        val preservedIndexes = BitwardenPasswordCustomFieldAdapter.remoteIndexesToPreserveForUpload(
+            remote = remotePlainFields,
+            local = outgoingUserFields,
+            localSystemFieldNames = localSystemFieldNames,
+            initialized = initialized
+        )
+        val preservedRemote = remoteApiFields.filterIndexed { index, _ -> index in preservedIndexes }
 
         return (preservedRemote + localFields).ifEmpty { null }
     }
@@ -1888,15 +1926,39 @@ class BitwardenSyncService(
                 if (matches.size != 1) continue
 
                 val matched = matches.first()
+                val localUserFields = loadPasswordCustomFields(current.id)
+                val remoteUserFields = BitwardenPasswordCustomFieldAdapter.extractUserFields(
+                    matched.fields.orEmpty().map { field ->
+                        BitwardenPlainCustomField(
+                            name = decryptOrPlain(field.name, symmetricKey)?.trim(),
+                            value = decryptOrPlain(field.value, symmetricKey),
+                            type = field.type,
+                            linkedId = field.linkedId
+                        )
+                    }
+                )
+                val customFieldMerge = BitwardenPasswordCustomFieldAdapter.mergeIncoming(
+                    local = localUserFields,
+                    remote = remoteUserFields,
+                    sameRevision = true
+                )
                 val rebound = current.copy(
                     bitwardenCipherId = matched.id,
                     bitwardenFolderId = matched.folderId,
                     bitwardenRevisionDate = matched.revisionDate,
                     bitwardenCipherType = matched.type,
-                    bitwardenLocalModified = false,
+                    bitwardenLocalModified = customFieldMerge.needsUpload,
                     updatedAt = Date()
                 )
                 passwordEntryDao.update(rebound)
+                replacePasswordCustomFields(current.id, customFieldMerge.fields)
+                passwordCustomFieldSyncState.markInitialized(vault.id, matched.id)
+                if (customFieldMerge.needsUpload) {
+                    takagi.ru.monica.bitwarden.sync.BitwardenMutationSyncBridge.requestLocalMutationSync(
+                        context = context,
+                        vaultId = vault.id
+                    )
+                }
                 reconciled++
             }
 
@@ -1998,15 +2060,71 @@ class BitwardenSyncService(
         BitwardenDiagLogger.append(summary)
     }
 
-    private fun buildEncryptedPasswordCustomFields(
+    private data class PasswordPlainUploadField(
+        val name: String,
+        val value: String,
+        val type: Int = BitwardenPasswordCustomFieldAdapter.TYPE_TEXT
+    )
+
+    private suspend fun buildEncryptedPasswordCustomFields(
         entry: PasswordEntry,
-        symmetricKey: SymmetricCryptoKey
+        symmetricKey: SymmetricCryptoKey,
+        userFieldsOverride: List<MonicaPlainCustomField>? = null
     ): List<CipherFieldApiData>? {
         val crypto = takagi.ru.monica.bitwarden.crypto.BitwardenCrypto
-        val fields = mutableListOf<Pair<String, String>>()
+        val userFields = userFieldsOverride ?: loadPasswordCustomFields(entry.id)
+        val fields = buildPasswordSystemFields(entry) + userFields
+            .filter { it.name.isNotBlank() }
+            .map { field ->
+                PasswordPlainUploadField(
+                    name = field.name,
+                    value = field.value,
+                    type = if (field.isProtected) {
+                        BitwardenPasswordCustomFieldAdapter.TYPE_HIDDEN
+                    } else {
+                        BitwardenPasswordCustomFieldAdapter.TYPE_TEXT
+                    }
+                )
+            }
 
-        fun addField(name: String, value: String) {
-            if (value.isNotBlank()) fields.add(name to value)
+        return fields.map { field ->
+            CipherFieldApiData(
+                name = crypto.encryptString(field.name, symmetricKey),
+                value = crypto.encryptString(field.value, symmetricKey),
+                type = field.type
+            )
+        }.ifEmpty { null }
+    }
+
+    private fun buildPasswordSystemFields(entry: PasswordEntry): List<PasswordPlainUploadField> {
+        val fields = mutableListOf<PasswordPlainUploadField>()
+
+        fun addField(
+            name: String,
+            value: String,
+            type: Int = BitwardenPasswordCustomFieldAdapter.TYPE_TEXT
+        ) {
+            if (value.isNotBlank()) {
+                fields += PasswordPlainUploadField(name = name, value = value, type = type)
+            }
+        }
+
+        if (entry.loginType.equals(LOGIN_TYPE_SSH_KEY, ignoreCase = true)) {
+            SshKeyDataCodec.decode(entry.sshKeyData)?.let { ssh ->
+                addField("monica_ssh_algorithm", ssh.algorithm)
+                addField("monica_ssh_key_size", ssh.keySize.takeIf { it > 0 }?.toString().orEmpty())
+                addField("monica_ssh_public_key", ssh.publicKeyOpenSsh)
+                addField(
+                    "monica_ssh_private_key",
+                    ssh.privateKeyOpenSsh,
+                    BitwardenPasswordCustomFieldAdapter.TYPE_HIDDEN
+                )
+                addField("monica_ssh_fingerprint", ssh.fingerprintSha256)
+                addField("monica_ssh_comment", ssh.comment)
+                addField("monica_ssh_format", ssh.format)
+            }
+            addField("monica_login_type", LOGIN_TYPE_SSH_KEY)
+            return fields
         }
 
         addField("monica_app_package", entry.appPackageName)
@@ -2037,51 +2155,40 @@ class BitwardenSyncService(
             .filter { it.isNotBlank() }
             .joinToString(", ")
         addField("address", legacyAddress)
+        return fields
+    }
 
-        if (fields.isEmpty()) return null
-
-        return fields.map { (name, value) ->
-            CipherFieldApiData(
-                name = crypto.encryptString(name, symmetricKey),
-                value = crypto.encryptString(value, symmetricKey),
-                type = 0
+    private suspend fun loadPasswordCustomFields(entryId: Long): List<MonicaPlainCustomField> {
+        if (entryId <= 0L) return emptyList()
+        return customFieldDao.getFieldsByEntryIdSync(entryId).map { field ->
+            MonicaPlainCustomField(
+                name = field.title,
+                value = field.value,
+                isProtected = field.isProtected
             )
         }
     }
 
-    /**
-     * 为 SSH 密钥条目构建加密的自定义字段列表。
-     * 使用 monica_ssh_* 前缀字段名，同步回来时 buildSshKeyDataFromCustomFields 可识别。
-     */
-    private fun buildEncryptedSshKeyCustomFields(
-        entry: PasswordEntry,
-        symmetricKey: SymmetricCryptoKey
-    ): List<CipherFieldApiData> {
-        val crypto = takagi.ru.monica.bitwarden.crypto.BitwardenCrypto
-        val ssh = SshKeyDataCodec.decode(entry.sshKeyData) ?: return emptyList()
-        val fields = mutableListOf<Pair<String, String>>()
+    private suspend fun replacePasswordCustomFields(
+        entryId: Long,
+        fields: List<MonicaPlainCustomField>
+    ) {
+        if (entryId <= 0L) return
+        val existing = loadPasswordCustomFields(entryId)
+        if (existing == fields) return
 
-        fun addField(name: String, value: String) {
-            if (value.isNotBlank()) fields.add(name to value)
-        }
-
-        addField("monica_ssh_algorithm", ssh.algorithm)
-        addField("monica_ssh_key_size", ssh.keySize.takeIf { it > 0 }?.toString().orEmpty())
-        addField("monica_ssh_public_key", ssh.publicKeyOpenSsh)
-        addField("monica_ssh_private_key", ssh.privateKeyOpenSsh)
-        addField("monica_ssh_fingerprint", ssh.fingerprintSha256)
-        addField("monica_ssh_comment", ssh.comment)
-        addField("monica_ssh_format", ssh.format)
-        // 添加 monica_login_type 标记，方便同步时快速识别
-        addField("monica_login_type", LOGIN_TYPE_SSH_KEY)
-
-        return fields.map { (name, value) ->
-            CipherFieldApiData(
-                name = crypto.encryptString(name, symmetricKey),
-                value = crypto.encryptString(value, symmetricKey),
-                type = if (name == "monica_ssh_private_key") 1 else 0 // Hidden type for private key
-            )
-        }
+        customFieldDao.replaceFieldsForEntry(
+            entryId = entryId,
+            newFields = fields.mapIndexed { index, field ->
+                takagi.ru.monica.data.CustomField(
+                    entryId = entryId,
+                    title = field.name,
+                    value = field.value,
+                    isProtected = field.isProtected,
+                    sortOrder = index
+                )
+            }
+        )
     }
 
     private fun parseLoginUris(

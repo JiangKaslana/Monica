@@ -8,6 +8,7 @@ import takagi.ru.monica.bitwarden.crypto.BitwardenCrypto
 import takagi.ru.monica.bitwarden.crypto.BitwardenCrypto.SymmetricCryptoKey
 import takagi.ru.monica.bitwarden.mapper.*
 import takagi.ru.monica.bitwarden.sync.SyncItemType
+import takagi.ru.monica.bitwarden.sync.BitwardenMutationSyncBridge
 import takagi.ru.monica.data.*
 import takagi.ru.monica.data.model.BankCardData
 import takagi.ru.monica.data.model.CardWalletDataCodec
@@ -167,10 +168,12 @@ class CipherSyncProcessor(
     
     private val database = PasswordDatabase.getDatabase(context)
     private val passwordEntryDao = database.passwordEntryDao()
+    private val customFieldDao = database.customFieldDao()
     private val secureItemDao = database.secureItemDao()
     private val passkeyDao = database.passkeyDao()
     private val pendingOpDao = database.bitwardenPendingOperationDao()
     private val securityManager = SecurityManager(context)
+    private val passwordCustomFieldSyncState = BitwardenPasswordCustomFieldSyncState(context)
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -282,7 +285,31 @@ class CipherSyncProcessor(
         if (existing != null && hasPendingDelete && !isServerDeleted) {
             return CipherSyncResult.Skipped("Local delete wins")
         }
-        if (existing != null && shouldSkipPasswordRemoteSync(existing, cipher, serverDeletedAt, serverArchivedAt)) {
+
+        val decryptedFields = decryptCustomFields(cipher.fields, symmetricKey)
+        val remoteUserFields = BitwardenPasswordCustomFieldAdapter.extractUserFields(
+            decryptedFields.map { it.toPlainField() }
+        )
+        val localUserFields = existing?.let { loadPasswordCustomFields(it.id) }.orEmpty()
+        val incomingCustomFieldMerge = if (existing != null && !existing.bitwardenLocalModified) {
+            BitwardenPasswordCustomFieldAdapter.mergeIncoming(
+                local = localUserFields,
+                remote = remoteUserFields,
+                sameRevision = hasSameRemoteRevision(existing.bitwardenRevisionDate, cipher.revisionDate)
+            )
+        } else {
+            IncomingPasswordCustomFieldMerge(
+                fields = localUserFields,
+                needsUpload = false
+            )
+        }
+        val passwordCustomFieldsChanged = existing != null &&
+            incomingCustomFieldMerge.fields != localUserFields
+
+        if (existing != null && shouldSkipPasswordRemoteSync(existing, cipher, serverDeletedAt, serverArchivedAt) &&
+            !passwordCustomFieldsChanged && !incomingCustomFieldMerge.needsUpload
+        ) {
+            passwordCustomFieldSyncState.markInitialized(vault.id, cipher.id)
             return CipherSyncResult.Skipped(SKIP_REMOTE_UNCHANGED)
         }
         
@@ -299,7 +326,7 @@ class CipherSyncProcessor(
         val notes = decryptString(cipher.notes, symmetricKey) ?: ""
         val totp = decryptString(login.totp, symmetricKey) ?: ""
         val parsedUris = parseLoginUris(login.uris, symmetricKey)
-        val customFields = decryptCustomFieldMap(cipher.fields, symmetricKey)
+        val customFields = decryptedFields.associate { it.name to it.value }
         // 调试：对有自定义字段的 cipher 记录 ID
         if (customFields.isNotEmpty()) {
             android.util.Log.i(TAG, "syncPasswordCipher has ${customFields.size} custom fields")
@@ -373,7 +400,9 @@ class CipherSyncProcessor(
                 isArchived = serverArchivedAt != null,
                 archivedAt = serverArchivedAt
             )
-            passwordEntryDao.insert(newEntry)
+            val newEntryId = passwordEntryDao.insert(newEntry)
+            replacePasswordCustomFields(newEntryId, remoteUserFields)
+            passwordCustomFieldSyncState.markInitialized(vault.id, cipher.id)
             return CipherSyncResult.Added
         } else {
             if (isServerDeleted) {
@@ -409,6 +438,8 @@ class CipherSyncProcessor(
                         bitwardenLocalModified = false
                     )
                 )
+                replacePasswordCustomFields(existing.id, incomingCustomFieldMerge.fields)
+                passwordCustomFieldSyncState.markInitialized(vault.id, cipher.id)
                 return CipherSyncResult.Updated
             }
             // 更新现有条目
@@ -464,9 +495,19 @@ class CipherSyncProcessor(
                 bitwardenFolderId = cipher.folderId,
                 bitwardenRevisionDate = cipher.revisionDate,
                 // 如果服务端丢失了 SSH 数据，标记为本地修改以触发重新上传
-                bitwardenLocalModified = serverLostSshData
+                bitwardenLocalModified = serverLostSshData || incomingCustomFieldMerge.needsUpload
             )
             passwordEntryDao.update(updated)
+            if (passwordCustomFieldsChanged) {
+                replacePasswordCustomFields(existing.id, incomingCustomFieldMerge.fields)
+            }
+            passwordCustomFieldSyncState.markInitialized(vault.id, cipher.id)
+            if (incomingCustomFieldMerge.needsUpload) {
+                BitwardenMutationSyncBridge.requestLocalMutationSync(
+                    context = context,
+                    vaultId = vault.id
+                )
+            }
             if (serverLostSshData) {
                 android.util.Log.i(TAG, "SSH key ${cipher.id} lost on server, marking for re-upload as Type 1 + fields")
             }
@@ -1723,7 +1764,8 @@ class CipherSyncProcessor(
             DecryptedCustomField(
                 name = name,
                 value = value,
-                type = field.type
+                type = field.type,
+                linkedId = field.linkedId
             )
         }
     }
@@ -1789,8 +1831,49 @@ class CipherSyncProcessor(
     private data class DecryptedCustomField(
         val name: String,
         val value: String,
-        val type: Int
-    )
+        val type: Int,
+        val linkedId: Int? = null
+    ) {
+        fun toPlainField(): BitwardenPlainCustomField {
+            return BitwardenPlainCustomField(
+                name = name,
+                value = value,
+                type = type,
+                linkedId = linkedId
+            )
+        }
+    }
+
+    private suspend fun loadPasswordCustomFields(entryId: Long): List<MonicaPlainCustomField> {
+        return customFieldDao.getFieldsByEntryIdSync(entryId).map { field ->
+            MonicaPlainCustomField(
+                name = field.title,
+                value = field.value,
+                isProtected = field.isProtected
+            )
+        }
+    }
+
+    private suspend fun replacePasswordCustomFields(
+        entryId: Long,
+        fields: List<MonicaPlainCustomField>
+    ) {
+        val existing = loadPasswordCustomFields(entryId)
+        if (existing == fields) return
+
+        customFieldDao.replaceFieldsForEntry(
+            entryId = entryId,
+            newFields = fields.mapIndexed { index, field ->
+                CustomField(
+                    entryId = entryId,
+                    title = field.name,
+                    value = field.value,
+                    isProtected = field.isProtected,
+                    sortOrder = index
+                )
+            }
+        )
+    }
 
     private fun List<DecryptedCustomField>.toCardCustomFields(): List<SecureCustomField> {
         val reserved = LEGACY_MONICA_FIELD_NAMES + LEGACY_CARD_FIELD_NAMES + READABLE_CARD_FIELD_NAMES

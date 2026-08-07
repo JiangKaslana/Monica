@@ -2705,8 +2705,10 @@ class PasswordViewModel(
                 customFieldsOverride = customFieldsOverride
             )
         ) ?: return null
-        normalizedBoundEntry.bitwardenVaultId?.let { vaultId ->
-            bitwardenRepository?.requestLocalMutationSync(vaultId)
+        if (customFieldsOverride == null) {
+            normalizedBoundEntry.bitwardenVaultId?.let { vaultId ->
+                bitwardenRepository?.requestLocalMutationSync(vaultId)
+            }
         }
 
         if (includeDetailedLog) {
@@ -2968,8 +2970,10 @@ class PasswordViewModel(
             savePasswordHistorySnapshot(entryToUpdate.id, oldPassword)
         }
 
-        entryToUpdate.bitwardenVaultId?.let { vaultId ->
-            bitwardenRepository?.requestLocalMutationSync(vaultId)
+        if (customFieldsOverride == null) {
+            entryToUpdate.bitwardenVaultId?.let { vaultId ->
+                bitwardenRepository?.requestLocalMutationSync(vaultId)
+            }
         }
         
         // 记录更新操作
@@ -4769,9 +4773,23 @@ class PasswordViewModel(
      */
     suspend fun saveCustomFieldsForEntry(entryId: Long, fields: List<CustomFieldDraft>) {
         customFieldRepository?.saveFieldsForEntry(entryId, fields)
-        
-        // 更新密码条目的 updatedAt 以确保 WebDAV 同步能检测到自定义字段的变化
-        repository.updatePasswordUpdatedAt(entryId, java.util.Date())
+
+        val updatedAt = java.util.Date()
+        val entry = repository.getPasswordEntryById(entryId)
+        val bitwardenVaultId = entry?.bitwardenVaultId
+        if (entry != null && bitwardenVaultId != null) {
+            repository.updatePasswordEntry(
+                entry.copy(
+                    bitwardenLocalModified = true,
+                    updatedAt = updatedAt
+                )
+            )
+            // 字段已经写入 Room 后再请求同步，避免后台任务读取到旧字段列表。
+            bitwardenRepository?.requestLocalMutationSync(bitwardenVaultId)
+        } else {
+            // 更新密码条目的 updatedAt 以确保 WebDAV 同步能检测到自定义字段的变化
+            repository.updatePasswordUpdatedAt(entryId, updatedAt)
+        }
     }
 
     private suspend fun copyCustomFieldsForEntryCopy(
