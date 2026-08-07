@@ -131,6 +131,12 @@ internal data class PasswordListInitialRenderState(
     val shouldGateInitialContent: Boolean
 )
 
+internal fun resolvePasswordGroupsForRender(
+    groupedPasswords: Map<String, List<PasswordEntry>>,
+    hasGroupedPasswordsReadyForCurrentInputs: Boolean,
+): Map<String, List<PasswordEntry>> =
+    if (hasGroupedPasswordsReadyForCurrentInputs) groupedPasswords else emptyMap()
+
 internal data class PasswordListQuickFolderUiState(
     val nodes: List<PasswordQuickFolderNode>,
     val nodeByPath: Map<String, PasswordQuickFolderNode>,
@@ -1187,6 +1193,7 @@ internal fun resolvePasswordListInitialRenderState(
     allPasswordsForUiReady: Boolean,
     categoriesReady: Boolean,
     shouldRenderPasswordGroups: Boolean,
+    hasGroupedPasswordsReadyForCurrentInputs: Boolean,
     visiblePasswordIds: List<Long>,
     groupedPasswordIds: List<Long>,
     displayedContentTypes: Set<PasswordPageContentType>,
@@ -1194,22 +1201,24 @@ internal fun resolvePasswordListInitialRenderState(
 ): PasswordListInitialRenderState {
     val isPasswordListDataLoaded = passwordEntriesReady && allPasswordsForUiReady
     val isHeaderDataLoaded = isPasswordListDataLoaded && categoriesReady
-    val isPasswordPageListModelReady = if (!isPasswordListDataLoaded) {
-        false
-    } else {
+    val isGroupedPasswordModelReady =
         !shouldRenderPasswordGroups ||
             visiblePasswordIds.isEmpty() ||
             (
-                groupedPasswordIds.size == visiblePasswordIds.size &&
+                hasGroupedPasswordsReadyForCurrentInputs &&
+                    groupedPasswordIds.size == visiblePasswordIds.size &&
                     groupedPasswordIds.toSet() == visiblePasswordIds.toSet()
                 )
+    val isPasswordPageListModelReady = if (!isPasswordListDataLoaded) {
+        false
+    } else {
+        isGroupedPasswordModelReady
     }
     val shouldGateInitialContent =
-        !hasCompletedInitialPasswordListStabilization &&
-            (
-                !isHeaderDataLoaded ||
-                    !isPasswordPageListModelReady
-                ) &&
+        (
+            !isPasswordPageListModelReady ||
+                (!hasCompletedInitialPasswordListStabilization && !isHeaderDataLoaded)
+            ) &&
             PasswordPageContentType.PASSWORD in displayedContentTypes &&
             searchQuery.isEmpty()
 

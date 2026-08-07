@@ -113,6 +113,11 @@ class DockAndListFirstFramePerformanceGuardTest {
         assertFalse(
             animatedHostSource.contains("transform.using(SizeTransform(clip = false))")
         )
+        assertTrue(
+            animatedHostSource.contains("if (currentTab.isAuthenticatorPasskeyTab())")
+        )
+        assertTrue(animatedHostSource.contains("key(currentTab.key)"))
+        assertTrue(animatedHostSource.contains("SaveableStateProvider(currentTab.key)"))
     }
 
     private fun projectFile(relativePath: String): File {

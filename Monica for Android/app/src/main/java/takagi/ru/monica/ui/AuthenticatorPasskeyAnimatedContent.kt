@@ -5,7 +5,9 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import takagi.ru.monica.ui.main.navigation.BottomNavItem
@@ -22,30 +24,43 @@ internal fun AuthenticatorPasskeyAnimatedContent(
 ) {
     val saveableStateHolder = rememberSaveableStateHolder()
 
-    AnimatedContent(
-        targetState = currentTab,
-        modifier = modifier,
-        transitionSpec = {
-            when {
-                initialState == BottomNavItem.Authenticator && targetState == BottomNavItem.Passkey ->
-                    (slideInFromRight() togetherWith parallaxExitToLeft()).using(
-                        SizeTransform(clip = false)
-                    )
+    if (currentTab.isAuthenticatorPasskeyTab()) {
+        AnimatedContent(
+            targetState = currentTab,
+            modifier = modifier,
+            transitionSpec = {
+                when {
+                    initialState == BottomNavItem.Authenticator && targetState == BottomNavItem.Passkey ->
+                        (slideInFromRight() togetherWith parallaxExitToLeft()).using(
+                            SizeTransform(clip = false)
+                        )
 
-                initialState == BottomNavItem.Passkey && targetState == BottomNavItem.Authenticator ->
-                    (parallaxEnterFromLeft() togetherWith slideOutToRight()).using(
-                        SizeTransform(clip = false)
-                    )
+                    initialState == BottomNavItem.Passkey && targetState == BottomNavItem.Authenticator ->
+                        (parallaxEnterFromLeft() togetherWith slideOutToRight()).using(
+                            SizeTransform(clip = false)
+                        )
 
-                else -> EnterTransition.None togetherWith ExitTransition.None
+                    else -> EnterTransition.None togetherWith ExitTransition.None
+                }
+            },
+            contentKey = BottomNavItem::key,
+            label = "authenticator_passkey_switch",
+            content = { targetTab ->
+                saveableStateHolder.SaveableStateProvider(targetTab.key) {
+                    content(targetTab)
+                }
             }
-        },
-        contentKey = BottomNavItem::key,
-        label = "authenticator_passkey_switch",
-        content = { targetTab ->
-            saveableStateHolder.SaveableStateProvider(targetTab.key) {
-                content(targetTab)
+        )
+    } else {
+        Box(modifier = modifier) {
+            key(currentTab.key) {
+                saveableStateHolder.SaveableStateProvider(currentTab.key) {
+                    content(currentTab)
+                }
             }
         }
-    )
+    }
 }
+
+private fun BottomNavItem.isAuthenticatorPasskeyTab(): Boolean =
+    this == BottomNavItem.Authenticator || this == BottomNavItem.Passkey

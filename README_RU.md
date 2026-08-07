@@ -117,14 +117,11 @@ Android:
 
 <br/>
 
-<div align="center">
-  <style>.pp-BHSYWK73CA8FW{text-align:center;border:none;border-radius:0.25rem;min-width:11.625rem;padding:0 2rem;height:2.625rem;font-weight:bold;background-color:#FFD140;color:#000000;font-family:"Helvetica Neue",Arial,sans-serif;font-size:1rem;line-height:1.25rem;cursor:pointer;}</style>
-  <form action="https://www.paypal.com/ncp/payment/BHSYWK73CA8FW" method="post" target="_blank" style="display:inline-grid;justify-items:center;align-content:start;gap:0.5rem;">
-    <input class="pp-BHSYWK73CA8FW" type="submit" value="Support Monica" />
-    <img src="https://www.paypalobjects.com/images/Debit_Credit_APM.svg" alt="cards" />
-    <section style="font-size: 0.75rem;"> Powered by <img src="https://www.paypalobjects.com/paypal-ui/logos/svg/paypal-wordmark-color.svg" alt="paypal" style="height:0.875rem;vertical-align:middle;"/></section>
-  </form>
-</div>
+<p align="center">
+  <a href="https://www.paypal.com/ncp/payment/BHSYWK73CA8FW">
+    <img src="https://img.shields.io/badge/PayPal-Support%20Monica-FFD140?style=for-the-badge&amp;logo=paypal&amp;logoColor=003087" alt="Поддержать Monica через PayPal" />
+  </a>
+</p>
 
 Поддержка в первую очередь идет на:
 - Усиление безопасности и аудиты.

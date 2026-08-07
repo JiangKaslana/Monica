@@ -205,7 +205,10 @@ import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.password.PasswordAggregateCardStyle
 import takagi.ru.monica.ui.password.PasswordAggregateListItemUi
 import takagi.ru.monica.ui.password.PasswordAggregateRetainedStateViewModel
+import takagi.ru.monica.ui.password.PasswordGroupingEntryRevision
+import takagi.ru.monica.ui.password.PasswordGroupingSnapshotSeed
 import takagi.ru.monica.ui.password.PasswordGroupingSnapshotKey
+import takagi.ru.monica.ui.password.PasswordManualStackMetadata
 import takagi.ru.monica.ui.password.PasswordAggregateWalletItemType
 import takagi.ru.monica.ui.password.PasswordListCardBadge
 import takagi.ru.monica.ui.password.PasswordGroupListItemUi
@@ -792,9 +795,6 @@ fun PasswordListContent(
     LaunchedEffect(hasAnyBarcodeEntry) {
         if (!hasAnyBarcodeEntry) quickFilterBarcode = false
     }
-    var manualStackGroupByEntryId by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
-    var noStackEntryIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
-    var lastCustomFieldEntryIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     val configuredQuickFilterItems = remember(
         appSettings.passwordPageAggregateEnabled,
         aggregateUiState.visibleContentTypes
@@ -905,6 +905,59 @@ fun PasswordListContent(
             quickFilterManualStackOnly ||
             quickFilterNeverStack ||
             quickFilterUnstacked
+
+    val manualStackEntryRevisions = remember(passwordEntries, deletedItemIds) {
+        passwordEntries
+            .asSequence()
+            .filter { entry -> entry.id !in deletedItemIds }
+            .map { entry ->
+                PasswordGroupingEntryRevision(
+                    id = entry.id,
+                    updatedAtMillis = entry.updatedAt.time,
+                )
+            }
+            .toList()
+    }
+    val retainedManualStackMetadata = remember(
+        manualStackEntryRevisions,
+        shouldLoadManualStackMetadata,
+    ) {
+        if (shouldLoadManualStackMetadata) {
+            aggregateRetainedStateViewModel.retainedState.seedManualStackMetadata(
+                manualStackEntryRevisions
+            )
+        } else {
+            null
+        }
+    }
+    var manualStackGroupByEntryId by remember(
+        manualStackEntryRevisions,
+        shouldLoadManualStackMetadata,
+    ) {
+        mutableStateOf(retainedManualStackMetadata?.manualStackGroupByEntryId.orEmpty())
+    }
+    var noStackEntryIds by remember(
+        manualStackEntryRevisions,
+        shouldLoadManualStackMetadata,
+    ) {
+        mutableStateOf(retainedManualStackMetadata?.noStackEntryIds.orEmpty())
+    }
+    var lastCustomFieldEntryRevisions by remember(
+        manualStackEntryRevisions,
+        shouldLoadManualStackMetadata,
+    ) {
+        mutableStateOf(retainedManualStackMetadata?.revisions.orEmpty())
+    }
+    var hasManualStackMetadataForCurrentInputs by remember(
+        manualStackEntryRevisions,
+        shouldLoadManualStackMetadata,
+    ) {
+        mutableStateOf(
+            !shouldLoadManualStackMetadata ||
+                manualStackEntryRevisions.isEmpty() ||
+                retainedManualStackMetadata != null
+        )
+    }
     val emptyStateMessage = remember(
         currentFilter,
         quickFoldersEnabledForCurrentFilter,
@@ -1105,32 +1158,29 @@ fun PasswordListContent(
         }
     }
 
-    LaunchedEffect(passwordEntries, deletedItemIds, shouldLoadManualStackMetadata) {
+    LaunchedEffect(manualStackEntryRevisions, shouldLoadManualStackMetadata) {
         if (!shouldLoadManualStackMetadata) {
             manualStackGroupByEntryId = emptyMap()
             noStackEntryIds = emptySet()
-            lastCustomFieldEntryIds = emptyList()
+            lastCustomFieldEntryRevisions = emptyList()
+            hasManualStackMetadataForCurrentInputs = true
             return@LaunchedEffect
         }
-        val entriesSnapshot = passwordEntries
-        val deletedIdsSnapshot = deletedItemIds
-        val allIds = withContext(Dispatchers.Default) {
-            entriesSnapshot
-                .asSequence()
-                .map { it.id }
-                .filter { id -> id !in deletedIdsSnapshot }
-                .toList()
-        }
+        val revisionsSnapshot = manualStackEntryRevisions
+        val allIds = revisionsSnapshot.map(PasswordGroupingEntryRevision::id)
         if (allIds.isEmpty()) {
             manualStackGroupByEntryId = emptyMap()
             noStackEntryIds = emptySet()
-            lastCustomFieldEntryIds = emptyList()
+            lastCustomFieldEntryRevisions = emptyList()
+            hasManualStackMetadataForCurrentInputs = true
             return@LaunchedEffect
         }
-        if (allIds == lastCustomFieldEntryIds) {
+        if (revisionsSnapshot == lastCustomFieldEntryRevisions) {
+            hasManualStackMetadataForCurrentInputs = true
             return@LaunchedEffect
         }
-        lastCustomFieldEntryIds = allIds
+        hasManualStackMetadataForCurrentInputs = false
+        lastCustomFieldEntryRevisions = revisionsSnapshot
         val fieldMap = withContext(Dispatchers.IO) {
             viewModel.getCustomFieldsByEntryIds(allIds)
         }
@@ -1151,6 +1201,14 @@ fun PasswordListContent(
         }
         manualStackGroupByEntryId = manualStackMap
         noStackEntryIds = noStackIds
+        hasManualStackMetadataForCurrentInputs = true
+        aggregateRetainedStateViewModel.retainedState.updateManualStackMetadata(
+            PasswordManualStackMetadata(
+                revisions = revisionsSnapshot,
+                manualStackGroupByEntryId = manualStackMap,
+                noStackEntryIds = noStackIds,
+            )
+        )
     }
     
     // 根据分组模式对密码进行分组（后台线程计算，避免阻塞首滑）
@@ -1166,18 +1224,35 @@ fun PasswordListContent(
             config = groupingConfig,
         )
     }
-    val retainedGroupingSeed = remember(groupingSnapshotKey) {
-        aggregateRetainedStateViewModel.retainedState.groupingSeed(groupingSnapshotKey)
+    val retainedGroupingSeed = remember(
+        groupingSnapshotKey,
+        hasManualStackMetadataForCurrentInputs,
+    ) {
+        if (hasManualStackMetadataForCurrentInputs) {
+            aggregateRetainedStateViewModel.retainedState.groupingSeed(groupingSnapshotKey)
+        } else {
+            PasswordGroupingSnapshotSeed(
+                groups = emptyMap(),
+                hasSnapshot = false,
+            )
+        }
     }
-    var groupedPasswords by remember(groupingSnapshotKey) {
+    var groupedPasswords by remember(groupingSnapshotKey, hasManualStackMetadataForCurrentInputs) {
         mutableStateOf(retainedGroupingSeed.groups)
     }
-    var hasGroupedPasswordsReadyForCurrentInputs by remember(groupingSnapshotKey) {
+    var hasGroupedPasswordsReadyForCurrentInputs by remember(
+        groupingSnapshotKey,
+        hasManualStackMetadataForCurrentInputs,
+    ) {
         mutableStateOf(retainedGroupingSeed.hasSnapshot)
     }
-    LaunchedEffect(groupingSnapshotKey) {
+    LaunchedEffect(groupingSnapshotKey, hasManualStackMetadataForCurrentInputs) {
         val generation = aggregateRetainedStateViewModel.retainedState.currentGeneration()
         val sourceEntries = visiblePasswordsForAutoGrouping
+        if (!hasManualStackMetadataForCurrentInputs) {
+            hasGroupedPasswordsReadyForCurrentInputs = false
+            return@LaunchedEffect
+        }
         if (sourceEntries.isEmpty()) {
             groupedPasswords = emptyMap()
             hasGroupedPasswordsReadyForCurrentInputs = true
@@ -1209,19 +1284,11 @@ fun PasswordListContent(
     val groupedPasswordsForRender = remember(
         groupedPasswords,
         hasGroupedPasswordsReadyForCurrentInputs,
-        visiblePasswordsForAutoGrouping
     ) {
-        if (
-            groupedPasswords.isEmpty() &&
-            !hasGroupedPasswordsReadyForCurrentInputs &&
-            visiblePasswordsForAutoGrouping.isNotEmpty()
-        ) {
-            visiblePasswordsForAutoGrouping
-                .sortedBy { entry -> entry.sortOrder }
-                .associate { entry -> "entry_${entry.id}" to listOf(entry) }
-        } else {
-            groupedPasswords
-        }
+        resolvePasswordGroupsForRender(
+            groupedPasswords = groupedPasswords,
+            hasGroupedPasswordsReadyForCurrentInputs = hasGroupedPasswordsReadyForCurrentInputs,
+        )
     }
 
     val shouldRenderPasswordGroups = remember(aggregateUiState.displayedContentTypes) {
@@ -1247,6 +1314,7 @@ fun PasswordListContent(
         shouldRenderPasswordGroups,
         visiblePasswordIds,
         groupedPasswordIds,
+        hasGroupedPasswordsReadyForCurrentInputs,
         aggregateUiState.displayedContentTypes,
         searchQuery
     ) {
@@ -1256,6 +1324,7 @@ fun PasswordListContent(
             allPasswordsForUiReady = allPasswordsReady,
             categoriesReady = categoriesReady,
             shouldRenderPasswordGroups = shouldRenderPasswordGroups,
+            hasGroupedPasswordsReadyForCurrentInputs = hasGroupedPasswordsReadyForCurrentInputs,
             visiblePasswordIds = visiblePasswordIds,
             groupedPasswordIds = groupedPasswordIds,
             displayedContentTypes = aggregateUiState.displayedContentTypes,

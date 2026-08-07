@@ -12,7 +12,9 @@ android {
     compileSdk 35
 
     def previewVersionSuffix = project.findProperty('previewVersionSuffix')?.toString()?.trim()
-    def appVersionCode = 11
+    // Intentionally frozen: same-signature sideloaded builds must remain mutually replaceable
+    // for emergency rollback. Do not increment this value for routine releases.
+    def appVersionCode = 12
     def baseVersionName = previewVersionSuffix ? "1.0.299-${previewVersionSuffix}" : "1.0.299"
     def normalizeTwoDigits = { raw ->
         def value = raw?.toString()?.trim()?.replaceAll('\\D', '')
@@ -130,7 +132,7 @@ android {
         release {
             minifyEnabled true
             shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
         debug {
             minifyEnabled false
