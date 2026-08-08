@@ -2,13 +2,8 @@ name: Update Contributor Flag
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths-ignore:
-      - '.github/assets/**'
-      - '*.svg'
-  schedule:
-    - cron: '17 3 * * 1'
+  release:
+    types: [released]
 
 permissions:
   contents: write
@@ -18,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
 
       - name: Create output directory
         run: mkdir -p .github/assets
