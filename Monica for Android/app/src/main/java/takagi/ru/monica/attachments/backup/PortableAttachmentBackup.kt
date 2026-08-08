@@ -10,6 +10,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.storage.AttachmentKeyVault
 import takagi.ru.monica.attachments.storage.AttachmentStorage
@@ -39,13 +40,14 @@ object PortableAttachmentBackup {
 
     @Serializable
     data class Manifest(
-        val version: Int = 1,
+        val version: Int = 2,
         val entries: List<Entry> = emptyList()
     )
 
     @Serializable
     data class Entry(
-        val parentPasswordId: Long,
+        val parentPasswordId: Long? = null,
+        val parentSecureItemId: Long? = null,
         val fileName: String,
         val mimeType: String,
         val sizeBytes: Long,
@@ -54,8 +56,11 @@ object PortableAttachmentBackup {
         val createdAt: Long,
         val updatedAt: Long
     ) {
-        fun isValid(): Boolean =
-            parentPasswordId > 0 && payloadPath.isNotBlank() && fileName.isNotBlank()
+        fun isValid(): Boolean {
+            val hasPassword = parentPasswordId?.let { it > 0L } == true
+            val hasSecureItem = parentSecureItemId?.let { it > 0L } == true
+            return hasPassword.xor(hasSecureItem) && payloadPath.isNotBlank() && fileName.isNotBlank()
+        }
     }
 
     data class ExportResult(
@@ -100,6 +105,7 @@ object PortableAttachmentBackup {
             ) {
                 return@forEach
             }
+            if (attachment.owner == null) return@forEach
 
             val payloadName = Base64.encodeToString(
                 path.toByteArray(Charsets.UTF_8),
@@ -108,6 +114,7 @@ object PortableAttachmentBackup {
             val payloadPath = "$DIR_NAME/$payloadName"
             val entry = Entry(
                 parentPasswordId = attachment.parentPasswordId,
+                parentSecureItemId = attachment.parentSecureItemId,
                 fileName = attachment.fileName,
                 mimeType = attachment.mimeType,
                 sizeBytes = attachment.sizeBytes,
@@ -151,6 +158,20 @@ object PortableAttachmentBackup {
         payloadFile: File,
         mappedParentId: Long,
         now: Long = System.currentTimeMillis()
+    ): Attachment = materialize(
+        context = context,
+        entry = entry,
+        payloadFile = payloadFile,
+        mappedOwner = AttachmentOwner.password(mappedParentId),
+        now = now
+    )
+
+    suspend fun materialize(
+        context: Context,
+        entry: Entry,
+        payloadFile: File,
+        mappedOwner: AttachmentOwner,
+        now: Long = System.currentTimeMillis()
     ): Attachment = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         val storage = AttachmentStorage(app)
@@ -167,7 +188,8 @@ object PortableAttachmentBackup {
 
         Attachment(
             id = 0,
-            parentPasswordId = mappedParentId,
+            parentPasswordId = mappedOwner.passwordId,
+            parentSecureItemId = mappedOwner.secureItemId,
             source = AttachmentSource.LOCAL.name,
             fileName = entry.fileName,
             mimeType = entry.mimeType,

@@ -47,6 +47,8 @@ class ImageManager(private val context: Context) {
         private const val KEY_ALGORITHM = "AES"
         private const val MAX_STORED_IMAGE_DIMENSION = 2048
         private const val DEFAULT_LOAD_MAX_DIMENSION = 1600
+        private const val MAX_IMPORTED_IMAGE_BYTES = 25 * 1024 * 1024
+        private const val MAX_IMPORTED_IMAGE_DIMENSION = 32_768
         
         // 简单的加密密钥（实际应用中应该使用更安全的密钥管理方案）
         private val ENCRYPTION_KEY = "MonicaSecureKey1".toByteArray()
@@ -206,6 +208,54 @@ class ImageManager(private val context: Context) {
     }
 
     /**
+     * 保存已经编码完成的图片字节，并继续使用 Monica 的加密图片目录。
+     *
+     * 该入口主要用于从 KDBX 标准二进制附件恢复银行卡/证件照片。只接受可识别且大小受限的
+     * 图片，磁盘中始终写入密文；[stableId] 可使用 KDBX binary hash，使相同附件在重复同步时
+     * 复用同一份本地缓存。
+     */
+    suspend fun saveImageBytes(
+        bytes: ByteArray,
+        stableId: String? = null
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!isValidImportedImage(bytes)) return@withContext null
+
+            val preferredFileName = buildImportedImageFileName(stableId)
+            var file = resolveImageFile(preferredFileName) ?: return@withContext null
+            if (file.exists()) {
+                val existingBytes = runCatching { decrypt(file.readBytes()) }.getOrNull()
+                if (existingBytes?.contentEquals(bytes) == true) {
+                    return@withContext preferredFileName
+                }
+                file = resolveImageFile("${UUID.randomUUID()}.enc") ?: return@withContext null
+            }
+
+            val encryptedData = encrypt(bytes)
+            val tempFile = File(imageDirectory, ".${file.name}.${UUID.randomUUID()}.tmp")
+            try {
+                FileOutputStream(tempFile).use { output ->
+                    output.write(encryptedData)
+                    output.fd.sync()
+                }
+                if (!tempFile.renameTo(file)) {
+                    tempFile.copyTo(file, overwrite = false)
+                    tempFile.delete()
+                }
+            } finally {
+                if (tempFile.exists()) tempFile.delete()
+            }
+            file.name
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "saveImageBytes ran out of memory", e)
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "saveImageBytes failed", e)
+            null
+        }
+    }
+
+    /**
      * 估算按指定压缩参数保存后的图片大小
      */
     suspend fun estimateSavedImageSize(
@@ -262,6 +312,24 @@ class ImageManager(private val context: Context) {
             null
         }
     }
+
+    /**
+     * 读取 Monica 加密图片对应的原始编码字节，供写入 KDBX 标准附件。
+     */
+    suspend fun readImageBytes(fileName: String): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            val file = resolveImageFile(fileName) ?: return@withContext null
+            if (!file.exists() || file.length() <= 0L) return@withContext null
+            val bytes = decrypt(file.readBytes())
+            bytes.takeIf(::isValidImportedImage)
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "readImageBytes ran out of memory", e)
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "readImageBytes failed", e)
+            null
+        }
+    }
     
     /**
      * 删除图片
@@ -305,6 +373,38 @@ class ImageManager(private val context: Context) {
         val stream = java.io.ByteArrayOutputStream()
         bitmap.compress(compressionFormat, compressionQuality, stream)
         return stream.toByteArray()
+    }
+
+    private fun buildImportedImageFileName(stableId: String?): String {
+        val normalizedStableId = stableId
+            ?.filter(Char::isLetterOrDigit)
+            ?.lowercase(Locale.ROOT)
+            ?.take(64)
+            ?.takeIf { it.length >= 16 }
+        return if (normalizedStableId != null) {
+            "kdbx_$normalizedStableId.enc"
+        } else {
+            "${UUID.randomUUID()}.enc"
+        }
+    }
+
+    private fun resolveImageFile(fileName: String): File? {
+        if (fileName.isBlank()) return null
+        return runCatching {
+            val base = imageDirectory.canonicalFile
+            val candidate = File(base, fileName).canonicalFile
+            candidate.takeIf { it.parentFile == base }
+        }.getOrNull()
+    }
+
+    private fun isValidImportedImage(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty() || bytes.size > MAX_IMPORTED_IMAGE_BYTES) return false
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        return bounds.outWidth in 1..MAX_IMPORTED_IMAGE_DIMENSION &&
+            bounds.outHeight in 1..MAX_IMPORTED_IMAGE_DIMENSION
     }
 
     private fun queryUriSize(uri: Uri): Long? {

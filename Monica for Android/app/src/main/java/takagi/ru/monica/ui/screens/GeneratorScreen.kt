@@ -2374,65 +2374,51 @@ private fun GeneratorHistorySheet(
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 // 保存到密码库按钮
-                                val allPasswords by passwordViewModel.passwordEntries.collectAsState()
-
-                                // 检查密码是否已存在（相同密码和域名/包名）
-                                val alreadyExists = remember(historyItem.password, historyItem.domain, historyItem.packageName, allPasswords) {
-                                    allPasswords.any { entry ->
-                                        entry.password == historyItem.password &&
-                                            (entry.website == historyItem.domain ||
-                                                entry.appPackageName == historyItem.packageName)
-                                    }
-                                }
-
                                 var saved by remember { mutableStateOf(false) }
 
                                 Button(
                                     onClick = {
-                                        if (!alreadyExists) {
-                                            scope.launch {
-                                                val entry = PasswordEntry(
-                                                    title = if (historyItem.domain.isNotEmpty()) {
-                                                        historyItem.domain
-                                                    } else {
-                                                        historyItem.packageName.substringAfterLast('.')
-                                                    },
-                                                    website = historyItem.domain,
-                                                    username = historyItem.username,
-                                                    password = historyItem.password,
-                                                    notes = context.getString(
-                                                        R.string.saved_from_generator_history,
-                                                        java.text.SimpleDateFormat(
-                                                            "yyyy-MM-dd HH:mm:ss",
-                                                            java.util.Locale.getDefault()
-                                                        ).format(java.util.Date(historyItem.timestamp))
-                                                    ),
-                                                    appPackageName = historyItem.packageName,
-                                                    createdAt = Date(),
-                                                    updatedAt = Date()
-                                                )
-                                                passwordViewModel.addPasswordEntry(entry)
-                                                saved = true
-                                                Toast.makeText(context, context.getString(R.string.saved_to_vault), Toast.LENGTH_SHORT).show()
-                                            }
+                                        scope.launch {
+                                            val entry = PasswordEntry(
+                                                title = if (historyItem.domain.isNotEmpty()) {
+                                                    historyItem.domain
+                                                } else {
+                                                    historyItem.packageName.substringAfterLast('.')
+                                                },
+                                                website = historyItem.domain,
+                                                username = historyItem.username,
+                                                password = historyItem.password,
+                                                notes = context.getString(
+                                                    R.string.saved_from_generator_history,
+                                                    java.text.SimpleDateFormat(
+                                                        "yyyy-MM-dd HH:mm:ss",
+                                                        java.util.Locale.getDefault()
+                                                    ).format(java.util.Date(historyItem.timestamp))
+                                                ),
+                                                appPackageName = historyItem.packageName,
+                                                createdAt = Date(),
+                                                updatedAt = Date()
+                                            )
+                                            passwordViewModel.addPasswordEntry(entry)
+                                            saved = true
+                                            Toast.makeText(context, context.getString(R.string.saved_to_vault), Toast.LENGTH_SHORT).show()
                                         }
                                     },
                                     modifier = Modifier.fillMaxWidth(),
-                                    enabled = !alreadyExists && !saved,
+                                    enabled = !saved,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (alreadyExists || saved) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
-                                        contentColor = if (alreadyExists || saved) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer
+                                        containerColor = if (saved) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = if (saved) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 ) {
                                     Icon(
-                                        imageVector = if (alreadyExists || saved) Icons.Default.Done else Icons.Default.Save,
+                                        imageVector = if (saved) Icons.Default.Done else Icons.Default.Save,
                                         contentDescription = null,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        if (alreadyExists) stringResource(R.string.already_in_vault)
-                                        else if (saved) stringResource(R.string.saved_to_vault)
+                                        if (saved) stringResource(R.string.saved_to_vault)
                                         else stringResource(R.string.save_to_vault)
                                     )
                                 }

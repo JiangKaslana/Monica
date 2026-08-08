@@ -35,7 +35,8 @@ object AttachmentBackupCodec {
     /** 单个附件的备份条目（JSON 序列化结构）。 */
     @Serializable
     data class Entry(
-        val parentPasswordId: Long,
+        val parentPasswordId: Long? = null,
+        val parentSecureItemId: Long? = null,
         val fileName: String,
         val mimeType: String,
         val sizeBytes: Long,
@@ -49,7 +50,7 @@ object AttachmentBackupCodec {
     /** 整个备份 manifest 的顶层结构；保留版本号便于后续演进。 */
     @Serializable
     data class Manifest(
-        val version: Int = 1,
+        val version: Int = 2,
         val entries: List<Entry> = emptyList()
     )
 
@@ -67,6 +68,7 @@ object AttachmentBackupCodec {
     fun Entry.toAttachment(now: Long = System.currentTimeMillis()): Attachment = Attachment(
         id = 0,
         parentPasswordId = parentPasswordId,
+        parentSecureItemId = parentSecureItemId,
         source = AttachmentSource.LOCAL.name,
         fileName = fileName,
         mimeType = mimeType,
@@ -82,9 +84,11 @@ object AttachmentBackupCodec {
     private fun Attachment.toEntry(): Entry? {
         val path = localPath ?: return null
         val wrapped = wrappedCek ?: return null
+        if (owner == null) return null
         if (sourceEnum != AttachmentSource.LOCAL) return null
         return Entry(
             parentPasswordId = parentPasswordId,
+            parentSecureItemId = parentSecureItemId,
             fileName = fileName,
             mimeType = mimeType,
             sizeBytes = sizeBytes,

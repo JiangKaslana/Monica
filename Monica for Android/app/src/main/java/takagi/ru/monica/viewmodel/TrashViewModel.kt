@@ -89,7 +89,8 @@ class TrashViewModel(application: Application) : AndroidViewModel(application) {
     private val secureItemRepository = SecureItemRepository(
         database.secureItemDao(),
         mdbxRepository,
-        securityManager::decryptDataIfMonicaCiphertext
+        securityManager::decryptDataIfMonicaCiphertext,
+        takagi.ru.monica.attachments.repository.AttachmentRepository(database.attachmentDao())
     )
     private val bitwardenRepository = BitwardenRepository.getInstance(application)
     private val keepassBridge = KeePassCompatibilityBridge(

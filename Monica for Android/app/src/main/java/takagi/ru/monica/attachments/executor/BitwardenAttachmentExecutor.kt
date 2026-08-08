@@ -14,6 +14,7 @@ import takagi.ru.monica.attachments.crypto.BitwardenAttachmentCrypto
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
 import takagi.ru.monica.attachments.model.AttachmentError
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.storage.AttachmentKeyVault
 import takagi.ru.monica.attachments.storage.AttachmentStorage
@@ -70,6 +71,22 @@ class BitwardenAttachmentExecutor(
      */
     suspend fun upload(
         parentPasswordId: Long,
+        fileName: String,
+        mimeType: String,
+        source: InputStream,
+        sizeBytes: Long,
+        ctx: UploadContext
+    ): Attachment = upload(
+        owner = AttachmentOwner.password(parentPasswordId),
+        fileName = fileName,
+        mimeType = mimeType,
+        source = source,
+        sizeBytes = sizeBytes,
+        ctx = ctx
+    )
+
+    suspend fun upload(
+        owner: AttachmentOwner,
         fileName: String,
         mimeType: String,
         source: InputStream,
@@ -193,7 +210,8 @@ class BitwardenAttachmentExecutor(
         val now = System.currentTimeMillis()
         Attachment(
             id = 0,
-            parentPasswordId = parentPasswordId,
+            parentPasswordId = owner.passwordId,
+            parentSecureItemId = owner.secureItemId,
             source = AttachmentSource.BITWARDEN.name,
             fileName = fileName,
             mimeType = mimeType,

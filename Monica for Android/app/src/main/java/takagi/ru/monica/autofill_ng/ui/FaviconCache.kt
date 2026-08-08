@@ -26,6 +26,7 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.net.URL
 import java.security.MessageDigest
+import java.util.Locale
 import javax.net.ssl.SSLException
 
 /**
@@ -34,6 +35,7 @@ import javax.net.ssl.SSLException
 object FaviconCache {
     private const val TAG = "FaviconCache"
     private const val CACHE_DIR_NAME = "favicons"
+    private const val CACHE_VERSION = "v2"
     private const val MAX_MEMORY_CACHE_SIZE = 50 // Keep up to 50 icons in memory
 
     private val memoryCache = LruCache<String, ImageBitmap>(MAX_MEMORY_CACHE_SIZE)
@@ -44,7 +46,7 @@ object FaviconCache {
      */
     suspend fun getIcon(context: Context, url: String): ImageBitmap? {
         val domain = getDomainFromUrl(url) ?: return null
-        val cacheKey = hashString(domain)
+        val cacheKey = hashString("$CACHE_VERSION:$domain")
 
         // 1. Check memory cache
         memoryCache.get(cacheKey)?.let {
@@ -136,19 +138,28 @@ object FaviconCache {
     }
 
     private fun getDomainFromUrl(url: String): String? {
-        if (url.isBlank()) return null
+        val raw = url.trim()
+        if (raw.isBlank()) return null
         return try {
-            val uri = java.net.URI(url)
+            val uri = java.net.URI(raw)
             val domain = uri.host
             if (domain != null) {
-                return domain.removePrefix("www.")
+                return normalizeDomain(domain).takeIf { it.isNotBlank() }
             }
             // Fallback for URLs without scheme
-            val simpleUrl = if (url.startsWith("http")) url else "http://$url"
-            java.net.URI(simpleUrl).host?.removePrefix("www.")
+            val simpleUrl = if (raw.startsWith("http", ignoreCase = true)) raw else "http://$raw"
+            java.net.URI(simpleUrl).host?.let(::normalizeDomain)?.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun normalizeDomain(domain: String): String {
+        return domain
+            .trim()
+            .trimEnd('.')
+            .lowercase(Locale.ROOT)
+            .removePrefix("www.")
     }
 
     private fun hashString(input: String): String {
@@ -156,6 +167,26 @@ object FaviconCache {
             .digest(input.toByteArray())
             .joinToString("") { "%02x".format(it) }
     }
+}
+
+/**
+ * Returns whether a stored address identifies a web origin.
+ *
+ * App URIs such as `android://com.example.app` may legitimately use an
+ * installed application icon. A real web address should keep its favicon as
+ * the only automatic website fallback, even when an app binding is present.
+ */
+fun isWebAddress(url: String): Boolean {
+    val raw = url.trim()
+    if (raw.isBlank()) return false
+    val parsedRaw = runCatching { java.net.URI(raw) }.getOrNull()
+    val uri = if (parsedRaw?.scheme != null) {
+        parsedRaw
+    } else {
+        runCatching { java.net.URI("https://$raw") }.getOrNull()
+    } ?: return false
+    val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return false
+    return scheme in setOf("http", "https") && !uri.host.isNullOrBlank()
 }
 
 /**

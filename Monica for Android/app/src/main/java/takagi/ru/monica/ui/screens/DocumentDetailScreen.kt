@@ -23,6 +23,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import takagi.ru.monica.R
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.facade.AttachmentFacade
+import takagi.ru.monica.attachments.model.AttachmentOwner
+import takagi.ru.monica.attachments.ui.AttachmentsDetailSection
+import takagi.ru.monica.data.ItemType
+import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.data.model.CardWalletDataCodec
 import takagi.ru.monica.data.model.DocumentData
@@ -30,6 +36,7 @@ import takagi.ru.monica.data.model.DocumentType
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.displayFullName
 import takagi.ru.monica.data.model.toStorageTarget
+import takagi.ru.monica.keepass.KeePassSecureItemPhotoAttachments
 import takagi.ru.monica.ui.components.ActionStrip
 import takagi.ru.monica.ui.components.ActionStripItem
 import takagi.ru.monica.ui.components.ImageDialog
@@ -39,6 +46,7 @@ import takagi.ru.monica.ui.components.PasswordField
 import takagi.ru.monica.util.ImageManager
 import takagi.ru.monica.viewmodel.DocumentViewModel
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,9 +59,11 @@ fun DocumentDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val database = remember { PasswordDatabase.getDatabase(context) }
     val imageManager = remember { ImageManager(context) }
     val scope = rememberCoroutineScope()
     val allDocuments by viewModel.allDocuments.collectAsState(initial = emptyList())
+    val bitwardenVaults by database.bitwardenVaultDao().getAllVaultsFlow().collectAsState(initial = emptyList())
     
     var documentItem by remember { mutableStateOf<SecureItem?>(null) }
     var documentData by remember { mutableStateOf<DocumentData?>(null) }
@@ -69,6 +79,24 @@ fun DocumentDetailScreen(
             documentItem = item
             
             documentData = viewModel.parseDocumentData(item.itemData)
+
+            if (item.keepassDatabaseId != null && !item.keepassEntryUuid.isNullOrBlank()) {
+                launch(Dispatchers.IO) {
+                    runCatching {
+                        AttachmentContainer.keepassReconciler(context).reconcile(
+                            owner = AttachmentOwner.secureItem(item.id),
+                            databaseId = item.keepassDatabaseId,
+                            entryUuid = item.keepassEntryUuid,
+                            excludedFileNames = KeePassSecureItemPhotoAttachments.managedFileNames(ItemType.DOCUMENT)
+                        )
+                    }.onFailure { error ->
+                        android.util.Log.w(
+                            "DocumentDetailScreen",
+                            "KeePass attachment metadata reconcile failed: ${error::class.simpleName}"
+                        )
+                    }
+                }
+            }
             
             try {
                 if (item.imagePaths.isNotBlank()) {
@@ -93,6 +121,31 @@ fun DocumentDetailScreen(
                 .ifEmpty { listOf(currentItem.toStorageTarget()) }
         } else {
             listOf(currentItem.toStorageTarget())
+        }
+    }
+    val attachmentBitwardenVault = remember(documentItem?.bitwardenVaultId, bitwardenVaults) {
+        documentItem?.bitwardenVaultId?.let { vaultId ->
+            bitwardenVaults.firstOrNull { it.id == vaultId }
+        }
+    }
+    val attachmentBitwardenContext = remember(
+        attachmentBitwardenVault,
+        documentItem?.bitwardenCipherId
+    ) {
+        attachmentBitwardenVault?.let { vault ->
+            viewModel.getAttachmentBitwardenContext(vault, documentItem?.bitwardenCipherId)
+        }
+    }
+    val attachmentKeePassContext = remember(
+        documentItem?.keepassDatabaseId,
+        documentItem?.keepassEntryUuid
+    ) {
+        val databaseId = documentItem?.keepassDatabaseId
+        val entryUuid = documentItem?.keepassEntryUuid?.takeIf { it.isNotBlank() }
+        if (databaseId != null && entryUuid != null) {
+            AttachmentFacade.KeePassContext(databaseId = databaseId, entryUuid = entryUuid)
+        } else {
+            null
         }
     }
     Scaffold(
@@ -365,7 +418,7 @@ fun DocumentDetailScreen(
                 }
                 
                 // Notes
-                 if (!documentItem?.notes.isNullOrBlank()) {
+                if (!documentItem?.notes.isNullOrBlank()) {
                      Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
@@ -389,7 +442,16 @@ fun DocumentDetailScreen(
                         }
                     }
                 }
-                
+
+                documentItem?.let { item ->
+                    AttachmentsDetailSection(
+                        owner = AttachmentOwner.secureItem(item.id),
+                        bitwardenContext = attachmentBitwardenContext,
+                        keepassContext = attachmentKeePassContext,
+                        excludedFileNames = KeePassSecureItemPhotoAttachments.managedFileNames(ItemType.DOCUMENT)
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }

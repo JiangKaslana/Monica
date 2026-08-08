@@ -56,6 +56,7 @@ internal fun BoxScope.MainScreenFabOverlay(
     isCompactWidth: Boolean,
     shouldHideBottomNavigation: Boolean,
     wideFabHostWidth: Dp,
+    vaultV2HasWideDetail: Boolean,
     appSettings: takagi.ru.monica.data.AppSettings,
     passwordHistoryPageMode: PasswordHistoryPageMode,
     isAnySelectionMode: Boolean,
@@ -129,6 +130,7 @@ internal fun BoxScope.MainScreenFabOverlay(
     // FAB visibility is computed from tab context + selection mode + detail pane occupancy.
     // This avoids conflicting gestures between fast-scroll, quick access, and expandable add menu.
     val hasWideDetailSelection = !isCompactWidth && when (currentTab) {
+        BottomNavItem.VaultV2 -> vaultV2HasWideDetail
         BottomNavItem.Passwords -> isAddingPasswordInline || inlinePasswordEditorId != null
         BottomNavItem.Authenticator -> isAddingTotpInline || selectedTotpId != null
         BottomNavItem.CardWallet -> isAddingBankCardInline ||

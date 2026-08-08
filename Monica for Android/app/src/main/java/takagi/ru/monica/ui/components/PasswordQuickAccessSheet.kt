@@ -500,7 +500,11 @@ private fun PasswordQuickAccessLeadingIcon(
         rememberUploadedPasswordIcon(entry.customIconValue)
     } else null
     val primaryAppPackageName = entry.primaryLinkedAppPackageName()
-    val appIcon = if (iconCardsEnabled && primaryAppPackageName.isNotBlank()) {
+    val appIcon = if (
+        iconCardsEnabled &&
+        primaryAppPackageName.isNotBlank() &&
+        !takagi.ru.monica.autofill_ng.ui.isWebAddress(entry.website)
+    ) {
         rememberAppIcon(primaryAppPackageName)
     } else null
     val autoMatchedSimpleIcon = rememberAutoMatchedSimpleIcon(

@@ -79,31 +79,58 @@ internal fun NotePane(
                     .weight(1f)
                     .fillMaxHeight()
             ) {
-                if (isAddingNoteInline || inlineNoteEditorId != null) {
-                    AddEditNoteScreen(
-                        noteId = inlineNoteEditorId ?: -1L,
-                        initialCategoryId = initialCategoryId,
-                        initialKeePassDatabaseId = initialKeePassDatabaseId,
-                        initialKeePassGroupPath = initialKeePassGroupPath,
-                        initialMdbxDatabaseId = initialMdbxDatabaseId,
-                        initialBitwardenVaultId = initialBitwardenVaultId,
-                        initialBitwardenFolderId = initialBitwardenFolderId,
-                        onNavigateBack = onInlineNoteEditorBack,
-                        viewModel = noteViewModel
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Select a note to view or edit",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                NoteDetailPaneContent(
+                    noteViewModel = noteViewModel,
+                    isAddingNoteInline = isAddingNoteInline,
+                    inlineNoteEditorId = inlineNoteEditorId,
+                    onInlineNoteEditorBack = onInlineNoteEditorBack,
+                    initialCategoryId = initialCategoryId,
+                    initialKeePassDatabaseId = initialKeePassDatabaseId,
+                    initialKeePassGroupPath = initialKeePassGroupPath,
+                    initialMdbxDatabaseId = initialMdbxDatabaseId,
+                    initialBitwardenVaultId = initialBitwardenVaultId,
+                    initialBitwardenFolderId = initialBitwardenFolderId
+                )
             }
+        }
+    }
+}
+
+@Composable
+internal fun NoteDetailPaneContent(
+    noteViewModel: NoteViewModel,
+    isAddingNoteInline: Boolean,
+    inlineNoteEditorId: Long?,
+    onInlineNoteEditorBack: () -> Unit,
+    initialCategoryId: Long? = null,
+    initialKeePassDatabaseId: Long? = null,
+    initialKeePassGroupPath: String? = null,
+    initialMdbxDatabaseId: Long? = null,
+    initialBitwardenVaultId: Long? = null,
+    initialBitwardenFolderId: String? = null
+) {
+    if (isAddingNoteInline || inlineNoteEditorId != null) {
+        AddEditNoteScreen(
+            noteId = inlineNoteEditorId ?: -1L,
+            initialCategoryId = initialCategoryId,
+            initialKeePassDatabaseId = initialKeePassDatabaseId,
+            initialKeePassGroupPath = initialKeePassGroupPath,
+            initialMdbxDatabaseId = initialMdbxDatabaseId,
+            initialBitwardenVaultId = initialBitwardenVaultId,
+            initialBitwardenFolderId = initialBitwardenFolderId,
+            onNavigateBack = onInlineNoteEditorBack,
+            viewModel = noteViewModel
+        )
+    } else {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Select a note to view or edit",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

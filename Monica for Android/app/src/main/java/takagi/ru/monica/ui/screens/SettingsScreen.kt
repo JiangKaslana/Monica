@@ -160,7 +160,8 @@ fun SettingsScreen(
             updateCheckResult = null
             updateCheckError = null
             coroutineScope.launch {
-                val currentVersion = BuildConfig.VERSION_NAME.ifBlank { BuildConfig.FULL_VERSION_NAME }
+                val currentVersion = BuildConfig.BASE_VERSION_NAME
+                    .ifBlank { BuildConfig.VERSION_NAME }
                 UpdateChecker.checkLatestRelease(currentVersion)
                     .onSuccess { result ->
                         updateCheckResult = result

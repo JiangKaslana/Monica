@@ -1343,6 +1343,7 @@ fun VaultV2Pane(
 	onScanFidoQr: () -> Unit = {},
 	onOpenStandaloneSettings: () -> Unit = {},
 	showStandaloneSettingsEntry: Boolean = false,
+	useEmbeddedHistoryPages: Boolean = true,
 	showOnlyLocalData: Boolean = false,
 	appSettings: AppSettings = AppSettings(),
 	securityManager: SecurityManager? = null,
@@ -1355,7 +1356,7 @@ fun VaultV2Pane(
 	val timelineViewModel: takagi.ru.monica.viewmodel.TimelineViewModel = viewModel()
 
 	// 历史/回收站页面优先渲染，覆盖整个 VaultV2Pane
-	if (vaultHistoryPageMode != 0) {
+	if (useEmbeddedHistoryPages && vaultHistoryPageMode != 0) {
 		takagi.ru.monica.ui.screens.TimelineScreen(
 			viewModel = timelineViewModel,
 			onLogSelected = {},
@@ -1374,8 +1375,16 @@ fun VaultV2Pane(
 	}
 
 	// 覆盖外部传入的导航回调，改为在 VaultV2 内部处理
-	val handleOpenHistory: () -> Unit = { vaultHistoryPageMode = 1 }
-	val handleOpenTrashPage: () -> Unit = { vaultHistoryPageMode = 2 }
+	val handleOpenHistory: () -> Unit = if (useEmbeddedHistoryPages) {
+		{ vaultHistoryPageMode = 1 }
+	} else {
+		onOpenHistory
+	}
+	val handleOpenTrashPage: () -> Unit = if (useEmbeddedHistoryPages) {
+		{ vaultHistoryPageMode = 2 }
+	} else {
+		onOpenTrashPage
+	}
 	val handleOpenArchivePage: () -> Unit = { state.openArchiveView() }
 
 	var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -3968,7 +3977,10 @@ private fun VaultV2ItemCard(
 	} else {
 		null
 	}
-	val appIcon = if (iconAppPackage.isNotBlank()) {
+	val appIcon = if (
+		iconAppPackage.isNotBlank() &&
+		!takagi.ru.monica.autofill_ng.ui.isWebAddress(iconWebsite)
+	) {
 		takagi.ru.monica.autofill_ng.ui.rememberAppIcon(iconAppPackage)
 	} else {
 		null

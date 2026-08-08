@@ -13,6 +13,7 @@ import takagi.ru.monica.attachments.executor.LocalAttachmentExecutor
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
 import takagi.ru.monica.attachments.model.AttachmentError
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.repository.AttachmentRepository
 import takagi.ru.monica.attachments.storage.AttachmentKeyVault
@@ -24,8 +25,10 @@ import takagi.ru.monica.bitwarden.api.CipherAttachmentApiData
 import takagi.ru.monica.bitwarden.crypto.BitwardenCrypto.SymmetricCryptoKey
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordEntryDao
+import takagi.ru.monica.data.SecureItemDao
 import takagi.ru.monica.repository.MdbxRepository
 import takagi.ru.monica.repository.mdbxPasswordObjectId
+import takagi.ru.monica.repository.mdbxSecureItemObjectId
 import java.io.File
 import java.io.OutputStream
 
@@ -52,6 +55,7 @@ class AttachmentFacade(
     private val keyVault: AttachmentKeyVault,
     private val previewCache: AttachmentPreviewCache,
     private val passwordEntryDao: PasswordEntryDao? = null,
+    private val secureItemDao: SecureItemDao? = null,
     private val mdbxVaultStore: MdbxRepository? = null,
     /** 用于 `openForPreview` 发出的 FileProvider authority，需与 manifest 中注册的 authority 一致。 */
     private val fileProviderAuthority: String
@@ -66,7 +70,7 @@ class AttachmentFacade(
      * - KEEPASS：必须提供 [keepassContext]。
      */
     data class UploadRequest(
-        val parentPasswordId: Long,
+        val owner: AttachmentOwner,
         val source: AttachmentSource,
         val uri: Uri,
         val isPlusActivated: Boolean,
@@ -94,10 +98,20 @@ class AttachmentFacade(
     // ---------------------------------------------------------------- 查询
 
     fun observeByPassword(passwordId: Long): Flow<List<Attachment>> =
-        repository.observeByPassword(passwordId)
+        observe(AttachmentOwner.password(passwordId))
+
+    fun observeBySecureItem(secureItemId: Long): Flow<List<Attachment>> =
+        observe(AttachmentOwner.secureItem(secureItemId))
+
+    fun observe(owner: AttachmentOwner): Flow<List<Attachment>> = repository.observe(owner)
 
     suspend fun listByPassword(passwordId: Long): List<Attachment> =
-        repository.listByPassword(passwordId)
+        list(AttachmentOwner.password(passwordId))
+
+    suspend fun listBySecureItem(secureItemId: Long): List<Attachment> =
+        list(AttachmentOwner.secureItem(secureItemId))
+
+    suspend fun list(owner: AttachmentOwner): List<Attachment> = repository.list(owner)
 
     suspend fun getById(id: Long): Attachment? = repository.getById(id)
 
@@ -110,9 +124,18 @@ class AttachmentFacade(
         passwordId: Long,
         bitwardenContext: BitwardenContext? = null,
         keepassContext: KeePassContext? = null
+    ): Int = ensureAttachmentsReadyForTransfer(
+        owner = AttachmentOwner.password(passwordId),
+        bitwardenContext = bitwardenContext,
+        keepassContext = keepassContext
+    )
+
+    suspend fun ensureAttachmentsReadyForTransfer(
+        owner: AttachmentOwner,
+        bitwardenContext: BitwardenContext? = null,
+        keepassContext: KeePassContext? = null
     ): Int = withContext(Dispatchers.IO) {
-        if (passwordId <= 0L) return@withContext 0
-        val attachments = repository.listByPassword(passwordId)
+        val attachments = repository.list(owner)
         attachments.forEach { attachment ->
             ensureLocalCacheForTransfer(
                 attachment = attachment,
@@ -133,7 +156,7 @@ class AttachmentFacade(
     suspend fun addAttachment(request: UploadRequest): Attachment = withContext(Dispatchers.IO) {
         try {
             // 1. Quota（仅本地/Bitwarden/KeePass 都一致地受 Plus 限制）
-            val existingCount = repository.countActive(request.parentPasswordId)
+            val existingCount = repository.countActive(request.owner)
             AttachmentQuotaPolicy.check(existingCount, request.isPlusActivated)?.let { throw it }
 
             // 2. Size / 类型上限
@@ -158,7 +181,7 @@ class AttachmentFacade(
             // 3. 按 source 分派
             val attachment = when (request.source) {
                 AttachmentSource.LOCAL -> localExecutor.writeFromUri(
-                    parentPasswordId = request.parentPasswordId,
+                    owner = request.owner,
                     sourceUri = request.uri,
                     fallbackFileName = meta.fileName
                 )
@@ -170,7 +193,7 @@ class AttachmentFacade(
                     val input = resolver.openInputStream(request.uri) ?: throw AttachmentError.IoError
                     input.use { stream ->
                         bitwardenExecutor.upload(
-                            parentPasswordId = request.parentPasswordId,
+                            owner = request.owner,
                             fileName = meta.fileName,
                             mimeType = meta.mimeType,
                             source = stream,
@@ -189,7 +212,7 @@ class AttachmentFacade(
                     val kp = request.keepassContext ?: throw AttachmentError.IoError
                     val bytes = readAllBytes(request.uri)
                     keepassExecutor.upload(
-                        parentPasswordId = request.parentPasswordId,
+                        owner = request.owner,
                         databaseId = kp.databaseId,
                         entryUuid = kp.entryUuid,
                         fileName = meta.fileName,
@@ -210,7 +233,8 @@ class AttachmentFacade(
                         attachmentId = id,
                         source = saved.sourceEnum,
                         extras = mapOf(
-                            "passwordId" to request.parentPasswordId,
+                            "ownerKind" to request.owner.kind.name,
+                            "ownerId" to request.owner.id,
                             "keepassDatabaseId" to request.keepassContext?.databaseId,
                             "keepassEntryUuidPresent" to !request.keepassContext?.entryUuid.isNullOrBlank()
                         )
@@ -231,7 +255,8 @@ class AttachmentFacade(
                 source = request.source,
                 error = e,
                 extras = mapOf(
-                    "passwordId" to request.parentPasswordId,
+                    "ownerKind" to request.owner.kind.name,
+                    "ownerId" to request.owner.id,
                     "keepassDatabaseId" to request.keepassContext?.databaseId,
                     "keepassEntryUuidPresent" to !request.keepassContext?.entryUuid.isNullOrBlank()
                 )
@@ -509,11 +534,24 @@ class AttachmentFacade(
     suspend fun cloneAttachmentsToNewParent(
         sourcePasswordId: Long,
         targetPasswordId: Long
+    ): Int = cloneAttachmentsToNewOwner(
+        sourceOwner = AttachmentOwner.password(sourcePasswordId),
+        targetOwner = AttachmentOwner.password(targetPasswordId)
+    )
+
+    /** Same clone operation for either a password or a secure item owner. */
+    suspend fun cloneAttachmentsToNewOwner(
+        sourceOwner: AttachmentOwner,
+        targetOwner: AttachmentOwner,
+        sourceBitwardenContext: BitwardenContext? = null,
+        sourceKeepassContext: KeePassContext? = null,
+        excludedFileNames: Set<String> = emptySet()
     ): Int = withContext(Dispatchers.IO) {
-        if (sourcePasswordId <= 0 || targetPasswordId <= 0 || sourcePasswordId == targetPasswordId) {
+        if (sourceOwner.id <= 0 || targetOwner.id <= 0 || sourceOwner == targetOwner) {
             return@withContext 0
         }
-        val sources = repository.listByPassword(sourcePasswordId)
+        val sources = repository.list(sourceOwner)
+            .filterNot { it.fileName in excludedFileNames }
         if (sources.isEmpty()) return@withContext 0
 
         val created = mutableListOf<Attachment>()
@@ -521,8 +559,8 @@ class AttachmentFacade(
             sources.forEach { source ->
                 val ready = ensureLocalCacheForTransfer(
                     attachment = source,
-                    sourceBitwardenContext = null,
-                    sourceKeepassContext = null
+                    sourceBitwardenContext = sourceBitwardenContext,
+                    sourceKeepassContext = sourceKeepassContext
                 )
                 val plainStream = localExecutor.openDecrypted(ready)
                 val blob = plainStream.use { storage.writeEncrypted(it) }
@@ -537,7 +575,8 @@ class AttachmentFacade(
                 val now = System.currentTimeMillis()
                 val cloned = ready.copy(
                     id = 0,
-                    parentPasswordId = targetPasswordId,
+                    parentPasswordId = targetOwner.passwordId,
+                    parentSecureItemId = targetOwner.secureItemId,
                     source = AttachmentSource.LOCAL.name,
                     localPath = blob.relativePath,
                     wrappedCek = wrapped,
@@ -581,8 +620,8 @@ class AttachmentFacade(
                 source = null,
                 error = error,
                 extras = mapOf(
-                    "source_password_id" to sourcePasswordId,
-                    "target_password_id" to targetPasswordId,
+                    "source_owner" to sourceOwner.toString(),
+                    "target_owner" to targetOwner.toString(),
                     "attachment_count" to sources.size
                 )
             )
@@ -990,52 +1029,65 @@ class AttachmentFacade(
         requireSuccess: Boolean = false
     ) {
         val vaultStore = mdbxVaultStore ?: return
-        val dao = passwordEntryDao ?: return
         if (attachment.localPath.isNullOrBlank() || attachment.wrappedCek.isNullOrBlank()) return
-        val parent = dao.getPasswordEntryById(attachment.parentPasswordId) ?: return
-        val databaseId = parent.mdbxDatabaseId ?: return
-        val parentEntryId = mdbxPasswordObjectId(parent)
+        val owner = resolveMdbxAttachmentOwner(attachment) ?: return
         try {
-            vaultStore.upsertAttachment(databaseId, parentEntryId, attachment)
+            vaultStore.upsertAttachment(owner.databaseId, owner.entryId, attachment)
         } catch (error: Throwable) {
             AttachmentLogger.logFailure(
                 event = AttachmentLogger.Event.UPLOAD,
                 attachmentId = attachment.id,
                 source = attachment.sourceEnum,
                 error = error,
-                extras = mapOf("mdbx_database_id" to databaseId)
+                extras = mapOf("mdbx_database_id" to owner.databaseId)
             )
-            if (requireSuccess || vaultStore.requiresStrictMutationConsistency(databaseId)) throw error
+            if (requireSuccess || vaultStore.requiresStrictMutationConsistency(owner.databaseId)) throw error
         }
     }
 
     private suspend fun mirrorAttachmentDeleteToMdbx(attachment: Attachment) {
         val vaultStore = mdbxVaultStore ?: return
-        val dao = passwordEntryDao ?: return
-        val parent = dao.getPasswordEntryById(attachment.parentPasswordId) ?: return
-        val databaseId = parent.mdbxDatabaseId ?: return
-        val parentEntryId = mdbxPasswordObjectId(parent)
+        val owner = resolveMdbxAttachmentOwner(attachment) ?: return
         try {
-            vaultStore.deleteAttachment(databaseId, parentEntryId, attachment)
+            vaultStore.deleteAttachment(owner.databaseId, owner.entryId, attachment)
         } catch (error: Throwable) {
             AttachmentLogger.logFailure(
                 event = AttachmentLogger.Event.DELETE,
                 attachmentId = attachment.id,
                 source = attachment.sourceEnum,
                 error = error,
-                extras = mapOf("mdbx_database_id" to databaseId)
+                extras = mapOf("mdbx_database_id" to owner.databaseId)
             )
-            if (vaultStore.requiresStrictMutationConsistency(databaseId)) throw error
+            if (vaultStore.requiresStrictMutationConsistency(owner.databaseId)) throw error
         }
     }
 
     private suspend fun isStrictMdbxAttachment(attachment: Attachment): Boolean {
         val vaultStore = mdbxVaultStore ?: return false
-        val dao = passwordEntryDao ?: return false
-        val databaseId = dao.getPasswordEntryById(attachment.parentPasswordId)?.mdbxDatabaseId
-            ?: return false
-        return vaultStore.requiresStrictMutationConsistency(databaseId)
+        val owner = resolveMdbxAttachmentOwner(attachment) ?: return false
+        return vaultStore.requiresStrictMutationConsistency(owner.databaseId)
     }
+
+    private suspend fun resolveMdbxAttachmentOwner(attachment: Attachment): MdbxAttachmentOwner? {
+        val owner = attachment.owner ?: return null
+        return when (owner.kind) {
+            AttachmentOwner.Kind.PASSWORD -> {
+                val parent = passwordEntryDao?.getPasswordEntryById(owner.id) ?: return null
+                val databaseId = parent.mdbxDatabaseId ?: return null
+                MdbxAttachmentOwner(databaseId, mdbxPasswordObjectId(parent))
+            }
+            AttachmentOwner.Kind.SECURE_ITEM -> {
+                val parent = secureItemDao?.getItemById(owner.id) ?: return null
+                val databaseId = parent.mdbxDatabaseId ?: return null
+                MdbxAttachmentOwner(databaseId, mdbxSecureItemObjectId(parent))
+            }
+        }
+    }
+
+    private data class MdbxAttachmentOwner(
+        val databaseId: Long,
+        val entryId: String
+    )
 
     private suspend fun materializePreview(attachment: Attachment): File {
         val wrapped = attachment.wrappedCek ?: throw AttachmentError.CryptoError

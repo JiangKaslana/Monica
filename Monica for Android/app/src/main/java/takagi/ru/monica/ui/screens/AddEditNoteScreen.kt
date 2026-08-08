@@ -64,6 +64,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,8 +84,17 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.facade.AttachmentFacade
+import takagi.ru.monica.attachments.model.AttachmentOwner
+import takagi.ru.monica.attachments.model.AttachmentSource
+import takagi.ru.monica.attachments.ui.AttachmentPendingDraft
+import takagi.ru.monica.attachments.ui.AttachmentsEditSection
+import takagi.ru.monica.attachments.ui.flushPendingDraftsTo
+import takagi.ru.monica.bitwarden.BitwardenVaultPremiumStore
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.NoteCodeBlockCollapseMode
 import takagi.ru.monica.data.PasswordDatabase
@@ -148,6 +158,7 @@ fun AddEditNoteScreen(
     val editorState by editorViewModel.uiState.collectAsState()
 
     val noteImageBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    val pendingAttachmentDrafts = remember { mutableStateListOf<AttachmentPendingDraft>() }
 
     var showNoteImageDialog by remember { mutableStateOf<String?>(null) } // 存文件名
     var showConfirmDelete by remember { mutableStateOf(false) }
@@ -181,6 +192,32 @@ fun AddEditNoteScreen(
     val keepassDatabases by database.localKeePassDatabaseDao().getAllDatabases().collectAsState(initial = emptyList())
     val bitwardenVaults by database.bitwardenVaultDao().getAllVaultsFlow().collectAsState(initial = emptyList())
     val allNotes by viewModel.allNotes.collectAsState(initial = emptyList())
+    val attachmentOwnerItem = editorState.currentNote?.takeIf { isEditing }
+    val attachmentBitwardenVault = remember(attachmentOwnerItem?.bitwardenVaultId, bitwardenVaults) {
+        attachmentOwnerItem?.bitwardenVaultId?.let { vaultId ->
+            bitwardenVaults.firstOrNull { it.id == vaultId }
+        }
+    }
+    val attachmentBitwardenContext = remember(
+        attachmentBitwardenVault,
+        attachmentOwnerItem?.bitwardenCipherId
+    ) {
+        attachmentBitwardenVault?.let { vault ->
+            viewModel.getAttachmentBitwardenContext(vault, attachmentOwnerItem?.bitwardenCipherId)
+        }
+    }
+    val attachmentKeePassContext = remember(
+        attachmentOwnerItem?.keepassDatabaseId,
+        attachmentOwnerItem?.keepassEntryUuid
+    ) {
+        val databaseId = attachmentOwnerItem?.keepassDatabaseId
+        val entryUuid = attachmentOwnerItem?.keepassEntryUuid?.takeIf { it.isNotBlank() }
+        if (databaseId != null && entryUuid != null) {
+            AttachmentFacade.KeePassContext(databaseId = databaseId, entryUuid = entryUuid)
+        } else {
+            null
+        }
+    }
     val draftStorageTarget by viewModel.draftStorageTarget.collectAsState()
     val rememberedStorageTarget by settingsManager
         .rememberedStorageTargetFlow(SettingsManager.StorageTargetScope.NOTE)
@@ -410,6 +447,31 @@ fun AddEditNoteScreen(
         }
     }
 
+    LaunchedEffect(
+        attachmentOwnerItem?.id,
+        attachmentOwnerItem?.keepassDatabaseId,
+        attachmentOwnerItem?.keepassEntryUuid
+    ) {
+        val item = attachmentOwnerItem ?: return@LaunchedEffect
+        if (item.keepassDatabaseId == null || item.keepassEntryUuid.isNullOrBlank()) {
+            return@LaunchedEffect
+        }
+        launch(Dispatchers.IO) {
+            runCatching {
+                AttachmentContainer.keepassReconciler(context).reconcile(
+                    owner = AttachmentOwner.secureItem(item.id),
+                    databaseId = item.keepassDatabaseId,
+                    entryUuid = item.keepassEntryUuid
+                )
+            }.onFailure { error ->
+                Log.w(
+                    ADD_EDIT_NOTE_SCREEN_TAG,
+                    "KeePass attachment metadata reconcile failed: ${error::class.simpleName}"
+                )
+            }
+        }
+    }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, noteId, editorViewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -541,6 +603,7 @@ fun AddEditNoteScreen(
 
         val primaryTarget = effectiveTargets.first()
 
+        val shouldFlushAttachmentDrafts = shouldNavigateBack && !isEditing && pendingAttachmentDrafts.isNotEmpty()
         viewModel.saveNotesAcrossTargets(
             id = noteId.takeIf { isEditing },
             content = payload.content,
@@ -550,7 +613,46 @@ fun AddEditNoteScreen(
             isFavorite = currentState.isFavorite,
             createdAt = currentState.createdAt,
             imagePaths = payload.imagePathsJson,
-            targets = effectiveTargets
+            targets = effectiveTargets,
+            onPrimaryCreated = if (shouldFlushAttachmentDrafts) {
+                { newId ->
+                    val savedItem = viewModel.getNoteById(newId)
+                    val savedKeePassContext = savedItem?.let { item ->
+                        val databaseId = item.keepassDatabaseId
+                        val entryUuid = item.keepassEntryUuid?.takeIf { it.isNotBlank() }
+                        if (databaseId != null && entryUuid != null) {
+                            AttachmentFacade.KeePassContext(databaseId, entryUuid)
+                        } else {
+                            null
+                        }
+                    }
+                    val savedVault = savedItem?.bitwardenVaultId?.let { vaultId ->
+                        bitwardenVaults.firstOrNull { it.id == vaultId }
+                    }
+                    val savedBitwardenContext = savedVault?.let { vault ->
+                        viewModel.getAttachmentBitwardenContext(vault, savedItem?.bitwardenCipherId)
+                    }
+                    flushPendingDraftsTo(
+                        context = context,
+                        owner = AttachmentOwner.secureItem(newId),
+                        pendingDrafts = pendingAttachmentDrafts,
+                        isPlusActivated = appSettings.isPlusActivated,
+                        attachmentSource = when {
+                            savedBitwardenContext != null -> AttachmentSource.BITWARDEN
+                            savedKeePassContext != null -> AttachmentSource.KEEPASS
+                            else -> AttachmentSource.LOCAL
+                        },
+                        bitwardenContext = savedBitwardenContext,
+                        bitwardenPremium = savedVault?.let {
+                            BitwardenVaultPremiumStore.isPremium(context, it.id)
+                        } ?: true,
+                        keepassContext = savedKeePassContext
+                    )
+                    onNavigateBack()
+                }
+            } else {
+                {}
+            }
         )
         if (currentState.deletedImagePaths.isNotEmpty()) {
             viewModel.cleanupUnreferencedNoteImages(currentState.deletedImagePaths)
@@ -570,7 +672,7 @@ fun AddEditNoteScreen(
         }
         editorViewModel.stopSaving()
         editorViewModel.clearDraft(noteId)
-        if (shouldNavigateBack) {
+        if (shouldNavigateBack && !shouldFlushAttachmentDrafts) {
             onNavigateBack()
         }
     }
@@ -586,6 +688,33 @@ fun AddEditNoteScreen(
             isEditing = isEditing,
             onAddTargetClick = { showStorageTargetSheet = true },
             onRemoveTarget = { target -> editorViewModel.removeSelectedStorageTarget(target) }
+        )
+    }
+    val attachmentsContent: @Composable () -> Unit = {
+        val draftAttachmentTarget = editorState.selectedStorageTargets.firstOrNull()
+            ?: buildMultiStorageTarget(
+                categoryId = editorState.selectedCategoryId,
+                keepassDatabaseId = editorState.keepassDatabaseId,
+                keepassGroupPath = editorState.keepassGroupPath,
+                mdbxDatabaseId = editorState.mdbxDatabaseId,
+                bitwardenVaultId = editorState.bitwardenVaultId,
+                bitwardenFolderId = editorState.bitwardenFolderId
+            )
+        AttachmentsEditSection(
+            owner = attachmentOwnerItem?.let { AttachmentOwner.secureItem(it.id) },
+            isPlusActivated = appSettings.isPlusActivated,
+            attachmentSource = when {
+                attachmentOwnerItem?.bitwardenVaultId != null -> AttachmentSource.BITWARDEN
+                attachmentOwnerItem?.keepassDatabaseId != null -> AttachmentSource.KEEPASS
+                !isEditing && draftAttachmentTarget is StorageTarget.KeePass -> AttachmentSource.KEEPASS
+                else -> AttachmentSource.LOCAL
+            },
+            bitwardenContext = attachmentBitwardenContext,
+            bitwardenPremium = attachmentBitwardenVault?.let {
+                BitwardenVaultPremiumStore.isPremium(context, it.id)
+            } ?: true,
+            keepassContext = attachmentKeePassContext,
+            pendingDrafts = if (isEditing) null else pendingAttachmentDrafts
         )
     }
     Scaffold(
@@ -764,6 +893,7 @@ fun AddEditNoteScreen(
                         isBitwardenNoteTarget = isBitwardenNoteTarget,
                         toolbarContent = toolbarContent,
                         storageSelectorContent = storageSelectorContent,
+                        attachmentsContent = attachmentsContent,
                         onTitleChange = { editorViewModel.updateTitle(it) },
                         onContentChange = { editorViewModel.updateContent(it) },
                         onPreviewModeChange = { editorViewModel.updatePreviewMode(it) },
@@ -799,6 +929,7 @@ fun AddEditNoteScreen(
                         isBitwardenNoteTarget = isBitwardenNoteTarget,
                         toolbarContent = toolbarContent,
                         storageSelectorContent = storageSelectorContent,
+                        attachmentsContent = attachmentsContent,
                         onTitleChange = { editorViewModel.updateTitle(it) },
                         onContentChange = { editorViewModel.updateContent(it) },
                         onPreviewModeChange = { editorViewModel.updatePreviewMode(it) },
@@ -835,6 +966,7 @@ fun AddEditNoteScreen(
                         isBitwardenNoteTarget = isBitwardenNoteTarget,
                         toolbarContent = toolbarContent,
                         storageSelectorContent = storageSelectorContent,
+                        attachmentsContent = attachmentsContent,
                         onTitleChange = { editorViewModel.updateTitle(it) },
                         onContentChange = { editorViewModel.updateContent(it) },
                         onPreviewModeChange = { editorViewModel.updatePreviewMode(it) },
@@ -1238,6 +1370,7 @@ private fun NoteEditorModeBody(
     isBitwardenNoteTarget: Boolean,
     toolbarContent: @Composable () -> Unit,
     storageSelectorContent: @Composable () -> Unit,
+    attachmentsContent: @Composable () -> Unit,
     onTitleChange: (String) -> Unit,
     onContentChange: (androidx.compose.ui.text.input.TextFieldValue) -> Unit,
     onPreviewModeChange: (Boolean) -> Unit,
@@ -1360,6 +1493,8 @@ private fun NoteEditorModeBody(
                             onRemoveImage = onRemoveImage
                         )
                     }
+
+                    attachmentsContent()
                 }
 
                 if (!editorState.isMarkdownPreview) {

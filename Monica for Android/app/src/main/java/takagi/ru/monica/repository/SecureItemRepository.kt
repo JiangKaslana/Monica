@@ -1,6 +1,8 @@
 package takagi.ru.monica.repository
 
 import android.util.Log
+import takagi.ru.monica.attachments.model.AttachmentOwner
+import takagi.ru.monica.attachments.repository.AttachmentRepository
 import takagi.ru.monica.bitwarden.BitwardenMutationStateHelper
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.SecureItem
@@ -26,7 +28,8 @@ import java.util.Locale
 class SecureItemRepository(
     private val secureItemDao: SecureItemDao,
     private val mdbxRepository: MdbxRepository? = null,
-    private val decryptSensitiveValue: ((String) -> String)? = null
+    private val decryptSensitiveValue: ((String) -> String)? = null,
+    private val attachmentRepository: AttachmentRepository? = null
 ) {
     companion object {
         private const val TAG = "SecureItemRepository"
@@ -479,9 +482,21 @@ class SecureItemRepository(
             updatedAt = java.util.Date()
         )
         return commitRoomThenMirror(
-            roomCommit = { secureItemDao.updateItem(deletedItem); deletedItem },
+            roomCommit = {
+                attachmentRepository?.softDelete(AttachmentOwner.secureItem(item.id))
+                try {
+                    secureItemDao.updateItem(deletedItem)
+                    deletedItem
+                } catch (error: Throwable) {
+                    attachmentRepository?.restore(AttachmentOwner.secureItem(item.id))
+                    throw error
+                }
+            },
             mirrorCommit = { mdbxRepository?.upsertSecureItem(it) },
-            rollbackRoom = { secureItemDao.updateItem(item) },
+            rollbackRoom = {
+                secureItemDao.updateItem(item)
+                attachmentRepository?.restore(AttachmentOwner.secureItem(item.id))
+            },
             rollbackMirror = { mdbxRepository?.upsertSecureItem(item) }
         )
     }
@@ -496,9 +511,21 @@ class SecureItemRepository(
             updatedAt = java.util.Date()
         )
         return commitRoomThenMirror(
-            roomCommit = { secureItemDao.updateItem(restoredItem); restoredItem },
+            roomCommit = {
+                attachmentRepository?.restore(AttachmentOwner.secureItem(item.id))
+                try {
+                    secureItemDao.updateItem(restoredItem)
+                    restoredItem
+                } catch (error: Throwable) {
+                    attachmentRepository?.softDelete(AttachmentOwner.secureItem(item.id))
+                    throw error
+                }
+            },
             mirrorCommit = { mdbxRepository?.upsertSecureItem(it) },
-            rollbackRoom = { secureItemDao.updateItem(item) },
+            rollbackRoom = {
+                secureItemDao.updateItem(item)
+                attachmentRepository?.softDelete(AttachmentOwner.secureItem(item.id))
+            },
             rollbackMirror = { mdbxRepository?.upsertSecureItem(item) }
         )
     }

@@ -216,6 +216,14 @@ private fun buildAutoMatchCandidates(
         }
     }
 
+    // A web address is the authoritative identity for a website entry. Title
+    // and app-package tokens are weak signals and can belong to an unrelated
+    // linked app (for example com.github.android on a linux.do entry), so they
+    // must not replace the website favicon with another site's brand icon.
+    if (host.isNotBlank() && isWebScheme) {
+        return candidates.toList()
+    }
+
     title?.takeIf { it.isNotBlank() }?.let { rawTitle ->
         val compactTitle = rawTitle.lowercase(Locale.ROOT).replace(NON_ALNUM_OR_SPACE_REGEX, " ")
         compactTitle.split(' ')
@@ -247,6 +255,27 @@ fun resolveAutoMatchedSimpleIconSlug(
     val availableSlugs = SimpleIconCatalog.getSlugs(context)
     if (availableSlugs.isEmpty()) return null
 
+    return resolveAutoMatchedSimpleIconSlugFromSlugs(
+        availableSlugs = availableSlugs,
+        website = website,
+        title = title,
+        appPackageName = appPackageName
+    )
+}
+
+/**
+ * Resolves an automatic icon using a supplied catalog.
+ *
+ * Keeping the catalog as an argument makes the precedence rule testable without
+ * constructing an Android AssetManager. Website entries must never inherit an
+ * unrelated icon from an associated application's package name.
+ */
+internal fun resolveAutoMatchedSimpleIconSlugFromSlugs(
+    availableSlugs: Set<String>,
+    website: String,
+    title: String? = null,
+    appPackageName: String? = null
+): String? {
     val candidates = buildAutoMatchCandidates(
         website = website,
         title = title,

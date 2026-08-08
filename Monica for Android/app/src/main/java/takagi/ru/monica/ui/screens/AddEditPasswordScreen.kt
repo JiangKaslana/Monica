@@ -606,6 +606,16 @@ fun AddEditPasswordScreen(
                     Toast.LENGTH_SHORT
                 ).show()
             }
+            is takagi.ru.monica.util.TotpScanParseResult.MigrationFailure -> {
+                authenticatorPayloadOverride = null
+                Toast.makeText(
+                    context,
+                    context.getString(
+                        takagi.ru.monica.ui.components.migrationFailureMessageRes(scanResult.reason)
+                    ),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
             takagi.ru.monica.util.TotpScanParseResult.UnsupportedPhoneFactor -> {
                 authenticatorPayloadOverride = null
                 Toast.makeText(
@@ -1424,10 +1434,16 @@ fun AddEditPasswordScreen(
                 }
             }
         } else {
-             hasOwnershipConflict = false
-             unreadablePasswordIds = emptySet()
-             existingSshKeyData = ""
-             if (passwords.isEmpty()) passwords.add("")
+              // A reused editor must never carry an ID from the previous edit
+              // session into a new item. saveGroupedPasswordsInternal treats
+              // every ID as an update target.
+              originalIds = emptyList()
+              hasOwnershipConflict = false
+              unreadablePasswordIds = emptySet()
+              currentReplicaGroupId = null
+              existingReplicaTargetKeys = emptySet()
+              existingSshKeyData = ""
+              if (passwords.isEmpty()) passwords.add("")
              if (!initialDraftApplied && initialDraft != null) {
                  if (title.isBlank()) title = initialDraft.title
                  if (website.isBlank()) replaceWebsiteUrlsFromRaw(initialDraft.website)
@@ -1566,8 +1582,16 @@ fun AddEditPasswordScreen(
             }
 
             viewModel.savePasswordsAcrossTargets(
-                originalIds = originalIds,
-                commonEntry = commonEntry.copy(replicaGroupId = currentReplicaGroupId),
+                // isEditing is the authoritative mode; this defensive guard
+                // prevents any stale remembered IDs from turning a new save
+                // into an update.
+                originalIds = originalIds.takeIf { isEditing }.orEmpty(),
+                // A new item must receive a fresh replica identity in the
+                // repository layer. Never let a remembered editor group make
+                // savePasswordsAcrossTargets discover and update old replicas.
+                commonEntry = commonEntry.copy(
+                    replicaGroupId = currentReplicaGroupId.takeIf { isEditing }
+                ),
                 passwords = normalizedPasswords, // Snapshot (trimmed)
                 targets = storageTargetsForSave,
                 customFields = currentCustomFields, // 保存自定义字段

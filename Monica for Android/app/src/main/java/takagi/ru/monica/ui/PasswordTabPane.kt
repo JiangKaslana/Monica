@@ -189,85 +189,140 @@ internal fun PasswordTabPane(
                     .weight(1f)
                     .fillMaxHeight()
             ) {
-                val detailContent = remember(
-                    isAddingPasswordInline,
-                    inlinePasswordEditorId,
-                    selectedPasswordId
-                ) {
-                    when {
-                        isAddingPasswordInline -> PasswordDetailContent.Add
-                        inlinePasswordEditorId != null -> PasswordDetailContent.Edit(inlinePasswordEditorId)
-                        selectedPasswordId != null -> PasswordDetailContent.Detail(selectedPasswordId)
-                        else -> PasswordDetailContent.Empty
-                    }
-                }
-                when (val content = detailContent) {
-                    PasswordDetailContent.Empty -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Select an item to view details",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    PasswordDetailContent.Add,
-                    is PasswordDetailContent.Edit -> {
-                        val editorId = (content as? PasswordDetailContent.Edit)?.passwordId
-                        AddEditPasswordScreen(
-                            viewModel = passwordViewModel,
-                            totpViewModel = totpViewModel,
-                            bankCardViewModel = bankCardViewModel,
-                            noteViewModel = noteViewModel,
-                            localKeePassViewModel = localKeePassViewModel,
-                            passwordId = editorId,
-                            initialCategoryId = passwordNewItemDefaults.categoryId,
-                            initialKeePassDatabaseId = passwordNewItemDefaults.keepassDatabaseId,
-                            initialKeePassGroupPath = passwordNewItemDefaults.keepassGroupPath,
-                            initialBitwardenVaultId = passwordNewItemDefaults.bitwardenVaultId,
-                            initialBitwardenFolderId = passwordNewItemDefaults.bitwardenFolderId,
-                            initialMdbxDatabaseId = passwordNewItemDefaults.mdbxDatabaseId,
-                            initialMdbxFolderId = passwordNewItemDefaults.mdbxFolderId,
-                            mdbxDatabasesFallback = mdbxDatabases,
-                            pendingQrResult = pendingPasswordAuthenticatorQrResult,
-                            onConsumePendingQrResult = onConsumePendingPasswordAuthenticatorQrResult,
-                            onScanAuthenticatorQrCode = onScanPasswordAuthenticatorQrCode,
-                            onSwitchToWifi = { targetId ->
-                                onInlinePasswordEditorBack()
-                                onNavigateToAddWifi(targetId)
-                            },
-                            onSwitchToSshKey = { targetId ->
-                                onInlinePasswordEditorBack()
-                                onNavigateToAddSshKey(targetId)
-                            },
-                            onNavigateBack = onInlinePasswordEditorBack
-                        )
-                    }
-                    is PasswordDetailContent.Detail -> {
-                        androidx.compose.runtime.CompositionLocalProvider(
-                            LocalSharedTransitionScope provides null,
-                            LocalAnimatedVisibilityScope provides null
-                        ) {
-                            PasswordDetailScreen(
-                                viewModel = passwordViewModel,
-                                passkeyViewModel = passkeyViewModel,
-                                noteViewModel = noteViewModel,
-                                passwordId = content.passwordId,
-                                biometricEnabled = biometricEnabled,
-                                iconCardsEnabled = iconCardsEnabled,
-                                unmatchedIconHandlingStrategy = unmatchedIconHandlingStrategy,
-                                enableSharedBounds = false,
-                                onNavigateBack = onClearSelectedPassword,
-                                onOpenBoundNote = onNavigateToNoteDetail,
-                                onEditPassword = onEditPassword,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
-                }
+                PasswordDetailPaneContent(
+                    isAddingPasswordInline = isAddingPasswordInline,
+                    inlinePasswordEditorId = inlinePasswordEditorId,
+                    selectedPasswordId = selectedPasswordId,
+                    passwordViewModel = passwordViewModel,
+                    totpViewModel = totpViewModel,
+                    bankCardViewModel = bankCardViewModel,
+                    noteViewModel = noteViewModel,
+                    localKeePassViewModel = localKeePassViewModel,
+                    passwordNewItemDefaults = passwordNewItemDefaults,
+                    mdbxDatabases = mdbxDatabases,
+                    pendingPasswordAuthenticatorQrResult = pendingPasswordAuthenticatorQrResult,
+                    onConsumePendingPasswordAuthenticatorQrResult = onConsumePendingPasswordAuthenticatorQrResult,
+                    onScanPasswordAuthenticatorQrCode = onScanPasswordAuthenticatorQrCode,
+                    onInlinePasswordEditorBack = onInlinePasswordEditorBack,
+                    onNavigateToAddWifi = onNavigateToAddWifi,
+                    onNavigateToAddSshKey = onNavigateToAddSshKey,
+                    passkeyViewModel = passkeyViewModel,
+                    biometricEnabled = biometricEnabled,
+                    iconCardsEnabled = iconCardsEnabled,
+                    unmatchedIconHandlingStrategy = unmatchedIconHandlingStrategy,
+                    onClearSelectedPassword = onClearSelectedPassword,
+                    onNavigateToNoteDetail = onNavigateToNoteDetail,
+                    onEditPassword = onEditPassword
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PasswordDetailPaneContent(
+    isAddingPasswordInline: Boolean,
+    inlinePasswordEditorId: Long?,
+    selectedPasswordId: Long?,
+    passwordViewModel: PasswordViewModel,
+    totpViewModel: takagi.ru.monica.viewmodel.TotpViewModel,
+    bankCardViewModel: BankCardViewModel,
+    noteViewModel: NoteViewModel,
+    localKeePassViewModel: takagi.ru.monica.viewmodel.LocalKeePassViewModel,
+    passwordNewItemDefaults: NewItemStorageDefaults,
+    mdbxDatabases: List<LocalMdbxDatabase>,
+    pendingPasswordAuthenticatorQrResult: String?,
+    onConsumePendingPasswordAuthenticatorQrResult: () -> Unit,
+    onScanPasswordAuthenticatorQrCode: () -> Unit,
+    onInlinePasswordEditorBack: () -> Unit,
+    onNavigateToAddWifi: (Long?) -> Unit,
+    onNavigateToAddSshKey: (Long?) -> Unit,
+    passkeyViewModel: PasskeyViewModel,
+    biometricEnabled: Boolean,
+    iconCardsEnabled: Boolean,
+    unmatchedIconHandlingStrategy: UnmatchedIconHandlingStrategy,
+    onClearSelectedPassword: () -> Unit,
+    onNavigateToNoteDetail: (Long) -> Unit,
+    onEditPassword: (Long) -> Unit
+) {
+    val detailContent = remember(
+        isAddingPasswordInline,
+        inlinePasswordEditorId,
+        selectedPasswordId
+    ) {
+        when {
+            isAddingPasswordInline -> PasswordDetailContent.Add
+            inlinePasswordEditorId != null -> PasswordDetailContent.Edit(inlinePasswordEditorId)
+            selectedPasswordId != null -> PasswordDetailContent.Detail(selectedPasswordId)
+            else -> PasswordDetailContent.Empty
+        }
+    }
+    when (val content = detailContent) {
+        PasswordDetailContent.Empty -> {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Select an item to view details",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        PasswordDetailContent.Add,
+        is PasswordDetailContent.Edit -> {
+            val editorId = (content as? PasswordDetailContent.Edit)?.passwordId
+            key(content) {
+                AddEditPasswordScreen(
+                    viewModel = passwordViewModel,
+                    totpViewModel = totpViewModel,
+                    bankCardViewModel = bankCardViewModel,
+                    noteViewModel = noteViewModel,
+                    localKeePassViewModel = localKeePassViewModel,
+                    passwordId = editorId,
+                    initialCategoryId = passwordNewItemDefaults.categoryId,
+                    initialKeePassDatabaseId = passwordNewItemDefaults.keepassDatabaseId,
+                    initialKeePassGroupPath = passwordNewItemDefaults.keepassGroupPath,
+                    initialBitwardenVaultId = passwordNewItemDefaults.bitwardenVaultId,
+                    initialBitwardenFolderId = passwordNewItemDefaults.bitwardenFolderId,
+                    initialMdbxDatabaseId = passwordNewItemDefaults.mdbxDatabaseId,
+                    initialMdbxFolderId = passwordNewItemDefaults.mdbxFolderId,
+                    mdbxDatabasesFallback = mdbxDatabases,
+                    pendingQrResult = pendingPasswordAuthenticatorQrResult,
+                    onConsumePendingQrResult = onConsumePendingPasswordAuthenticatorQrResult,
+                    onScanAuthenticatorQrCode = onScanPasswordAuthenticatorQrCode,
+                    onSwitchToWifi = { targetId ->
+                        onInlinePasswordEditorBack()
+                        onNavigateToAddWifi(targetId)
+                    },
+                    onSwitchToSshKey = { targetId ->
+                        onInlinePasswordEditorBack()
+                        onNavigateToAddSshKey(targetId)
+                    },
+                    onNavigateBack = onInlinePasswordEditorBack
+                )
+            }
+        }
+        is PasswordDetailContent.Detail -> {
+            CompositionLocalProvider(
+                LocalSharedTransitionScope provides null,
+                LocalAnimatedVisibilityScope provides null
+            ) {
+                PasswordDetailScreen(
+                    viewModel = passwordViewModel,
+                    passkeyViewModel = passkeyViewModel,
+                    noteViewModel = noteViewModel,
+                    passwordId = content.passwordId,
+                    biometricEnabled = biometricEnabled,
+                    iconCardsEnabled = iconCardsEnabled,
+                    unmatchedIconHandlingStrategy = unmatchedIconHandlingStrategy,
+                    enableSharedBounds = false,
+                    onNavigateBack = onClearSelectedPassword,
+                    onOpenBoundNote = onNavigateToNoteDetail,
+                    onEditPassword = onEditPassword,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }

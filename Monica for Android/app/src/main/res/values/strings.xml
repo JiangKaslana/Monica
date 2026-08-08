@@ -2032,6 +2032,8 @@
     <string name="select_totp_hint">Select an authenticator to view details</string>
     <string name="select_document_hint">Select a document to view details</string>
     <string name="select_bank_card_hint">Select a bank card to view details</string>
+    <string name="select_item_hint">Select an item to view details</string>
+    <string name="select_steam_account_hint">Select a Steam account to view details</string>
     
     <!-- Autofill Settings - General -->
     <string name="autofill_settings_title">Autofill</string>
@@ -3280,6 +3282,19 @@
     <string name="qr_authenticator_added">Authenticator added: %1$s</string>
     <string name="qr_authenticator_migration_result">Imported %1$d authenticators, skipped %2$d duplicates, failed %3$d items.</string>
     <string name="qr_migration_multiple_fill_first">This migration QR contains %1$d authenticators. Filled the first one only.</string>
+    <string name="totp_migration_review_title">Import authenticators</string>
+    <string name="totp_migration_review_summary">Found %1$d authenticators · %2$d selected</string>
+    <string name="totp_migration_import_selected">Import %1$d</string>
+    <string name="totp_migration_totp_parameters">%1$s · %2$s · %3$d digits · %4$ds</string>
+    <string name="totp_migration_hotp_parameters">%1$s · %2$s · %3$d digits · counter %4$d</string>
+    <string name="totp_migration_existing_item">Already exists: %1$s. Select manually to import another copy.</string>
+    <string name="totp_migration_batch_duplicate">Duplicate entry in this QR code</string>
+    <string name="totp_migration_error_invalid">This Google Authenticator migration QR code is invalid or incomplete.</string>
+    <string name="totp_migration_error_too_large">This migration QR code contains too much data.</string>
+    <string name="totp_migration_error_multiple_qr">This export contains multiple QR codes. Import one complete single-QR export at a time.</string>
+    <string name="totp_migration_error_version">This Google Authenticator migration format is not supported yet.</string>
+    <string name="totp_migration_error_parameters">The migration contains an unsupported algorithm, code length, or authenticator type.</string>
+    <string name="totp_migration_error_missing_name">An authenticator in this migration has no account name.</string>
     <string name="copied_sensitive_field">Copied sensitive field: %1$s</string>
     <string name="copied_field_name">Copied: %1$s</string>
     <string name="dynamic_verification_code">Dynamic verification code</string>

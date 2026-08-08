@@ -37,7 +37,7 @@ import takagi.ru.monica.keepass.KeePassPendingChangeDao
         BitwardenConflictBackup::class,
         BitwardenPendingOperation::class,
         BitwardenSyncRawEntryRecord::class,
-        // 附件（仅挂在 PasswordEntry 上，跨 Local/Bitwarden/KeePass 三个来源统一元数据）
+        // 附件（可挂在 PasswordEntry 或 SecureItem 上，跨来源统一元数据）
         Attachment::class,
         // MDBX 数据库格式
         LocalMdbxDatabase::class,
@@ -46,7 +46,7 @@ import takagi.ru.monica.keepass.KeePassPendingChangeDao
         // KeePass entry-level pending changes
         KeePassPendingChange::class
     ],
-    version = 76,
+    version = 77,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -2240,6 +2240,81 @@ abstract class PasswordDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration 76 → 77: allow attachments to belong to either a password or a secure item.
+         *
+         * SQLite cannot add a foreign key with ALTER TABLE, so rebuild the table while copying every
+         * existing row and keeping `parent_secure_item_id` null for legacy password attachments.
+         */
+        internal val MIGRATION_76_77 = object : androidx.room.migration.Migration(76, 77) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS attachments_v77 (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        parent_password_id INTEGER,
+                        parent_secure_item_id INTEGER,
+                        source TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        mime_type TEXT NOT NULL,
+                        size_bytes INTEGER NOT NULL,
+                        sha256_hex TEXT,
+                        wrapped_cek TEXT,
+                        local_path TEXT,
+                        bitwarden_attachment_id TEXT,
+                        bitwarden_url TEXT,
+                        bitwarden_file_key_enc TEXT,
+                        keepass_binary_ref TEXT,
+                        download_state TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL,
+                        is_deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at INTEGER,
+                        CHECK (
+                            (parent_password_id IS NOT NULL AND parent_secure_item_id IS NULL) OR
+                            (parent_password_id IS NULL AND parent_secure_item_id IS NOT NULL)
+                        ),
+                        FOREIGN KEY(parent_password_id) REFERENCES password_entries(id) ON DELETE CASCADE,
+                        FOREIGN KEY(parent_secure_item_id) REFERENCES secure_items(id) ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    """
+                    INSERT INTO attachments_v77 (
+                        id, parent_password_id, parent_secure_item_id, source, file_name, mime_type,
+                        size_bytes, sha256_hex, wrapped_cek, local_path, bitwarden_attachment_id,
+                        bitwarden_url, bitwarden_file_key_enc, keepass_binary_ref, download_state,
+                        created_at, updated_at, is_deleted, deleted_at
+                    )
+                    SELECT
+                        id, parent_password_id, NULL, source, file_name, mime_type,
+                        size_bytes, sha256_hex, wrapped_cek, local_path, bitwarden_attachment_id,
+                        bitwarden_url, bitwarden_file_key_enc, keepass_binary_ref, download_state,
+                        created_at, updated_at, is_deleted, deleted_at
+                    FROM attachments
+                    """.trimIndent()
+                )
+                database.execSQL("DROP TABLE attachments")
+                database.execSQL("ALTER TABLE attachments_v77 RENAME TO attachments")
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_attachments_parent ON attachments(parent_password_id)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_attachments_secure_item_parent ON attachments(parent_secure_item_id)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_attachments_source ON attachments(source)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_attachments_bw_id ON attachments(bitwarden_attachment_id)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_attachments_kp_ref ON attachments(keepass_binary_ref)"
+                )
+            }
+        }
+
         private fun addColumnIfMissing(
             database: androidx.sqlite.db.SupportSQLiteDatabase,
             tableName: String,
@@ -2344,7 +2419,8 @@ abstract class PasswordDatabase : RoomDatabase() {
                         MIGRATION_72_73,   // Encrypted timeline version snapshots
                         MIGRATION_73_74,   // Per-database MDBX engine selection
                         MIGRATION_74_75,   // MDBX2 durable remote sync cursors
-                        MIGRATION_75_76    // MDBX2 external SAF tree metadata
+                        MIGRATION_75_76,   // MDBX2 external SAF tree metadata
+                        MIGRATION_76_77    // Attachments for PasswordEntry and SecureItem
                     )
                     // 启用多进程失效通知：IME 跑在 :ime 独立进程，主进程需要
                     // 感知 IME 进程对数据库的修改（例如最近填充时间戳等）。

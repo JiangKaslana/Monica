@@ -2020,7 +2020,11 @@ private fun PasskeyListItem(
     } else {
         null
     }
-    val appIcon = if (iconCardsEnabled && !iconAppPackage.isNullOrBlank()) {
+    val appIcon = if (
+        iconCardsEnabled &&
+        !iconAppPackage.isNullOrBlank() &&
+        !takagi.ru.monica.autofill_ng.ui.isWebAddress(iconWebsite)
+    ) {
         rememberAppIcon(iconAppPackage)
     } else {
         null

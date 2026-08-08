@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
 import takagi.ru.monica.attachments.model.AttachmentError
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.storage.AttachmentKeyVault
 import takagi.ru.monica.attachments.storage.AttachmentStorage
@@ -70,6 +71,22 @@ class KeePassAttachmentExecutor(
         fileName: String,
         mimeType: String,
         sourceBytes: ByteArray
+    ): Attachment = upload(
+        owner = AttachmentOwner.password(parentPasswordId),
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        fileName = fileName,
+        mimeType = mimeType,
+        sourceBytes = sourceBytes
+    )
+
+    suspend fun upload(
+        owner: AttachmentOwner,
+        databaseId: Long,
+        entryUuid: String,
+        fileName: String,
+        mimeType: String,
+        sourceBytes: ByteArray
     ): Attachment = withContext(Dispatchers.IO) {
         val kdbxInfo = try {
             kdbxService.addAttachmentToEntry(
@@ -92,7 +109,8 @@ class KeePassAttachmentExecutor(
             val now = System.currentTimeMillis()
             return@withContext Attachment(
                 id = 0,
-                parentPasswordId = parentPasswordId,
+                parentPasswordId = owner.passwordId,
+                parentSecureItemId = owner.secureItemId,
                 source = AttachmentSource.KEEPASS.name,
                 fileName = kdbxInfo.fileName,
                 mimeType = mimeType,
@@ -119,7 +137,8 @@ class KeePassAttachmentExecutor(
         val now = System.currentTimeMillis()
         Attachment(
             id = 0,
-            parentPasswordId = parentPasswordId,
+            parentPasswordId = owner.passwordId,
+            parentSecureItemId = owner.secureItemId,
             source = AttachmentSource.KEEPASS.name,
             fileName = kdbxInfo.fileName,
             mimeType = mimeType,

@@ -77,6 +77,7 @@ fun LocalKeePassScreen(
     var showGoogleDriveAttachSheet by remember { mutableStateOf(false) }
     var selectedDatabase by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var showDatabaseDetailSheet by remember { mutableStateOf(false) }
+    var databaseToExport by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var databaseToTransferExternal by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var selectedExternalUri by remember { mutableStateOf<Uri?>(null) }
     
@@ -88,6 +89,18 @@ fun LocalKeePassScreen(
             selectedExternalUri = it
             showImportDialog = true
         }
+    }
+
+    // 内部数据库导出文件创建选择器
+    val exportToExternalLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/x-keepass")
+    ) { uri: Uri? ->
+        uri?.let { targetUri ->
+            databaseToExport?.let { db ->
+                viewModel.exportToExternal(db.id, targetUri)
+            }
+        }
+        databaseToExport = null
     }
     
     // 外部转移文件创建选择器
@@ -369,7 +382,17 @@ fun LocalKeePassScreen(
             onSyncRemote = { db ->
                 viewModel.syncRemoteDatabase(db.id)
             },
-            onExport = { /* 需要文件选择器 */ }
+            onExport = { db ->
+                databaseToExport = db
+                showDatabaseDetailSheet = false
+                selectedDatabase = null
+                val exportFileName = if (db.name.endsWith(".kdbx", ignoreCase = true)) {
+                    db.name
+                } else {
+                    "${db.name}.kdbx"
+                }
+                exportToExternalLauncher.launch(exportFileName)
+            }
         )
     }
 }

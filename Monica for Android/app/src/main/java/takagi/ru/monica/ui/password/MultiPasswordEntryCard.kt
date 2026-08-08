@@ -106,7 +106,10 @@ fun MultiPasswordEntryCard(
                         null
                     }
                     val primaryAppPackageName = firstEntry.primaryLinkedAppPackageName()
-                    val appIcon = if (primaryAppPackageName.isNotBlank()) {
+                    val appIcon = if (
+                        primaryAppPackageName.isNotBlank() &&
+                        !takagi.ru.monica.autofill_ng.ui.isWebAddress(firstEntry.website)
+                    ) {
                         takagi.ru.monica.autofill_ng.ui.rememberAppIcon(primaryAppPackageName)
                     } else null
                     val autoMatchedSimpleIcon = takagi.ru.monica.ui.icons.rememberAutoMatchedSimpleIcon(

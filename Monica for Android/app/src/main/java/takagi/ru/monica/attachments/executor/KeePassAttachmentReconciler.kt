@@ -2,6 +2,7 @@ package takagi.ru.monica.attachments.executor
 
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.repository.AttachmentRepository
 import takagi.ru.monica.attachments.storage.AttachmentStorage
@@ -32,25 +33,39 @@ class KeePassAttachmentReconciler(
         passwordId: Long,
         databaseId: Long?,
         entryUuid: String?
+    ): Report = reconcile(AttachmentOwner.password(passwordId), databaseId, entryUuid)
+
+    suspend fun reconcile(
+        owner: AttachmentOwner,
+        databaseId: Long?,
+        entryUuid: String?,
+        excludedFileNames: Set<String> = emptySet()
     ): Report {
-        if (passwordId <= 0 || databaseId == null || entryUuid.isNullOrBlank()) {
+        if (databaseId == null || entryUuid.isNullOrBlank()) {
             return Report(skipped = 1)
         }
 
         val remoteAttachments = executor?.snapshotAttachments(databaseId, entryUuid)
             ?: return Report(skipped = 1)
-        return reconcileSnapshot(passwordId, remoteAttachments)
+        return reconcileSnapshot(owner, remoteAttachments, excludedFileNames)
     }
 
     suspend fun reconcileSnapshot(
         passwordId: Long,
         remoteAttachments: List<KeePassKdbxService.KeePassAttachmentInfo>
+    ): Report = reconcileSnapshot(AttachmentOwner.password(passwordId), remoteAttachments)
+
+    suspend fun reconcileSnapshot(
+        owner: AttachmentOwner,
+        remoteAttachments: List<KeePassKdbxService.KeePassAttachmentInfo>,
+        excludedFileNames: Set<String> = emptySet()
     ): Report {
-        val remoteByRef = remoteAttachments.associateBy {
+        val visibleRemoteAttachments = remoteAttachments.filterNot { it.fileName in excludedFileNames }
+        val remoteByRef = visibleRemoteAttachments.associateBy {
             KeePassAttachmentRef.from(it.hashHex, it.fileName).encode()
         }
-        val remoteHashes = remoteAttachments.map { it.hashHex }.toSet()
-        val local = repository.listByParentAndSource(passwordId, AttachmentSource.KEEPASS)
+        val remoteHashes = visibleRemoteAttachments.map { it.hashHex }.toSet()
+        val local = repository.listByOwnerAndSource(owner, AttachmentSource.KEEPASS)
         val localByRef = local.mapNotNull { attach ->
             val ref = attach.keepassBinaryRef?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             ref to attach
@@ -77,7 +92,8 @@ class KeePassAttachmentReconciler(
                 repository.insert(
                     Attachment(
                         id = 0,
-                        parentPasswordId = passwordId,
+                        parentPasswordId = owner.passwordId,
+                        parentSecureItemId = owner.secureItemId,
                         source = AttachmentSource.KEEPASS.name,
                         fileName = remote.fileName.ifBlank { DEFAULT_FILE_NAME },
                         mimeType = guessMimeType(remote.fileName),

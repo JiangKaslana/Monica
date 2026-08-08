@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
 import takagi.ru.monica.attachments.model.AttachmentError
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.storage.AttachmentKeyVault
 import takagi.ru.monica.attachments.storage.AttachmentStorage
@@ -35,6 +36,16 @@ class LocalAttachmentExecutor(
         parentPasswordId: Long,
         sourceUri: Uri,
         fallbackFileName: String? = null
+    ): Attachment = writeFromUri(
+        owner = AttachmentOwner.password(parentPasswordId),
+        sourceUri = sourceUri,
+        fallbackFileName = fallbackFileName
+    )
+
+    suspend fun writeFromUri(
+        owner: AttachmentOwner,
+        sourceUri: Uri,
+        fallbackFileName: String? = null
     ): Attachment = withContext(Dispatchers.IO) {
         val resolver = context.applicationContext.contentResolver
         val fileName = resolveDisplayName(sourceUri) ?: fallbackFileName ?: DEFAULT_FILE_NAME
@@ -57,7 +68,8 @@ class LocalAttachmentExecutor(
 
         Attachment(
             id = 0,
-            parentPasswordId = parentPasswordId,
+            parentPasswordId = owner.passwordId,
+            parentSecureItemId = owner.secureItemId,
             source = AttachmentSource.LOCAL.name,
             fileName = fileName,
             mimeType = mimeType,

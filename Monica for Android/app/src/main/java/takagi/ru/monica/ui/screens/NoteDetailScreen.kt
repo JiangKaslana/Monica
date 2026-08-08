@@ -43,7 +43,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import takagi.ru.monica.R
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.facade.AttachmentFacade
+import takagi.ru.monica.attachments.model.AttachmentOwner
+import takagi.ru.monica.attachments.ui.AttachmentsDetailSection
 import takagi.ru.monica.data.NoteCodeBlockCollapseMode
+import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.notes.domain.NoteContentCodec
 import takagi.ru.monica.ui.components.ActionStrip
 import takagi.ru.monica.ui.components.ActionStripItem
@@ -52,6 +57,7 @@ import takagi.ru.monica.ui.components.MarkdownPreviewText
 import takagi.ru.monica.util.ImageManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import takagi.ru.monica.viewmodel.NoteViewModel
 import java.text.DateFormat
@@ -69,9 +75,11 @@ fun NoteDetailScreen(
 ) {
     val detailImageMaxDimension = 1440
     val context = LocalContext.current
+    val database = remember { PasswordDatabase.getDatabase(context) }
     val untitledLabel = stringResource(R.string.untitled)
     val imageManager = remember { ImageManager(context) }
     val noteItem by viewModel.observeNoteById(noteId).collectAsState(initial = null)
+    val bitwardenVaults by database.bitwardenVaultDao().getAllVaultsFlow().collectAsState(initial = emptyList())
     var showNoteImageDialog by remember { mutableStateOf<String?>(null) }
     val highlightQuery = initialHighlightQuery?.trim().orEmpty()
     var showSearchHighlight by remember(noteId, highlightQuery) {
@@ -120,6 +128,28 @@ fun NoteDetailScreen(
             markdownSource.ifBlank { decodedNote?.content.orEmpty() }.trim()
         }
     }
+    val attachmentBitwardenVault = remember(noteItem?.bitwardenVaultId, bitwardenVaults) {
+        noteItem?.bitwardenVaultId?.let { vaultId ->
+            bitwardenVaults.firstOrNull { it.id == vaultId }
+        }
+    }
+    val attachmentBitwardenContext = remember(
+        attachmentBitwardenVault,
+        noteItem?.bitwardenCipherId
+    ) {
+        attachmentBitwardenVault?.let { vault ->
+            viewModel.getAttachmentBitwardenContext(vault, noteItem?.bitwardenCipherId)
+        }
+    }
+    val attachmentKeePassContext = remember(noteItem?.keepassDatabaseId, noteItem?.keepassEntryUuid) {
+        val databaseId = noteItem?.keepassDatabaseId
+        val entryUuid = noteItem?.keepassEntryUuid?.takeIf { it.isNotBlank() }
+        if (databaseId != null && entryUuid != null) {
+            AttachmentFacade.KeePassContext(databaseId = databaseId, entryUuid = entryUuid)
+        } else {
+            null
+        }
+    }
 
     LaunchedEffect(imageIds) {
         val staleKeys = imageBitmaps.keys.toSet() - imageIds.toSet()
@@ -146,6 +176,27 @@ fun NoteDetailScreen(
         showSearchHighlight = true
         delay(3000)
         showSearchHighlight = false
+    }
+
+    LaunchedEffect(noteItem?.id, noteItem?.keepassDatabaseId, noteItem?.keepassEntryUuid) {
+        val item = noteItem ?: return@LaunchedEffect
+        if (item.keepassDatabaseId == null || item.keepassEntryUuid.isNullOrBlank()) {
+            return@LaunchedEffect
+        }
+        launch(Dispatchers.IO) {
+            runCatching {
+                AttachmentContainer.keepassReconciler(context).reconcile(
+                    owner = AttachmentOwner.secureItem(item.id),
+                    databaseId = item.keepassDatabaseId,
+                    entryUuid = item.keepassEntryUuid
+                )
+            }.onFailure { error ->
+                android.util.Log.w(
+                    "NoteDetailScreen",
+                    "KeePass attachment metadata reconcile failed: ${error::class.simpleName}"
+                )
+            }
+        }
     }
 
     Scaffold(
@@ -284,6 +335,12 @@ fun NoteDetailScreen(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+
+            AttachmentsDetailSection(
+                owner = AttachmentOwner.secureItem(currentNote.id),
+                bitwardenContext = attachmentBitwardenContext,
+                keepassContext = attachmentKeePassContext
+            )
 
             Text(
                 text = stringResource(

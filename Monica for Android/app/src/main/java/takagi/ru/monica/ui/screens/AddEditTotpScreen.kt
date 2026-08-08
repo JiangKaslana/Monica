@@ -68,7 +68,9 @@ import takagi.ru.monica.ui.components.MultiStorageTargetSelectorCard
 import takagi.ru.monica.ui.components.MonicaExpressiveFilterChip
 import takagi.ru.monica.ui.components.PasswordEntryPickerBottomSheet
 import takagi.ru.monica.ui.components.SimpleIconPickerBottomSheet
+import takagi.ru.monica.ui.components.TotpMigrationReviewDialog
 import takagi.ru.monica.ui.components.buildMultiStorageTarget
+import takagi.ru.monica.ui.components.migrationFailureMessageRes
 import takagi.ru.monica.ui.icons.MonicaIcons
 import takagi.ru.monica.ui.icons.PASSWORD_ICON_TYPE_NONE
 import takagi.ru.monica.ui.icons.PASSWORD_ICON_TYPE_SIMPLE
@@ -85,6 +87,7 @@ import takagi.ru.monica.util.TotpUriParser
 import takagi.ru.monica.viewmodel.LocalKeePassViewModel
 import takagi.ru.monica.viewmodel.PasswordViewModel
 import takagi.ru.monica.viewmodel.TotpViewModel
+import takagi.ru.monica.viewmodel.TotpMigrationSaveResult
 import takagi.ru.monica.utils.RememberedStorageTarget
 import takagi.ru.monica.utils.SettingsManager
 import java.io.File
@@ -121,6 +124,11 @@ fun AddEditTotpScreen(
         isFavorite: Boolean,
         targets: List<StorageTarget>,
         onComplete: (Boolean) -> Unit
+    ) -> Unit,
+    onBatchImport: (
+        items: List<TotpParseResult>,
+        targets: List<StorageTarget>,
+        onComplete: (TotpMigrationSaveResult) -> Unit
     ) -> Unit,
     onNavigateBack: () -> Unit,
     onScanQrCode: () -> Unit,
@@ -349,6 +357,8 @@ fun AddEditTotpScreen(
     var showPasswordSelectionDialog by remember { mutableStateOf(false) }
     var showImportUriDialog by remember { mutableStateOf(false) }
     var otpUriInput by rememberSaveable { mutableStateOf("") }
+    var pendingMigrationItems by remember { mutableStateOf<List<TotpParseResult>?>(null) }
+    var isMigrationSaving by remember { mutableStateOf(false) }
     
     // 防止重复点击保存按钮
     var isSaving by remember { mutableStateOf(false) }
@@ -493,14 +503,16 @@ fun AddEditTotpScreen(
                 showImportUriDialog = false
             }
             is TotpScanParseResult.Multiple -> {
-                scanResult.items.firstOrNull()?.let(::applyImportedTotp)
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.qr_migration_multiple_fill_first, scanResult.items.size),
-                    Toast.LENGTH_SHORT
-                ).show()
+                pendingMigrationItems = scanResult.items
                 otpUriInput = ""
                 showImportUriDialog = false
+            }
+            is TotpScanParseResult.MigrationFailure -> {
+                Toast.makeText(
+                    context,
+                    context.getString(migrationFailureMessageRes(scanResult.reason)),
+                    Toast.LENGTH_LONG
+                ).show()
             }
             TotpScanParseResult.UnsupportedPhoneFactor -> {
                 Toast.makeText(
@@ -1202,6 +1214,42 @@ fun AddEditTotpScreen(
             dismissButton = {
                 TextButton(onClick = { showImportUriDialog = false }) {
                     Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    pendingMigrationItems?.let { migrationItems ->
+        TotpMigrationReviewDialog(
+            items = migrationItems,
+            existingTitleFor = { data ->
+                totpViewModel
+                    ?.findTotpByData(data, selectedStorageTargets)
+                    ?.title
+            },
+            isSaving = isMigrationSaving,
+            onDismiss = {
+                pendingMigrationItems = null
+                isMigrationSaving = false
+            },
+            onImport = { selectedItems ->
+                isMigrationSaving = true
+                onBatchImport(selectedItems, selectedStorageTargets.toList()) { result ->
+                    isMigrationSaving = false
+                    Toast.makeText(
+                        context,
+                        context.getString(
+                            R.string.qr_authenticator_migration_result,
+                            result.importedCount,
+                            result.duplicateCount,
+                            result.failedCount
+                        ),
+                        Toast.LENGTH_LONG
+                    ).show()
+                    if (result.importedCount > 0) {
+                        pendingMigrationItems = null
+                        onNavigateBack()
+                    }
                 }
             }
         )

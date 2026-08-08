@@ -24,6 +24,7 @@ import takagi.ru.monica.R
 import takagi.ru.monica.attachments.data.AttachmentDao
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.storage.AttachmentStorage
 import takagi.ru.monica.data.CustomField
@@ -3534,7 +3535,11 @@ class MdbxViewModel(
                 }
         }
         val attachmentMs = measureTimeMillis {
-            importAttachmentsFromVault(databaseId, importedPasswordIds)
+            importAttachmentsFromVault(
+                databaseId = databaseId,
+                importedPasswordIds = importedPasswordIds,
+                importedSecureItemIds = importedSecureItemIds
+            )
         }
         MdbxDiagLogger.append(
             "[MDBX][perf][importEntriesFromVault] databaseId=$databaseId entries=${entries.size} active=${entries.count { !it.deleted }} passwords=${importedPasswordIds.size} secureItems=${importedSecureItemIds.size} readMs=$readMs reconcileMs=$reconcileMs importMs=$importMs attachmentMs=$attachmentMs"
@@ -3794,8 +3799,10 @@ class MdbxViewModel(
         if (database.engineTypeEnum == MdbxEngineType.RUST_MDBX2) {
             runCatching { mdbx2RemoteSyncCoordinator.clearLocalState(databaseId) }
         }
-        val attachmentPaths = attachmentDao
-            .selectLocalPathsByMdbxDatabaseId(databaseId)
+        val attachmentPaths = (
+            attachmentDao.selectLocalPathsByMdbxDatabaseId(databaseId) +
+                attachmentDao.selectSecureItemLocalPathsByMdbxDatabaseId(databaseId)
+            )
             .filter(String::isNotBlank)
             .distinct()
         val passkeyKeyReferences = passkeyDao.getByMdbxDatabaseId(databaseId)
@@ -4274,30 +4281,44 @@ class MdbxViewModel(
 
     private suspend fun importAttachmentsFromVault(
         databaseId: Long,
-        importedPasswordIds: Map<String, Long>
+        importedPasswordIds: Map<String, Long>,
+        importedSecureItemIds: Map<String, Long>
     ) {
-        if (importedPasswordIds.isEmpty()) return
+        if (importedPasswordIds.isEmpty() && importedSecureItemIds.isEmpty()) return
         val attachments = vaultStore.readStoredAttachments(databaseId)
         val dir = File(context.filesDir, "secure_attachments")
         dir.mkdirs()
-        val activeAttachmentsByParentId = attachments
+        val ownerByEntryId = buildMap {
+            importedPasswordIds.forEach { (entryId, roomId) ->
+                put(entryId, AttachmentOwner.password(roomId))
+            }
+            importedSecureItemIds.forEach { (entryId, roomId) ->
+                put(entryId, AttachmentOwner.secureItem(roomId))
+            }
+        }
+        val activeAttachmentsByOwner = attachments
             .filterNot { it.deleted }
             .filter { !it.wrappedCek.isNullOrBlank() }
-            .groupBy { stored ->
+            .mapNotNull { stored ->
                 val entryId = stored.entryId ?: stored.projectId
-                importedPasswordIds[entryId]
+                ownerByEntryId[entryId]?.let { owner -> owner to stored }
             }
-            .filterKeys { it != null }
-            .mapKeys { it.key!! }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
 
-        importedPasswordIds.values.toSet().forEach { parentPasswordId ->
-            val remoteAttachments = activeAttachmentsByParentId[parentPasswordId].orEmpty()
-            val localAttachments = attachmentDao.getActiveByParent(parentPasswordId)
+        ownerByEntryId.values.toSet().forEach { owner ->
+            val remoteAttachments = activeAttachmentsByOwner[owner].orEmpty()
+            val localAttachments = when (owner.kind) {
+                AttachmentOwner.Kind.PASSWORD -> attachmentDao.getActiveByParent(owner.id)
+                AttachmentOwner.Kind.SECURE_ITEM -> attachmentDao.getActiveBySecureItem(owner.id)
+            }
             if (localAttachments.matchesMdbxAttachments(remoteAttachments)) {
                 return@forEach
             }
 
-            attachmentDao.purgeByParent(parentPasswordId)
+            when (owner.kind) {
+                AttachmentOwner.Kind.PASSWORD -> attachmentDao.purgeByParent(owner.id)
+                AttachmentOwner.Kind.SECURE_ITEM -> attachmentDao.purgeBySecureItem(owner.id)
+            }
             remoteAttachments.forEach remoteLoop@{ stored ->
                 val wrappedCek = stored.wrappedCek ?: return@remoteLoop
                 val localWrappedCek = runCatching {
@@ -4311,7 +4332,8 @@ class MdbxViewModel(
                 attachmentDao.insert(
                     Attachment(
                         id = 0L,
-                        parentPasswordId = parentPasswordId,
+                        parentPasswordId = owner.passwordId,
+                        parentSecureItemId = owner.secureItemId,
                         source = AttachmentSource.LOCAL.name,
                         fileName = stored.fileName,
                         mimeType = stored.mimeType.ifBlank { "application/octet-stream" },

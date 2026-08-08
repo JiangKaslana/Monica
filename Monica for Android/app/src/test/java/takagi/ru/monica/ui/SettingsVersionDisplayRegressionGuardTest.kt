@@ -17,6 +17,7 @@ class SettingsVersionDisplayRegressionGuardTest {
 
         assertTrue(settingsSource.contains("val installedVersion = BuildConfig.VERSION_NAME"))
         assertTrue(settingsSource.contains("subtitle = installedVersion"))
+        assertTrue(settingsSource.contains("val currentVersion = BuildConfig.BASE_VERSION_NAME"))
 
         val resourceFiles = File(projectRoot, "app/src/main/res")
             .walkTopDown()

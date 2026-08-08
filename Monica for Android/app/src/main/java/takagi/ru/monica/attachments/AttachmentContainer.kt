@@ -71,6 +71,7 @@ object AttachmentContainer {
                 keyVault = keyVault(app),
                 previewCache = previewCache(app),
                 passwordEntryDao = PasswordDatabase.getDatabase(app).passwordEntryDao(),
+                secureItemDao = PasswordDatabase.getDatabase(app).secureItemDao(),
                 mdbxVaultStore = mdbxVaultStore(app),
                 fileProviderAuthority = "${app.packageName}.fileprovider"
             )

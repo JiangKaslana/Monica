@@ -12,6 +12,10 @@ import takagi.ru.monica.keepass.KeePassCrossDatabaseTransfer
 import takagi.ru.monica.keepass.KeePassSecureItemCreateExecutor
 import takagi.ru.monica.keepass.KeePassSecureItemDeleteExecutor
 import takagi.ru.monica.keepass.KeePassSecureItemUpdateExecutor
+import takagi.ru.monica.keepass.KeePassSecureItemPhotoAttachments
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.facade.AttachmentFacade
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.bitwarden.SecureItemBitwardenTransitionResolver
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.data.ItemType
@@ -23,6 +27,7 @@ import takagi.ru.monica.data.asMonicaLocalCopy
 import takagi.ru.monica.data.hasOwnershipConflict
 import takagi.ru.monica.data.resolveOwnership
 import takagi.ru.monica.data.bitwarden.BitwardenPendingOperation
+import takagi.ru.monica.data.bitwarden.BitwardenVault
 import takagi.ru.monica.repository.KeePassCompatibilityBridge
 import takagi.ru.monica.repository.KeePassWorkspaceRepository
 import takagi.ru.monica.repository.SecureItemRepository
@@ -56,6 +61,7 @@ class DocumentViewModel(
     private val localKeePassDatabaseDao: LocalKeePassDatabaseDao? = null,
     private val securityManager: SecurityManager? = null
 ) : ViewModel() {
+    private val attachmentFacade = context?.let { AttachmentContainer.facade(it) }
     private data class KeePassMutationIdentity(
         val groupPath: String?,
         val entryUuid: String?,
@@ -66,6 +72,13 @@ class DocumentViewModel(
 
     private fun requestBitwardenMutationSync(vaultId: Long?) {
         vaultId?.let { bitwardenRepository?.requestLocalMutationSync(it) }
+    }
+
+    fun getAttachmentBitwardenContext(
+        vault: BitwardenVault,
+        cipherId: String?
+    ): takagi.ru.monica.attachments.facade.AttachmentFacade.BitwardenContext? {
+        return bitwardenRepository?.getAttachmentBitwardenContext(vault, cipherId)
     }
 
     private val keepassBridge = if (context != null && localKeePassDatabaseDao != null && securityManager != null) {
@@ -338,7 +351,8 @@ class DocumentViewModel(
         mdbxFolderId: String? = null,
         bitwardenVaultId: Long? = null,
         bitwardenFolderId: String? = null,
-        replicaGroupId: String? = null
+        replicaGroupId: String? = null,
+        onCreated: suspend (Long) -> Unit = {}
     ) {
         viewModelScope.launch {
             val keepassIdentity = resolveKeePassMutationIdentity(
@@ -381,6 +395,7 @@ class DocumentViewModel(
                 itemId = newId,
                 itemTitle = title
             )
+            onCreated(newId)
         }
     }
     
@@ -627,7 +642,8 @@ class DocumentViewModel(
         notes: String = "",
         isFavorite: Boolean = false,
         imagePaths: String = "",
-        targets: List<StorageTarget>
+        targets: List<StorageTarget>,
+        onPrimaryCreated: suspend (Long) -> Unit = {}
     ) {
         viewModelScope.launch {
             val distinctTargets = targets.distinctBy(StorageTarget::stableKey)
@@ -664,7 +680,8 @@ class DocumentViewModel(
                             isFavorite = isFavorite,
                             imagePaths = imagePaths,
                             categoryId = currentTarget.categoryId,
-                            replicaGroupId = replicaGroupId
+                            replicaGroupId = replicaGroupId,
+                            onCreated = onPrimaryCreated
                         )
                     } else {
                         updateDocument(
@@ -689,7 +706,8 @@ class DocumentViewModel(
                             imagePaths = imagePaths,
                             keepassDatabaseId = currentTarget.databaseId,
                             keepassGroupPath = currentTarget.groupPath,
-                            replicaGroupId = replicaGroupId
+                            replicaGroupId = replicaGroupId,
+                            onCreated = onPrimaryCreated
                         )
                     } else {
                         updateDocument(
@@ -715,7 +733,8 @@ class DocumentViewModel(
                             imagePaths = imagePaths,
                             mdbxDatabaseId = currentTarget.databaseId,
                             mdbxFolderId = currentTarget.folderId,
-                            replicaGroupId = replicaGroupId
+                            replicaGroupId = replicaGroupId,
+                            onCreated = onPrimaryCreated
                         )
                     } else {
                         updateDocument(
@@ -741,7 +760,8 @@ class DocumentViewModel(
                             imagePaths = imagePaths,
                             bitwardenVaultId = currentTarget.vaultId,
                             bitwardenFolderId = currentTarget.folderId,
-                            replicaGroupId = replicaGroupId
+                            replicaGroupId = replicaGroupId,
+                            onCreated = onPrimaryCreated
                         )
                     } else {
                         updateDocument(
@@ -866,7 +886,40 @@ class DocumentViewModel(
             createdAt = Date(),
             updatedAt = Date()
         )
-        return repository.insertItem(localCopy)
+        val newId = repository.insertItem(localCopy)
+        return runCatching {
+            attachmentFacade?.cloneAttachmentsToNewOwner(
+                sourceOwner = AttachmentOwner.secureItem(item.id),
+                targetOwner = AttachmentOwner.secureItem(newId),
+                sourceBitwardenContext = attachmentBitwardenContextFor(item),
+                sourceKeepassContext = attachmentKeepassContextFor(item),
+                excludedFileNames = KeePassSecureItemPhotoAttachments.managedFileNames(ItemType.DOCUMENT)
+            )
+            newId
+        }.getOrElse { error ->
+            Log.e("DocumentViewModel", "Document attachment clone failed: ${error.message}", error)
+            runCatching { repository.deleteItemById(newId) }
+            null
+        }
+    }
+
+    private suspend fun attachmentBitwardenContextFor(
+        item: SecureItem
+    ): AttachmentFacade.BitwardenContext? {
+        val vaultId = item.bitwardenVaultId ?: return null
+        val vault = bitwardenRepository?.getAllVaultsFlow()?.first()?.firstOrNull { it.id == vaultId }
+            ?: return null
+        return bitwardenRepository?.getAttachmentBitwardenContext(vault, item.bitwardenCipherId)
+    }
+
+    private fun attachmentKeepassContextFor(item: SecureItem): AttachmentFacade.KeePassContext? {
+        val databaseId = item.keepassDatabaseId
+        val entryUuid = item.keepassEntryUuid?.takeIf { it.isNotBlank() }
+        return if (databaseId != null && entryUuid != null) {
+            AttachmentFacade.KeePassContext(databaseId, entryUuid)
+        } else {
+            null
+        }
     }
 
     suspend fun moveDocumentToMonicaLocal(

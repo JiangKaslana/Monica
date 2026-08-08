@@ -438,6 +438,23 @@
     <string name="totp_import_uri_dialog_hint">otpauth://totp/...</string>
     <string name="totp_import_uri_dialog_supporting">粘贴 otpauth://、otpauth-migration:// 或 motp:// 链接</string>
     <string name="totp_import_uri_empty">请粘贴验证器链接</string>
+    <string name="qr_authenticator_duplicate">验证器已存在：%1$s</string>
+    <string name="qr_authenticator_added">已添加验证器：%1$s</string>
+    <string name="qr_authenticator_migration_result">已导入 %1$d 个验证器，跳过 %2$d 个重复项，%3$d 个保存失败。</string>
+    <string name="qr_migration_multiple_fill_first">迁移二维码包含 %1$d 个验证器，当前仅填入第一项。</string>
+    <string name="totp_migration_review_title">导入验证器</string>
+    <string name="totp_migration_review_summary">发现 %1$d 个验证器 · 已选择 %2$d 个</string>
+    <string name="totp_migration_import_selected">导入 %1$d 个</string>
+    <string name="totp_migration_totp_parameters">%1$s · %2$s · %3$d 位 · %4$d 秒</string>
+    <string name="totp_migration_hotp_parameters">%1$s · %2$s · %3$d 位 · 计数器 %4$d</string>
+    <string name="totp_migration_existing_item">已存在：%1$s。仍可手动选中并导入副本。</string>
+    <string name="totp_migration_batch_duplicate">该二维码内的重复验证器</string>
+    <string name="totp_migration_error_invalid">Google 验证器迁移二维码无效或数据不完整。</string>
+    <string name="totp_migration_error_too_large">迁移二维码包含的数据过多。</string>
+    <string name="totp_migration_error_multiple_qr">该导出包含多张二维码，请改为每次导入一张完整的单二维码导出。</string>
+    <string name="totp_migration_error_version">暂不支持该版本的 Google 验证器迁移格式。</string>
+    <string name="totp_migration_error_parameters">迁移内容包含不支持的算法、验证码位数或验证器类型。</string>
+    <string name="totp_migration_error_missing_name">迁移内容中存在缺少账号名称的验证器。</string>
     <string name="issuer">发行者</string>
     <string name="issuer_example">例如：Google</string>
     <string name="account_name">账户名</string>
@@ -4056,4 +4073,6 @@
     <string name="mdbx_snapshot_no_changes_title">没有新的数据库变更</string>
     <string name="mdbx_snapshot_no_changes_message">最新快照已经对应当前数据库状态，增量创建没有可保存的内容。是否仍创建一个完整快照？</string>
     <string name="mdbx_snapshot_create_full_anyway">创建完整快照</string>
+    <string name="select_item_hint">选择一个项目以查看详情</string>
+    <string name="select_steam_account_hint">选择一个 Steam 账号以查看详情</string>
 </resources>

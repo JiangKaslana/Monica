@@ -34,6 +34,15 @@ interface AttachmentDao {
     @Query(
         """
         SELECT * FROM attachments
+        WHERE parent_secure_item_id = :secureItemId AND is_deleted = 0
+        ORDER BY created_at ASC
+        """
+    )
+    fun observeActiveBySecureItem(secureItemId: Long): Flow<List<Attachment>>
+
+    @Query(
+        """
+        SELECT * FROM attachments
         WHERE parent_password_id = :passwordId
         ORDER BY created_at ASC
         """
@@ -43,11 +52,29 @@ interface AttachmentDao {
     @Query(
         """
         SELECT * FROM attachments
+        WHERE parent_secure_item_id = :secureItemId
+        ORDER BY created_at ASC
+        """
+    )
+    suspend fun getAllBySecureItem(secureItemId: Long): List<Attachment>
+
+    @Query(
+        """
+        SELECT * FROM attachments
         WHERE parent_password_id = :passwordId AND is_deleted = 0
         ORDER BY created_at ASC
         """
     )
     suspend fun getActiveByParent(passwordId: Long): List<Attachment>
+
+    @Query(
+        """
+        SELECT * FROM attachments
+        WHERE parent_secure_item_id = :secureItemId AND is_deleted = 0
+        ORDER BY created_at ASC
+        """
+    )
+    suspend fun getActiveBySecureItem(secureItemId: Long): List<Attachment>
 
     @Query("SELECT * FROM attachments WHERE id = :id")
     suspend fun getById(id: Long): Attachment?
@@ -60,6 +87,14 @@ interface AttachmentDao {
     )
     suspend fun getByParentAndSource(passwordId: Long, source: String): List<Attachment>
 
+    @Query(
+        """
+        SELECT * FROM attachments
+        WHERE parent_secure_item_id = :secureItemId AND source = :source
+        """
+    )
+    suspend fun getBySecureItemAndSource(secureItemId: Long, source: String): List<Attachment>
+
     @Query("SELECT * FROM attachments WHERE bitwarden_attachment_id = :attachmentId LIMIT 1")
     suspend fun findByBitwardenAttachmentId(attachmentId: String): Attachment?
 
@@ -70,6 +105,14 @@ interface AttachmentDao {
         """
     )
     suspend fun countActiveByParent(passwordId: Long): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM attachments
+        WHERE parent_secure_item_id = :secureItemId AND is_deleted = 0
+        """
+    )
+    suspend fun countActiveBySecureItem(secureItemId: Long): Int
 
     @Query("SELECT COUNT(*) FROM attachments WHERE parent_password_id IN (:passwordIds) AND is_deleted = 0")
     suspend fun countActiveByParents(passwordIds: List<Long>): Int
@@ -92,6 +135,24 @@ interface AttachmentDao {
     )
     fun observeParentsWithActiveAttachments(): Flow<List<Long>>
 
+    @Query(
+        """
+        SELECT parent_secure_item_id FROM attachments
+        WHERE parent_secure_item_id IN (:secureItemIds) AND is_deleted = 0
+        GROUP BY parent_secure_item_id
+        """
+    )
+    suspend fun secureItemsWithActiveAttachments(secureItemIds: List<Long>): List<Long>
+
+    @Query(
+        """
+        SELECT parent_secure_item_id FROM attachments
+        WHERE parent_secure_item_id IS NOT NULL AND is_deleted = 0
+        GROUP BY parent_secure_item_id
+        """
+    )
+    fun observeSecureItemsWithActiveAttachments(): Flow<List<Long>>
+
     @Query("SELECT local_path FROM attachments WHERE local_path IS NOT NULL")
     suspend fun selectAllLocalPaths(): List<String?>
 
@@ -105,6 +166,17 @@ interface AttachmentDao {
         """
     )
     suspend fun selectLocalPathsByMdbxDatabaseId(databaseId: Long): List<String>
+
+    @Query(
+        """
+        SELECT DISTINCT attachments.local_path FROM attachments
+        INNER JOIN secure_items
+            ON secure_items.id = attachments.parent_secure_item_id
+        WHERE secure_items.mdbx_database_id = :databaseId
+          AND attachments.local_path IS NOT NULL
+        """
+    )
+    suspend fun selectSecureItemLocalPathsByMdbxDatabaseId(databaseId: Long): List<String>
 
     @Query("SELECT COUNT(*) FROM attachments WHERE local_path = :localPath")
     suspend fun countByLocalPath(localPath: String): Int
@@ -145,6 +217,29 @@ interface AttachmentDao {
     )
     suspend fun rewriteSourceToLocal(passwordId: Long, fromSource: String, now: Long): Int
 
+    @Query(
+        """
+        UPDATE attachments
+        SET
+            source = 'LOCAL',
+            bitwarden_attachment_id = NULL,
+            bitwarden_url = NULL,
+            bitwarden_file_key_enc = NULL,
+            keepass_binary_ref = NULL,
+            updated_at = :now
+        WHERE parent_secure_item_id = :secureItemId
+          AND source = :fromSource
+          AND local_path IS NOT NULL
+          AND wrapped_cek IS NOT NULL
+          AND is_deleted = 0
+        """
+    )
+    suspend fun rewriteSecureItemSourceToLocal(
+        secureItemId: Long,
+        fromSource: String,
+        now: Long
+    ): Int
+
     // ---------------------------------------------------------------- 写入
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
@@ -162,6 +257,9 @@ interface AttachmentDao {
     @Query("DELETE FROM attachments WHERE parent_password_id = :passwordId")
     suspend fun purgeByParent(passwordId: Long): Int
 
+    @Query("DELETE FROM attachments WHERE parent_secure_item_id = :secureItemId")
+    suspend fun purgeBySecureItem(secureItemId: Long): Int
+
     // ---------------------------------------------------------------- 软删除联动
 
     @Query(
@@ -176,11 +274,33 @@ interface AttachmentDao {
     @Query(
         """
         UPDATE attachments
+        SET is_deleted = 1, deleted_at = :deletedAt, updated_at = :updatedAt
+        WHERE parent_secure_item_id = :secureItemId AND is_deleted = 0
+        """
+    )
+    suspend fun softDeleteBySecureItem(
+        secureItemId: Long,
+        deletedAt: Long,
+        updatedAt: Long
+    ): Int
+
+    @Query(
+        """
+        UPDATE attachments
         SET is_deleted = 0, deleted_at = NULL, updated_at = :updatedAt
         WHERE parent_password_id = :passwordId AND is_deleted = 1
         """
     )
     suspend fun restoreByParent(passwordId: Long, updatedAt: Long): Int
+
+    @Query(
+        """
+        UPDATE attachments
+        SET is_deleted = 0, deleted_at = NULL, updated_at = :updatedAt
+        WHERE parent_secure_item_id = :secureItemId AND is_deleted = 1
+        """
+    )
+    suspend fun restoreBySecureItem(secureItemId: Long, updatedAt: Long): Int
 
     @Query(
         """

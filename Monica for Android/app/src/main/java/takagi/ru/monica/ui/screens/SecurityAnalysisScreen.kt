@@ -994,7 +994,10 @@ private fun SecurityPasswordEntryIcon(entry: PasswordEntry) {
         takagi.ru.monica.ui.icons.rememberUploadedPasswordIcon(entry.customIconValue)
     } else null
     val appPackageName = entry.primaryLinkedAppPackageName()
-    val appIcon = if (appPackageName.isNotBlank()) {
+    val appIcon = if (
+        appPackageName.isNotBlank() &&
+        !takagi.ru.monica.autofill_ng.ui.isWebAddress(entry.website)
+    ) {
         takagi.ru.monica.autofill_ng.ui.rememberAppIcon(appPackageName)
     } else null
     val autoMatchedIcon = takagi.ru.monica.ui.icons.rememberAutoMatchedSimpleIcon(

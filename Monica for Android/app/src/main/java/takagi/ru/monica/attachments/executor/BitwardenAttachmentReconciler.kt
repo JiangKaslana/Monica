@@ -2,6 +2,7 @@ package takagi.ru.monica.attachments.executor
 
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.repository.AttachmentRepository
 import takagi.ru.monica.attachments.storage.AttachmentStorage
@@ -37,10 +38,15 @@ class BitwardenAttachmentReconciler(
     suspend fun reconcile(
         passwordId: Long,
         remoteAttachments: List<CipherAttachmentApiData>?
+    ): Report = reconcile(AttachmentOwner.password(passwordId), remoteAttachments)
+
+    suspend fun reconcile(
+        owner: AttachmentOwner,
+        remoteAttachments: List<CipherAttachmentApiData>?
     ): Report {
         if (remoteAttachments == null) return Report(skipped = 1)
         val remoteById = remoteAttachments.associateBy { it.id }
-        val local = repository.listByParentAndSource(passwordId, AttachmentSource.BITWARDEN)
+        val local = repository.listByOwnerAndSource(owner, AttachmentSource.BITWARDEN)
         val localById = local.mapNotNull { attach ->
             val id = attach.bitwardenAttachmentId ?: return@mapNotNull null
             id to attach
@@ -67,7 +73,8 @@ class BitwardenAttachmentReconciler(
                 repository.insert(
                     Attachment(
                         id = 0,
-                        parentPasswordId = passwordId,
+                        parentPasswordId = owner.passwordId,
+                        parentSecureItemId = owner.secureItemId,
                         source = AttachmentSource.BITWARDEN.name,
                         fileName = remote.fileName ?: DEFAULT_FILE_NAME,
                         mimeType = guessMimeType(remote.fileName),

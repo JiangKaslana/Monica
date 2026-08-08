@@ -45,6 +45,7 @@ import takagi.ru.monica.attachments.facade.AttachmentFacade
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
 import takagi.ru.monica.attachments.model.AttachmentError
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 
 /**
@@ -61,11 +62,26 @@ fun AttachmentsDetailSection(
     modifier: Modifier = Modifier,
     bitwardenContext: AttachmentFacade.BitwardenContext? = null,
     keepassContext: AttachmentFacade.KeePassContext? = null
+) = AttachmentsDetailSection(
+    owner = AttachmentOwner.password(passwordId),
+    modifier = modifier,
+    bitwardenContext = bitwardenContext,
+    keepassContext = keepassContext
+)
+
+@Composable
+fun AttachmentsDetailSection(
+    owner: AttachmentOwner,
+    modifier: Modifier = Modifier,
+    bitwardenContext: AttachmentFacade.BitwardenContext? = null,
+    keepassContext: AttachmentFacade.KeePassContext? = null,
+    excludedFileNames: Set<String> = emptySet()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val facade = remember(context) { AttachmentContainer.facade(context) }
-    val attachments by facade.observeByPassword(passwordId).collectAsState(initial = emptyList())
+    val allAttachments by facade.observe(owner).collectAsState(initial = emptyList())
+    val attachments = allAttachments.filterNot { it.fileName in excludedFileNames }
 
     if (attachments.isEmpty()) return
 

@@ -69,31 +69,52 @@ internal fun PasskeyPane(
                     .weight(1f)
                     .fillMaxHeight()
             ) {
-                val passkey = selectedPasskey
-                if (passkey == null) {
-                    PasskeyOverviewPane(
-                        totalPasskeys = passkeyTotalCount,
-                        boundPasskeys = passkeyBoundCount,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    val boundPasswordTitle = passkey.boundPasswordId?.let(resolvePasswordTitle)
-                    PasskeyDetailPane(
-                        passkey = passkey,
-                        boundPasswordTitle = boundPasswordTitle,
-                        onOpenBoundPassword = passkey.boundPasswordId?.let { boundId ->
-                            { onOpenPasswordDetail(boundId) }
-                        },
-                        onUnbindPassword = if (passkey.boundPasswordId != null) {
-                            { onUnbindPasskey(passkey) }
-                        } else {
-                            null
-                        },
-                        onDeletePasskey = { onDeletePasskey(passkey) },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                PasskeyDetailPaneContent(
+                    selectedPasskey = selectedPasskey,
+                    passkeyTotalCount = passkeyTotalCount,
+                    passkeyBoundCount = passkeyBoundCount,
+                    resolvePasswordTitle = resolvePasswordTitle,
+                    onOpenPasswordDetail = onOpenPasswordDetail,
+                    onUnbindPasskey = onUnbindPasskey,
+                    onDeletePasskey = onDeletePasskey
+                )
             }
         }
+    }
+}
+
+@Composable
+internal fun PasskeyDetailPaneContent(
+    selectedPasskey: PasskeyEntry?,
+    passkeyTotalCount: Int,
+    passkeyBoundCount: Int,
+    resolvePasswordTitle: (Long) -> String?,
+    onOpenPasswordDetail: (Long) -> Unit,
+    onUnbindPasskey: (PasskeyEntry) -> Unit,
+    onDeletePasskey: (PasskeyEntry) -> Unit
+) {
+    val passkey = selectedPasskey
+    if (passkey == null) {
+        PasskeyOverviewPane(
+            totalPasskeys = passkeyTotalCount,
+            boundPasskeys = passkeyBoundCount,
+            modifier = Modifier.fillMaxSize()
+        )
+    } else {
+        val boundPasswordTitle = passkey.boundPasswordId?.let(resolvePasswordTitle)
+        PasskeyDetailPane(
+            passkey = passkey,
+            boundPasswordTitle = boundPasswordTitle,
+            onOpenBoundPassword = passkey.boundPasswordId?.let { boundId ->
+                { onOpenPasswordDetail(boundId) }
+            },
+            onUnbindPassword = if (passkey.boundPasswordId != null) {
+                { onUnbindPasskey(passkey) }
+            } else {
+                null
+            },
+            onDeletePasskey = { onDeletePasskey(passkey) },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }

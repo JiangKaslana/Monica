@@ -57,18 +57,6 @@ internal fun AuthenticatorTabPane(
             content = listPaneContent
         )
     } else {
-        val totpItems by totpViewModel.totpItems.collectAsState()
-        val selectedTotpItem = remember(selectedTotpId, totpItems) {
-            selectedTotpId?.let { selectedId ->
-                totpItems.firstOrNull { it.id == selectedId }
-            }
-        }
-        val parsedTotpItems by totpViewModel.parsedTotpItems.collectAsState()
-        val selectedTotpData = remember(selectedTotpId, parsedTotpItems) {
-            parsedTotpItems.firstOrNull { it.item.id == selectedTotpId }?.totpData
-        }
-        val totpCategories by totpViewModel.categories.collectAsState()
-
         Row(modifier = Modifier.fillMaxSize()) {
             ListPane(
                 modifier = Modifier
@@ -81,104 +69,167 @@ internal fun AuthenticatorTabPane(
                     .weight(1f)
                     .fillMaxHeight()
             ) {
-                if (isAddingTotpInline) {
-                    AddEditTotpScreen(
-                        totpId = null,
-                        initialData = null,
-                        initialTitle = "",
-                        initialNotes = "",
-                        initialCategoryId = totpNewItemDefaults.categoryId,
-                        initialKeePassDatabaseId = totpNewItemDefaults.keepassDatabaseId,
-                        initialKeePassGroupPath = totpNewItemDefaults.keepassGroupPath,
-                        initialBitwardenVaultId = totpNewItemDefaults.bitwardenVaultId,
-                        initialBitwardenFolderId = totpNewItemDefaults.bitwardenFolderId,
-                        initialIsFavorite = false,
-                        categories = totpCategories,
-                        passwordViewModel = passwordViewModel,
-                        totpViewModel = totpViewModel,
-                        localKeePassViewModel = localKeePassViewModel,
-                        onSave = { title, notes, totpData, isFavorite, targets, onComplete ->
-                            totpViewModel.saveTotpAcrossTargets(
-                                id = null,
-                                title = title,
-                                notes = notes,
-                                totpData = totpData,
-                                isFavorite = isFavorite,
-                                targets = targets,
-                                onComplete = { saved ->
-                                    if (saved) {
-                                        totpViewModel.revealSavedTotpTargets(targets)
-                                        onInlineTotpEditorBack()
-                                    }
-                                    onComplete(saved)
-                                }
-                            )
-                        },
-                        onNavigateBack = onInlineTotpEditorBack,
-                        onScanQrCode = onNavigateToQuickTotpScan,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else if (selectedTotpId == null) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Select an item to view details",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else if (selectedTotpItem == null || selectedTotpItem.id <= 0L || selectedTotpData == null) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "This item is not available for inline editing",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    AddEditTotpScreen(
-                        totpId = selectedTotpItem.id,
-                        initialData = selectedTotpData,
-                        initialTitle = selectedTotpItem.title,
-                        initialNotes = selectedTotpItem.notes,
-                        initialCategoryId = selectedTotpData.categoryId,
-                        initialKeePassDatabaseId = selectedTotpItem.keepassDatabaseId,
-                        initialKeePassGroupPath = selectedTotpItem.keepassGroupPath,
-                        initialBitwardenVaultId = selectedTotpItem.bitwardenVaultId,
-                        initialBitwardenFolderId = selectedTotpItem.bitwardenFolderId,
-                        initialReplicaGroupId = selectedTotpItem.replicaGroupId,
-                        initialIsFavorite = selectedTotpItem.isFavorite,
-                        categories = totpCategories,
-                        passwordViewModel = passwordViewModel,
-                        totpViewModel = totpViewModel,
-                        localKeePassViewModel = localKeePassViewModel,
-                        onSave = { title, notes, totpData, isFavorite, targets, onComplete ->
-                            totpViewModel.saveTotpAcrossTargets(
-                                id = selectedTotpItem.id,
-                                title = title,
-                                notes = notes,
-                                totpData = totpData,
-                                isFavorite = isFavorite,
-                                targets = targets,
-                                onComplete = { saved ->
-                                    if (saved) {
-                                        totpViewModel.revealSavedTotpTargets(targets)
-                                    }
-                                    onComplete(saved)
-                                }
-                            )
-                        },
-                        onNavigateBack = onInlineTotpEditorBack,
-                        onScanQrCode = onNavigateToQuickTotpScan,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                AuthenticatorDetailPaneContent(
+                    totpViewModel = totpViewModel,
+                    passwordViewModel = passwordViewModel,
+                    localKeePassViewModel = localKeePassViewModel,
+                    isAddingTotpInline = isAddingTotpInline,
+                    selectedTotpId = selectedTotpId,
+                    totpNewItemDefaults = totpNewItemDefaults,
+                    onInlineTotpEditorBack = onInlineTotpEditorBack,
+                    onNavigateToQuickTotpScan = onNavigateToQuickTotpScan
+                )
             }
+        }
+    }
+}
+
+@Composable
+internal fun AuthenticatorDetailPaneContent(
+    totpViewModel: takagi.ru.monica.viewmodel.TotpViewModel,
+    passwordViewModel: PasswordViewModel,
+    localKeePassViewModel: takagi.ru.monica.viewmodel.LocalKeePassViewModel,
+    isAddingTotpInline: Boolean,
+    selectedTotpId: Long?,
+    totpNewItemDefaults: NewItemStorageDefaults,
+    onInlineTotpEditorBack: () -> Unit,
+    onNavigateToQuickTotpScan: () -> Unit
+) {
+    val totpItems by totpViewModel.totpItems.collectAsState()
+    val selectedTotpItem = remember(selectedTotpId, totpItems) {
+        selectedTotpId?.let { selectedId ->
+            totpItems.firstOrNull { it.id == selectedId }
+        }
+    }
+    val parsedTotpItems by totpViewModel.parsedTotpItems.collectAsState()
+    val selectedTotpData = remember(selectedTotpId, parsedTotpItems) {
+        parsedTotpItems.firstOrNull { it.item.id == selectedTotpId }?.totpData
+    }
+    val totpCategories by totpViewModel.categories.collectAsState()
+
+    if (isAddingTotpInline) {
+        key("new") {
+            AddEditTotpScreen(
+            totpId = null,
+            initialData = null,
+            initialTitle = "",
+            initialNotes = "",
+            initialCategoryId = totpNewItemDefaults.categoryId,
+            initialKeePassDatabaseId = totpNewItemDefaults.keepassDatabaseId,
+            initialKeePassGroupPath = totpNewItemDefaults.keepassGroupPath,
+            initialBitwardenVaultId = totpNewItemDefaults.bitwardenVaultId,
+            initialBitwardenFolderId = totpNewItemDefaults.bitwardenFolderId,
+            initialIsFavorite = false,
+            categories = totpCategories,
+            passwordViewModel = passwordViewModel,
+            totpViewModel = totpViewModel,
+            localKeePassViewModel = localKeePassViewModel,
+            onSave = { title, notes, totpData, isFavorite, targets, onComplete ->
+                totpViewModel.saveTotpAcrossTargets(
+                    id = null,
+                    title = title,
+                    notes = notes,
+                    totpData = totpData,
+                    isFavorite = isFavorite,
+                    targets = targets,
+                    onComplete = { saved ->
+                        if (saved) {
+                            totpViewModel.revealSavedTotpTargets(targets)
+                            onInlineTotpEditorBack()
+                        }
+                        onComplete(saved)
+                    }
+                )
+            },
+            onBatchImport = { items, targets, onComplete ->
+                totpViewModel.saveTotpMigrationBatch(
+                    items = items,
+                    targets = targets,
+                    onComplete = { result ->
+                        if (result.importedCount > 0) {
+                            totpViewModel.revealSavedTotpTargets(targets)
+                        }
+                        onComplete(result)
+                    }
+                )
+            },
+            onNavigateBack = onInlineTotpEditorBack,
+            onScanQrCode = onNavigateToQuickTotpScan,
+            modifier = Modifier.fillMaxSize()
+            )
+        }
+    } else if (selectedTotpId == null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Select an item to view details",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    } else if (selectedTotpItem == null || selectedTotpItem.id <= 0L || selectedTotpData == null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "This item is not available for inline editing",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    } else {
+        key(selectedTotpItem.id) {
+            AddEditTotpScreen(
+            totpId = selectedTotpItem.id,
+            initialData = selectedTotpData,
+            initialTitle = selectedTotpItem.title,
+            initialNotes = selectedTotpItem.notes,
+            initialCategoryId = selectedTotpData.categoryId,
+            initialKeePassDatabaseId = selectedTotpItem.keepassDatabaseId,
+            initialKeePassGroupPath = selectedTotpItem.keepassGroupPath,
+            initialBitwardenVaultId = selectedTotpItem.bitwardenVaultId,
+            initialBitwardenFolderId = selectedTotpItem.bitwardenFolderId,
+            initialReplicaGroupId = selectedTotpItem.replicaGroupId,
+            initialIsFavorite = selectedTotpItem.isFavorite,
+            categories = totpCategories,
+            passwordViewModel = passwordViewModel,
+            totpViewModel = totpViewModel,
+            localKeePassViewModel = localKeePassViewModel,
+            onSave = { title, notes, totpData, isFavorite, targets, onComplete ->
+                totpViewModel.saveTotpAcrossTargets(
+                    id = selectedTotpItem.id,
+                    title = title,
+                    notes = notes,
+                    totpData = totpData,
+                    isFavorite = isFavorite,
+                    targets = targets,
+                    onComplete = { saved ->
+                        if (saved) {
+                            totpViewModel.revealSavedTotpTargets(targets)
+                        }
+                        onComplete(saved)
+                    }
+                )
+            },
+            onBatchImport = { items, targets, onComplete ->
+                totpViewModel.saveTotpMigrationBatch(
+                    items = items,
+                    targets = targets,
+                    onComplete = { result ->
+                        if (result.importedCount > 0) {
+                            totpViewModel.revealSavedTotpTargets(targets)
+                        }
+                        onComplete(result)
+                    }
+                )
+            },
+            onNavigateBack = onInlineTotpEditorBack,
+            onScanQrCode = onNavigateToQuickTotpScan,
+            modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }

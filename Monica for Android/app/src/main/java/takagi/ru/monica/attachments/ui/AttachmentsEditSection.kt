@@ -44,6 +44,7 @@ import takagi.ru.monica.attachments.facade.AttachmentSizeValidator
 import takagi.ru.monica.attachments.facade.AttachmentUriMetadata
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentError
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 
 /**
@@ -73,12 +74,38 @@ fun AttachmentsEditSection(
     isPlusActivated: Boolean,
     modifier: Modifier = Modifier,
     attachmentSource: AttachmentSource = AttachmentSource.LOCAL,
+    bitwardenContext: AttachmentFacade.BitwardenContext? = null,
+    bitwardenPremium: Boolean = true,
     keepassContext: AttachmentFacade.KeePassContext? = null,
-    pendingDrafts: SnapshotStateList<AttachmentPendingDraft>? = null
+    pendingDrafts: SnapshotStateList<AttachmentPendingDraft>? = null,
+    excludedFileNames: Set<String> = emptySet()
+) = AttachmentsEditSection(
+    owner = passwordId.takeIf { it > 0L }?.let { AttachmentOwner.password(it) },
+    isPlusActivated = isPlusActivated,
+    modifier = modifier,
+    attachmentSource = attachmentSource,
+    bitwardenContext = bitwardenContext,
+    bitwardenPremium = bitwardenPremium,
+    keepassContext = keepassContext,
+    pendingDrafts = pendingDrafts,
+    excludedFileNames = excludedFileNames
+)
+
+@Composable
+fun AttachmentsEditSection(
+    owner: AttachmentOwner?,
+    isPlusActivated: Boolean,
+    modifier: Modifier = Modifier,
+    attachmentSource: AttachmentSource = AttachmentSource.LOCAL,
+    bitwardenContext: AttachmentFacade.BitwardenContext? = null,
+    bitwardenPremium: Boolean = true,
+    keepassContext: AttachmentFacade.KeePassContext? = null,
+    pendingDrafts: SnapshotStateList<AttachmentPendingDraft>? = null,
+    excludedFileNames: Set<String> = emptySet()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val isDraftMode = passwordId <= 0
+    val isDraftMode = owner == null
     if (isDraftMode && pendingDrafts == null) {
         // 未提供草稿容器 → 直接隐藏（向后兼容旧调用点）
         return
@@ -88,7 +115,7 @@ fun AttachmentsEditSection(
         remember { kotlinx.coroutines.flow.MutableStateFlow<List<Attachment>>(emptyList()) }
             .collectAsState()
     } else {
-        facade.observeByPassword(passwordId).collectAsState(initial = emptyList())
+        facade.observe(requireNotNull(owner)).collectAsState(initial = emptyList())
     }
 
     var softLimitPending by remember { mutableStateOf<PendingUpload?>(null) }
@@ -112,10 +139,12 @@ fun AttachmentsEditSection(
             runCatching {
                 facade.addAttachment(
                     AttachmentFacade.UploadRequest(
-                        parentPasswordId = passwordId,
+                        owner = requireNotNull(owner),
                         source = attachmentSource,
                         uri = uri,
                         isPlusActivated = isPlusActivated,
+                        bitwardenPremium = bitwardenPremium,
+                        bitwardenContext = bitwardenContext,
                         keepassContext = keepassContext,
                         kdbxSoftLimitAccepted = acceptSoftLimit
                     )
@@ -181,8 +210,9 @@ fun AttachmentsEditSection(
         )
     }
 
+    val visiblePersistedAttachments = persistedAttachments.filterNot { it.fileName in excludedFileNames }
     val draftItems = pendingDrafts ?: emptyList()
-    val visibleCount = persistedAttachments.size + draftItems.size
+    val visibleCount = visiblePersistedAttachments.size + draftItems.size
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -208,7 +238,7 @@ fun AttachmentsEditSection(
                     Text(stringResource(R.string.attachments_add))
                 }
             }
-            persistedAttachments.forEach { attachment ->
+            visiblePersistedAttachments.forEach { attachment ->
                 EditRow(
                     title = attachment.fileName,
                     secondary = formatSecondaryShort(attachment),
@@ -217,6 +247,7 @@ fun AttachmentsEditSection(
                             runCatching {
                                 facade.deleteAttachment(
                                     attachmentId = attachment.id,
+                                    bitwardenContext = bitwardenContext,
                                     keepassContext = keepassContext
                                 )
                             }
@@ -258,10 +289,34 @@ suspend fun flushPendingDraftsTo(
     pendingDrafts: SnapshotStateList<AttachmentPendingDraft>,
     isPlusActivated: Boolean,
     attachmentSource: AttachmentSource = AttachmentSource.LOCAL,
+    bitwardenContext: AttachmentFacade.BitwardenContext? = null,
+    bitwardenPremium: Boolean = true,
+    keepassContext: AttachmentFacade.KeePassContext? = null,
+    kdbxSoftLimitAccepted: Boolean = true
+): Int = flushPendingDraftsTo(
+    context = context,
+    owner = AttachmentOwner.password(passwordId),
+    pendingDrafts = pendingDrafts,
+    isPlusActivated = isPlusActivated,
+    attachmentSource = attachmentSource,
+    bitwardenContext = bitwardenContext,
+    bitwardenPremium = bitwardenPremium,
+    keepassContext = keepassContext,
+    kdbxSoftLimitAccepted = kdbxSoftLimitAccepted
+)
+
+suspend fun flushPendingDraftsTo(
+    context: android.content.Context,
+    owner: AttachmentOwner,
+    pendingDrafts: SnapshotStateList<AttachmentPendingDraft>,
+    isPlusActivated: Boolean,
+    attachmentSource: AttachmentSource = AttachmentSource.LOCAL,
+    bitwardenContext: AttachmentFacade.BitwardenContext? = null,
+    bitwardenPremium: Boolean = true,
     keepassContext: AttachmentFacade.KeePassContext? = null,
     kdbxSoftLimitAccepted: Boolean = true
 ): Int {
-    if (passwordId <= 0 || pendingDrafts.isEmpty()) return 0
+    if (pendingDrafts.isEmpty()) return 0
     val facade = AttachmentContainer.facade(context)
     var successCount = 0
     val snapshot = pendingDrafts.toList()
@@ -269,10 +324,12 @@ suspend fun flushPendingDraftsTo(
         val result = runCatching {
             facade.addAttachment(
                 AttachmentFacade.UploadRequest(
-                    parentPasswordId = passwordId,
+                    owner = owner,
                     source = attachmentSource,
                     uri = draft.uri,
                     isPlusActivated = isPlusActivated,
+                    bitwardenPremium = bitwardenPremium,
+                    bitwardenContext = bitwardenContext,
                     keepassContext = keepassContext,
                     kdbxSoftLimitAccepted = kdbxSoftLimitAccepted
                 )

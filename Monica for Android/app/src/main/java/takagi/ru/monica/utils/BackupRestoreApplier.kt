@@ -200,7 +200,8 @@ object BackupRestoreApplier {
             var attachmentUnmappedParent = 0
             val now = System.currentTimeMillis()
             content.portableAttachments.entries.forEach { entry ->
-                val mappedParentId = passwordIdMap[entry.parentPasswordId]
+                val originalPasswordId = entry.parentPasswordId ?: return@forEach
+                val mappedParentId = passwordIdMap[originalPasswordId]
                 if (mappedParentId == null) {
                     attachmentUnmappedParent++
                     return@forEach
@@ -235,11 +236,8 @@ object BackupRestoreApplier {
             }
             android.util.Log.d(
                 logTag,
-                "Restored portable attachments: total=${content.portableAttachments.entries.size} restored=$attachmentRestored skipped=$attachmentSkipped missingPayload=$attachmentMissingPayload unmappedParent=$attachmentUnmappedParent"
+                "Restored password portable attachments: restored=$attachmentRestored skipped=$attachmentSkipped missingPayload=$attachmentMissingPayload unmappedParent=$attachmentUnmappedParent"
             )
-            content.portableAttachments.payloads.values.distinct().forEach { payload ->
-                runCatching { payload.delete() }
-            }
         } else if (content.attachments.isNotEmpty()) {
             val attachmentDao = PasswordDatabase.getDatabase(context).attachmentDao()
             val storageDir = java.io.File(context.filesDir, "secure_attachments")
@@ -249,7 +247,8 @@ object BackupRestoreApplier {
             var attachmentUnmappedParent = 0
             val now = System.currentTimeMillis()
             content.attachments.forEach { entry ->
-                val mappedParentId = passwordIdMap[entry.parentPasswordId]
+                val originalPasswordId = entry.parentPasswordId ?: return@forEach
+                val mappedParentId = passwordIdMap[originalPasswordId]
                 if (mappedParentId == null) {
                     attachmentUnmappedParent++
                     return@forEach
@@ -286,7 +285,7 @@ object BackupRestoreApplier {
             }
             android.util.Log.d(
                 logTag,
-                "Restored legacy attachments: total=${content.attachments.size} restored=$attachmentRestored skipped=$attachmentSkipped missingBlob=$attachmentMissingBlob unmappedParent=$attachmentUnmappedParent"
+                "Restored password legacy attachments: restored=$attachmentRestored skipped=$attachmentSkipped missingBlob=$attachmentMissingBlob unmappedParent=$attachmentUnmappedParent"
             )
         }
 
@@ -323,6 +322,7 @@ object BackupRestoreApplier {
         var secureItemCount = 0
         var secureItemSkipped = 0
         var secureItemFailed = 0
+        val secureItemIdMap = mutableMapOf<Long, Long>()
         val failedSecureItemDetails = mutableListOf<String>()
         var passkeyCountImported = 0
         var passkeySkipped = 0
@@ -384,9 +384,13 @@ object BackupRestoreApplier {
                         updatedAt = java.util.Date(exportItem.updatedAt),
                         categoryId = exportItem.categoryId
                     )
-                    secureItemRepository.insertItem(secureItem)
+                    val newId = secureItemRepository.insertItem(secureItem)
+                    if (newId > 0L) {
+                        secureItemIdMap[exportItem.id] = newId
+                    }
                     secureItemCount++
                 } else {
+                    secureItemIdMap[exportItem.id] = existingItem.id
                     secureItemSkipped++
                 }
             } catch (e: Exception) {
@@ -430,6 +434,13 @@ object BackupRestoreApplier {
                 }
             }
         }
+
+        restoreSecureItemAttachments(
+            context = context,
+            content = content,
+            secureItemIdMap = secureItemIdMap,
+            logTag = logTag
+        )
 
         var steamAccountImported = 0
         var steamAccountFailed = 0
@@ -480,6 +491,117 @@ object BackupRestoreApplier {
             steamAccountFailed = steamAccountFailed,
             failedPasswordDetails = failedPasswordDetails,
             failedSecureItemDetails = failedSecureItemDetails
+        )
+    }
+}
+
+private suspend fun restoreSecureItemAttachments(
+    context: Context,
+    content: BackupContent,
+    secureItemIdMap: Map<Long, Long>,
+    logTag: String
+) {
+    val attachmentDao = PasswordDatabase.getDatabase(context).attachmentDao()
+    var restored = 0
+    var skipped = 0
+    var missingPayload = 0
+    var unmappedParent = 0
+    val now = System.currentTimeMillis()
+
+    if (content.portableAttachments.isNotEmpty) {
+        content.portableAttachments.entries.forEach { entry ->
+            val originalSecureItemId = entry.parentSecureItemId ?: return@forEach
+            val mappedSecureItemId = secureItemIdMap[originalSecureItemId]
+            if (mappedSecureItemId == null) {
+                unmappedParent++
+                return@forEach
+            }
+            val payload = content.portableAttachments.payloads[entry.payloadPath]
+            if (payload == null || !payload.isFile) {
+                missingPayload++
+                return@forEach
+            }
+            val existing = attachmentDao.getAllBySecureItem(mappedSecureItemId)
+            val duplicate = existing.any { attachment ->
+                attachment.fileName == entry.fileName &&
+                    attachment.sizeBytes == entry.sizeBytes &&
+                    attachment.sha256Hex != null &&
+                    attachment.sha256Hex == entry.sha256Hex
+            }
+            if (duplicate) {
+                skipped++
+                return@forEach
+            }
+            runCatching {
+                takagi.ru.monica.attachments.backup.PortableAttachmentBackup.materialize(
+                    context = context,
+                    entry = entry,
+                    payloadFile = payload,
+                    mappedOwner = takagi.ru.monica.attachments.model.AttachmentOwner.secureItem(
+                        mappedSecureItemId
+                    ),
+                    now = now
+                )
+            }.onSuccess { attachment ->
+                attachmentDao.insert(attachment)
+                restored++
+            }.onFailure { error ->
+                android.util.Log.w(
+                    logTag,
+                    "Portable secure-item attachment restore failed for ${entry.payloadPath}: ${error.message}"
+                )
+            }
+        }
+        content.portableAttachments.payloads.values.distinct().forEach { payload ->
+            runCatching { payload.delete() }
+        }
+    } else if (content.attachments.isNotEmpty()) {
+        val storageDir = java.io.File(context.filesDir, "secure_attachments")
+        content.attachments.forEach { entry ->
+            val originalSecureItemId = entry.parentSecureItemId ?: return@forEach
+            val mappedSecureItemId = secureItemIdMap[originalSecureItemId]
+            if (mappedSecureItemId == null) {
+                unmappedParent++
+                return@forEach
+            }
+            val blob = java.io.File(storageDir, entry.localPath)
+            if (!blob.isFile) {
+                missingPayload++
+                return@forEach
+            }
+            val existing = attachmentDao.getAllBySecureItem(mappedSecureItemId)
+            val duplicate = existing.any { attachment ->
+                attachment.localPath == entry.localPath ||
+                    (attachment.fileName == entry.fileName &&
+                        attachment.sizeBytes == entry.sizeBytes &&
+                        attachment.sha256Hex != null &&
+                        attachment.sha256Hex == entry.sha256Hex)
+            }
+            if (duplicate) {
+                skipped++
+                return@forEach
+            }
+            val attachment = with(takagi.ru.monica.attachments.backup.AttachmentBackupCodec) {
+                entry.toAttachment(now)
+            }.copy(
+                parentPasswordId = null,
+                parentSecureItemId = mappedSecureItemId
+            )
+            runCatching { attachmentDao.insert(attachment) }
+                .onSuccess { restored++ }
+                .onFailure { error ->
+                    android.util.Log.w(
+                        logTag,
+                        "Legacy secure-item attachment restore failed for ${entry.localPath}: ${error.message}"
+                    )
+                }
+        }
+    }
+
+    if (restored + skipped + missingPayload + unmappedParent > 0) {
+        android.util.Log.d(
+            logTag,
+            "Restored secure-item attachments: restored=$restored skipped=$skipped missingPayload=$missingPayload unmappedParent=$unmappedParent"
         )
     }
 }

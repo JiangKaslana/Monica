@@ -32,12 +32,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import takagi.ru.monica.R
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.facade.AttachmentFacade
+import takagi.ru.monica.attachments.model.AttachmentOwner
+import takagi.ru.monica.attachments.ui.AttachmentsDetailSection
+import takagi.ru.monica.data.ItemType
+import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.data.model.BankCardData
 import takagi.ru.monica.data.model.CardWalletDataCodec
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.formatForDisplay
 import takagi.ru.monica.data.model.toStorageTarget
+import takagi.ru.monica.keepass.KeePassSecureItemPhotoAttachments
 import takagi.ru.monica.ui.components.ActionStrip
 import takagi.ru.monica.ui.components.ActionStripItem
 import takagi.ru.monica.ui.components.BankCardCard
@@ -57,8 +64,10 @@ fun BankCardDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val database = remember { PasswordDatabase.getDatabase(context) }
     val scrollState = rememberScrollState()
     val allCards by viewModel.allCards.collectAsState(initial = emptyList())
+    val bitwardenVaults by database.bitwardenVaultDao().getAllVaultsFlow().collectAsState(initial = emptyList())
     
     var cardItem by remember { mutableStateOf<SecureItem?>(null) }
     var cardData by remember { mutableStateOf<BankCardData?>(null) }
@@ -77,6 +86,24 @@ fun BankCardDetailScreen(
         viewModel.getCardById(cardId)?.let { item ->
             cardItem = item
             cardData = viewModel.parseCardData(item.itemData)
+
+            if (item.keepassDatabaseId != null && !item.keepassEntryUuid.isNullOrBlank()) {
+                launch(Dispatchers.IO) {
+                    runCatching {
+                        AttachmentContainer.keepassReconciler(context).reconcile(
+                            owner = AttachmentOwner.secureItem(item.id),
+                            databaseId = item.keepassDatabaseId,
+                            entryUuid = item.keepassEntryUuid,
+                            excludedFileNames = KeePassSecureItemPhotoAttachments.managedFileNames(ItemType.BANK_CARD)
+                        )
+                    }.onFailure { error ->
+                        android.util.Log.w(
+                            "BankCardDetailScreen",
+                            "KeePass attachment metadata reconcile failed: ${error::class.simpleName}"
+                        )
+                    }
+                }
+            }
             
             // 加载图片
             if (item.imagePaths.isNotBlank()) {
@@ -108,6 +135,28 @@ fun BankCardDetailScreen(
                 .ifEmpty { listOf(currentItem.toStorageTarget()) }
         } else {
             listOf(currentItem.toStorageTarget())
+        }
+    }
+    val attachmentBitwardenVault = remember(cardItem?.bitwardenVaultId, bitwardenVaults) {
+        cardItem?.bitwardenVaultId?.let { vaultId ->
+            bitwardenVaults.firstOrNull { it.id == vaultId }
+        }
+    }
+    val attachmentBitwardenContext = remember(
+        attachmentBitwardenVault,
+        cardItem?.bitwardenCipherId
+    ) {
+        attachmentBitwardenVault?.let { vault ->
+            viewModel.getAttachmentBitwardenContext(vault, cardItem?.bitwardenCipherId)
+        }
+    }
+    val attachmentKeePassContext = remember(cardItem?.keepassDatabaseId, cardItem?.keepassEntryUuid) {
+        val databaseId = cardItem?.keepassDatabaseId
+        val entryUuid = cardItem?.keepassEntryUuid?.takeIf { it.isNotBlank() }
+        if (databaseId != null && entryUuid != null) {
+            AttachmentFacade.KeePassContext(databaseId = databaseId, entryUuid = entryUuid)
+        } else {
+            null
         }
     }
     Scaffold(
@@ -454,8 +503,15 @@ fun BankCardDetailScreen(
                         }
                     }
                 }
-                
-                 Spacer(modifier = Modifier.height(80.dp))
+
+                AttachmentsDetailSection(
+                    owner = AttachmentOwner.secureItem(item.id),
+                    bitwardenContext = attachmentBitwardenContext,
+                    keepassContext = attachmentKeePassContext,
+                    excludedFileNames = KeePassSecureItemPhotoAttachments.managedFileNames(ItemType.BANK_CARD)
+                )
+
+                Spacer(modifier = Modifier.height(80.dp))
             }
         }
     }

@@ -16,8 +16,9 @@ class VaultV2ArchiveRoutingGuardTest {
                 "onOpenArchivePage\\s*=\\s*\\{([\\s\\S]*?)\\n\\s*},"
         ).findAll(screen).map { it.value }.toList()
 
-        assertTrue(archiveCallbacks.size >= 3)
+        assertTrue(archiveCallbacks.isNotEmpty())
         assertTrue(archiveCallbacks.all { it.contains("vaultV2PaneState.openArchiveView()") })
+        assertTrue(screen.contains("onOpenArchivePage = vaultV2PaneState::openArchiveView"))
         assertFalse(archiveCallbacks.any { it.contains("CategoryFilter.Archived") })
         assertFalse(archiveCallbacks.any { it.contains("BottomNavItem.Passwords.key") })
     }

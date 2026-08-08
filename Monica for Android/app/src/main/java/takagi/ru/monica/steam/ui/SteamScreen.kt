@@ -35,12 +35,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -128,6 +130,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import takagi.ru.monica.ui.common.layout.DetailPane
+import takagi.ru.monica.ui.common.layout.ListPane
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.fragment.app.FragmentActivity
 import com.google.zxing.BarcodeFormat
@@ -283,6 +287,8 @@ fun SteamScreen(
     showStandaloneSettingsEntry: Boolean,
     onOpenStandaloneSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    isCompactWidth: Boolean = true,
+    wideListPaneWidth: Dp = 0.dp,
     pendingSteamQrResult: String? = null,
     pendingSteamQrAccountId: Long? = null,
     onConsumePendingSteamQrResult: () -> Unit = {},
@@ -428,6 +434,11 @@ fun SteamScreen(
         protectedMarketPasswordError = false
         viewModel.clearBatchMarketQuotes()
         viewModel.clearSelectedConfirmations()
+    }
+
+    LaunchedEffect(selectedSection) {
+        detailAccountId = null
+        scannedQrPayload = null
     }
 
     LaunchedEffect(selectedAccount?.id) {
@@ -1217,105 +1228,208 @@ fun SteamScreen(
         )
     }
 
+    @Composable
+    fun RenderSteamRootTopBar() {
+        SteamRootTopBar(
+            title = stringResource(R.string.nav_steam),
+            searchQuery = steamSearchQuery,
+            onSearchQueryChange = { query ->
+                steamSearchQuery = query
+                selectedTokenAccountIds = emptyList()
+                viewModel.clearSelectedConfirmations()
+            },
+            isSearchExpanded = isSteamSearchExpanded,
+            onSearchExpandedChange = { expanded ->
+                isSteamSearchExpanded = expanded
+                if (!expanded) steamSearchQuery = ""
+            },
+            searchHint = stringResource(selectedSection.searchHintRes),
+            pendingConfirmationCount = pendingConfirmationCount,
+            onOpenSearch = { isSteamSearchExpanded = true },
+            storageSourceMenu = {
+                SteamStorageSourceMenu(
+                    expanded = showStorageSourceMenu,
+                    onDismissRequest = { showStorageSourceMenu = false },
+                    selectedSource = uiState.storageSource,
+                    mdbxDatabases = mdbxDatabases,
+                    onSelectSource = { source ->
+                        showStorageSourceMenu = false
+                        clearSteamSearch()
+                        selectedTokenAccountIds = emptyList()
+                        detailAccountId = null
+                        scannedQrPayload = null
+                        viewModel.clearSelectedConfirmations()
+                        viewModel.selectStorageSource(source)
+                    }
+                )
+            },
+            onOpenStorageSourceMenu = { showStorageSourceMenu = true },
+            topActionsMenu = {
+                SteamTopActionsMenu(
+                    expanded = showTopActionsMenu,
+                    onDismissRequest = { showTopActionsMenu = false },
+                    selectedSection = selectedSection,
+                    pendingConfirmationCount = pendingConfirmationCount,
+                    showStandaloneSettingsEntry = showStandaloneSettingsEntry,
+                    onSelectSection = { section ->
+                        showTopActionsMenu = false
+                        clearSteamSearch()
+                        selectedTokenAccountIds = emptyList()
+                        viewModel.clearSelectedConfirmations()
+                        detailAccountId = null
+                        scannedQrPayload = null
+                        if (selectedSection != section) selectedSection = section
+                    },
+                    onRefreshCurrent = {
+                        showTopActionsMenu = false
+                        when (selectedSection) {
+                            SteamSection.CODE -> Unit
+                            SteamSection.CONFIRMATIONS -> viewModel.refreshConfirmations()
+                            SteamSection.INVENTORY -> viewModel.refreshInventory(steamLanguage)
+                            SteamSection.MARKET -> viewModel.refreshMarketListings(steamLanguage)
+                        }
+                    },
+                    onAddAccount = {
+                        showTopActionsMenu = false
+                        clearSteamSearch()
+                        showAddAccountDialog = true
+                    },
+                    onOpenStandaloneSettings = {
+                        showTopActionsMenu = false
+                        clearSteamSearch()
+                        onOpenStandaloneSettings()
+                    }
+                )
+            },
+            onOpenTopActionsMenu = { showTopActionsMenu = true }
+        )
+    }
+
+    @Composable
+    fun RenderSteamDetailTopBar(account: SteamAccount) {
+        SteamDetailTopBar(
+            title = stringResource(R.string.nav_steam),
+            onNavigateBack = {
+                detailAccountId = null
+                scannedQrPayload = null
+            },
+            onRemoveAuthenticator = { removeAuthenticatorRequest = account },
+            onRebindAccount = { steamAccountRebindAccountId = account.id }
+        )
+    }
+
+    @Composable
+    fun RenderSteamAccountDetail(account: SteamAccount) {
+        SteamAccountDetailContent(
+            account = account,
+            appSettings = appSettings,
+            pendingLogins = uiState.pendingLogins,
+            authorizedDevices = uiState.authorizedDevices,
+            pendingScannedQr = scannedQrPayload,
+            onScannedQrHandled = { scannedQrPayload = null },
+            onEditRemark = { editRemarkAccount = account },
+            onCompleteSteamIdLogin = { steamIdCompletionAccountId = account.id },
+            onRefreshLogins = { viewModel.refreshPendingLogins() },
+            onRefreshAuthorizedDevices = { viewModel.refreshAuthorizedDevices(account.id) },
+            onRevokeAuthorizedDevice = { device, userName, password ->
+                viewModel.revokeAuthorizedDevice(account.id, device, userName, password)
+            },
+            onRespondPending = viewModel::respondPendingLogin,
+            onRespondQr = viewModel::respondQr
+        )
+    }
+
+    @Composable
+    fun RenderSteamCodeList() {
+        SteamCodeContent(
+            accounts = filteredSteamAccounts,
+            selectedAccountIds = selectedTokenAccountIds,
+            appSettings = appSettings,
+            isSearchActive = isSteamSearchExpanded || steamSearchQuery.isNotBlank(),
+            pullToSearch = pullToSearch,
+            onToggleSelection = { account ->
+                selectedTokenAccountIds = if (account.id in selectedTokenAccountIds) {
+                    selectedTokenAccountIds - account.id
+                } else {
+                    selectedTokenAccountIds + account.id
+                }
+            },
+            onClearSelection = { selectedTokenAccountIds = emptyList() },
+            onSelectAll = {
+                val visibleIds = filteredSteamAccounts.map { it.id }
+                selectedTokenAccountIds = if (
+                    visibleIds.isNotEmpty() && visibleIds.all { it in selectedTokenAccountIds }
+                ) {
+                    selectedTokenAccountIds - visibleIds.toSet()
+                } else {
+                    (selectedTokenAccountIds + visibleIds).distinct()
+                }
+            },
+            onDeleteSelected = {
+                val targets = uiState.accounts.filter { it.id in selectedTokenAccountIds }
+                if (targets.isNotEmpty()) deleteRequest = SteamDeleteAccountsRequest(targets)
+            },
+            onTransferSelected = {
+                val targets = uiState.accounts.filter { it.id in selectedTokenAccountIds }
+                if (targets.isNotEmpty()) transferRequest = SteamTransferAccountsRequest(targets)
+            },
+            onUpdateSortOrders = viewModel::updateSortOrders,
+            onOpenDetail = { account ->
+                clearSteamSearch()
+                selectedTokenAccountIds = emptyList()
+                detailAccountId = account.id
+            }
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
-            AnimatedContent(
-                targetState = detailAccount?.id,
-                transitionSpec = {
-                    easyNotesScreenEnter().togetherWith(easyNotesScreenExit())
-                },
-                label = "SteamTopBarNavigation"
-            ) { animatedDetailAccountId ->
-                if (animatedDetailAccountId != null) {
-                    val animatedDetailAccount = uiState.accounts.firstOrNull { it.id == animatedDetailAccountId }
-                    SteamDetailTopBar(
-                        title = stringResource(R.string.nav_steam),
-                        onNavigateBack = {
-                            detailAccountId = null
-                            scannedQrPayload = null
-                        },
-                        onRemoveAuthenticator = animatedDetailAccount?.let { account ->
-                            { removeAuthenticatorRequest = account }
-                        },
-                        onRebindAccount = animatedDetailAccount?.let { account ->
-                            { steamAccountRebindAccountId = account.id }
-                        }
-                    )
-                } else {
-                    SteamRootTopBar(
-                        title = stringResource(R.string.nav_steam),
-                        searchQuery = steamSearchQuery,
-                        onSearchQueryChange = { query ->
-                            steamSearchQuery = query
-                            selectedTokenAccountIds = emptyList()
-                            viewModel.clearSelectedConfirmations()
-                        },
-                        isSearchExpanded = isSteamSearchExpanded,
-                        onSearchExpandedChange = { expanded ->
-                            isSteamSearchExpanded = expanded
-                            if (!expanded) steamSearchQuery = ""
-                        },
-                        searchHint = stringResource(selectedSection.searchHintRes),
-                        pendingConfirmationCount = pendingConfirmationCount,
-                        onOpenSearch = { isSteamSearchExpanded = true },
-                        storageSourceMenu = {
-                            SteamStorageSourceMenu(
-                                expanded = showStorageSourceMenu,
-                                onDismissRequest = { showStorageSourceMenu = false },
-                                selectedSource = uiState.storageSource,
-                                mdbxDatabases = mdbxDatabases,
-                                onSelectSource = { source ->
-                                    showStorageSourceMenu = false
-                                    clearSteamSearch()
-                                    selectedTokenAccountIds = emptyList()
-                                    detailAccountId = null
-                                    scannedQrPayload = null
-                                    viewModel.clearSelectedConfirmations()
-                                    viewModel.selectStorageSource(source)
-                                }
-                            )
-                        },
-                        onOpenStorageSourceMenu = { showStorageSourceMenu = true },
-                        topActionsMenu = {
-                            SteamTopActionsMenu(
-                                expanded = showTopActionsMenu,
-                                onDismissRequest = { showTopActionsMenu = false },
-                                selectedSection = selectedSection,
-                                pendingConfirmationCount = pendingConfirmationCount,
-                                showStandaloneSettingsEntry = showStandaloneSettingsEntry,
-                                onSelectSection = { section ->
-                                    showTopActionsMenu = false
-                                    clearSteamSearch()
-                                    selectedTokenAccountIds = emptyList()
-                                    viewModel.clearSelectedConfirmations()
-                                    if (selectedSection != section) {
-                                        selectedSection = section
-                                    }
-                                },
-                                onRefreshCurrent = {
-                                    showTopActionsMenu = false
-                                    when (selectedSection) {
-                                        SteamSection.CODE -> Unit
-                                        SteamSection.CONFIRMATIONS -> viewModel.refreshConfirmations()
-                                        SteamSection.INVENTORY -> viewModel.refreshInventory(steamLanguage)
-                                        SteamSection.MARKET -> viewModel.refreshMarketListings(steamLanguage)
-                                    }
-                                },
-                                onAddAccount = {
-                                    showTopActionsMenu = false
-                                    clearSteamSearch()
-                                    showAddAccountDialog = true
-                                },
-                                onOpenStandaloneSettings = {
-                                    showTopActionsMenu = false
-                                    clearSteamSearch()
-                                    onOpenStandaloneSettings()
-                                }
-                            )
-                        },
-                        onOpenTopActionsMenu = { showTopActionsMenu = true }
-                    )
+            if (!isCompactWidth && selectedSection == SteamSection.CODE) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .width(wideListPaneWidth)
+                            .fillMaxHeight()
+                    ) {
+                        RenderSteamRootTopBar()
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        detailAccount?.let { account -> RenderSteamDetailTopBar(account) }
+                    }
+                }
+            } else {
+                AnimatedContent(
+                    targetState = detailAccount?.id,
+                    transitionSpec = {
+                        easyNotesScreenEnter().togetherWith(easyNotesScreenExit())
+                    },
+                    label = "SteamTopBarNavigation"
+                ) { animatedDetailAccountId ->
+                    val animatedDetailAccount = uiState.accounts.firstOrNull {
+                        it.id == animatedDetailAccountId
+                    }
+                    if (animatedDetailAccount != null) {
+                        SteamDetailTopBar(
+                            title = stringResource(R.string.nav_steam),
+                            onNavigateBack = {
+                                detailAccountId = null
+                                scannedQrPayload = null
+                            },
+                            onRemoveAuthenticator = animatedDetailAccount?.let { account ->
+                                { removeAuthenticatorRequest = account }
+                            },
+                            onRebindAccount = animatedDetailAccount?.let { account ->
+                                { steamAccountRebindAccountId = account.id }
+                            }
+                        )
+                    } else {
+                        RenderSteamRootTopBar()
+                    }
                 }
             }
         },
@@ -1352,6 +1466,13 @@ fun SteamScreen(
         }
     ) { contentPadding ->
         Box(modifier = Modifier.fillMaxSize()) {
+            SteamAdaptiveContent(
+                isCompactWidth = isCompactWidth,
+                selectedSection = selectedSection,
+                wideListPaneWidth = wideListPaneWidth,
+                detailAccount = detailAccount,
+                contentPadding = contentPadding,
+                compactContent = {
             AnimatedContent(
                 targetState = detailAccount?.id,
                 modifier = Modifier
@@ -1367,28 +1488,7 @@ fun SteamScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     if (animatedDetailAccount != null) {
-                        SteamAccountDetailContent(
-                            account = animatedDetailAccount,
-                            appSettings = appSettings,
-                            pendingLogins = uiState.pendingLogins,
-                            authorizedDevices = uiState.authorizedDevices,
-                            pendingScannedQr = scannedQrPayload,
-                            onScannedQrHandled = { scannedQrPayload = null },
-                            onEditRemark = { editRemarkAccount = animatedDetailAccount },
-                            onCompleteSteamIdLogin = { steamIdCompletionAccountId = animatedDetailAccount.id },
-                            onRefreshLogins = { viewModel.refreshPendingLogins() },
-                            onRefreshAuthorizedDevices = { viewModel.refreshAuthorizedDevices(animatedDetailAccount.id) },
-                            onRevokeAuthorizedDevice = { device, userName, password ->
-                                viewModel.revokeAuthorizedDevice(
-                                    animatedDetailAccount.id,
-                                    device,
-                                    userName,
-                                    password
-                                )
-                            },
-                            onRespondPending = viewModel::respondPendingLogin,
-                            onRespondQr = viewModel::respondQr
-                        )
+                        RenderSteamAccountDetail(animatedDetailAccount)
                     } else if (selectedAccount == null) {
                         Box(
                             modifier = Modifier
@@ -1410,53 +1510,9 @@ fun SteamScreen(
                         }
                     } else {
                         when (selectedSection) {
-                            SteamSection.CODE -> SteamCodeContent(
-                                accounts = filteredSteamAccounts,
-                                selectedAccountIds = selectedTokenAccountIds,
-                                appSettings = appSettings,
-                                isSearchActive = isSteamSearchExpanded || steamSearchQuery.isNotBlank(),
-                                pullToSearch = pullToSearch,
-                                onToggleSelection = { account ->
-                                    selectedTokenAccountIds = if (account.id in selectedTokenAccountIds) {
-                                        selectedTokenAccountIds - account.id
-                                    } else {
-                                        selectedTokenAccountIds + account.id
-                                    }
-                                },
-                                onClearSelection = {
-                                    selectedTokenAccountIds = emptyList()
-                                },
-                                onSelectAll = {
-                                    val visibleIds = filteredSteamAccounts.map { it.id }
-                                    selectedTokenAccountIds = if (
-                                        visibleIds.isNotEmpty() &&
-                                        visibleIds.all { it in selectedTokenAccountIds }
-                                    ) {
-                                        selectedTokenAccountIds - visibleIds.toSet()
-                                    } else {
-                                        (selectedTokenAccountIds + visibleIds).distinct()
-                                    }
-                                },
-                                onDeleteSelected = {
-                                    val targets = uiState.accounts.filter { it.id in selectedTokenAccountIds }
-                                    if (targets.isNotEmpty()) {
-                                        deleteRequest = SteamDeleteAccountsRequest(targets)
-                                    }
-                                },
-                                onTransferSelected = {
-                                    val targets = uiState.accounts.filter { it.id in selectedTokenAccountIds }
-                                    if (targets.isNotEmpty()) {
-                                        transferRequest = SteamTransferAccountsRequest(targets)
-                                    }
-                                },
-                                onUpdateSortOrders = viewModel::updateSortOrders,
-                                onOpenDetail = { account ->
-                                    clearSteamSearch()
-                                    selectedTokenAccountIds = emptyList()
-                                    detailAccountId = account.id
-                                }
-                            )
-                            SteamSection.CONFIRMATIONS -> SteamConfirmationsContent(
+                            SteamSection.CODE -> RenderSteamCodeList()
+                            SteamSection.CONFIRMATIONS -> SteamReadableSectionFrame(isCompactWidth) {
+                                SteamConfirmationsContent(
                                 account = selectedAccount,
                                 accounts = uiState.accounts,
                                 confirmations = filteredSteamConfirmations,
@@ -1472,8 +1528,9 @@ fun SteamScreen(
                                 },
                                 onClearSelection = viewModel::clearSelectedConfirmations,
                                 onRespond = viewModel::respondConfirmation,
-                                onRespondSelected = viewModel::respondSelectedConfirmations
-                            )
+                                    onRespondSelected = viewModel::respondSelectedConfirmations
+                                )
+                            }
                             SteamSection.INVENTORY -> SteamInventoryContent(
                                 account = selectedAccount,
                                 accounts = uiState.accounts,
@@ -1513,7 +1570,8 @@ fun SteamScreen(
                                     sellItemStack = stack
                                 }
                             )
-                            SteamSection.MARKET -> SteamMarketListingsContent(
+                            SteamSection.MARKET -> SteamReadableSectionFrame(isCompactWidth) {
+                                SteamMarketListingsContent(
                                 account = selectedAccount,
                                 accounts = uiState.accounts,
                                 state = uiState.inventoryMarket,
@@ -1555,25 +1613,154 @@ fun SteamScreen(
                                             )
                                         )
                                     }
-                                }
-                            )
+                                    }
+                                )
+                            }
                         }
                     }
                 }
             }
+            },
+                wideListContent = {
+                    if (selectedAccount == null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .offset { IntOffset(0, pullToSearch.currentOffset.toInt()) }
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures(
+                                        onVerticalDrag = { _, dragAmount ->
+                                            pullToSearch.onVerticalDrag(dragAmount)
+                                        },
+                                        onDragEnd = pullToSearch.onDragEnd,
+                                        onDragCancel = pullToSearch.onDragCancel
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SteamEmptyAccountContent(
+                                onAddAccount = { showAddAccountDialog = true }
+                            )
+                        }
+                    } else {
+                        RenderSteamCodeList()
+                    }
+                },
+                wideDetailContent = { account ->
+                    RenderSteamAccountDetail(account)
+                }
+            )
 
             if (uiState.loading) {
                 LinearProgressIndicator(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = if (!isCompactWidth && selectedSection == SteamSection.CODE) {
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .width(wideListPaneWidth)
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    } else {
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    }
                 )
             }
 
         }
     }
 
+}
+
+@Composable
+private fun SteamAdaptiveContent(
+    isCompactWidth: Boolean,
+    selectedSection: SteamSection,
+    wideListPaneWidth: Dp,
+    detailAccount: SteamAccount?,
+    contentPadding: PaddingValues,
+    compactContent: @Composable () -> Unit,
+    wideListContent: @Composable () -> Unit,
+    wideDetailContent: @Composable (SteamAccount) -> Unit
+) {
+    if (!isCompactWidth && selectedSection == SteamSection.CODE) {
+        SteamWideCodeContent(
+            wideListPaneWidth = wideListPaneWidth,
+            detailAccount = detailAccount,
+            contentPadding = contentPadding,
+            listContent = wideListContent,
+            detailContent = wideDetailContent
+        )
+    } else {
+        compactContent()
+    }
+}
+
+@Composable
+private fun SteamWideCodeContent(
+    wideListPaneWidth: Dp,
+    detailAccount: SteamAccount?,
+    contentPadding: PaddingValues,
+    listContent: @Composable () -> Unit,
+    detailContent: @Composable (SteamAccount) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+    ) {
+        ListPane(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(wideListPaneWidth)
+        ) {
+            listContent()
+        }
+        DetailPane(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+        ) {
+            if (detailAccount == null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.select_steam_account_hint),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                detailContent(detailAccount)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SteamReadableSectionFrame(
+    isCompactWidth: Boolean,
+    content: @Composable () -> Unit
+) {
+    if (isCompactWidth) {
+        content()
+    } else {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .widthIn(max = 840.dp)
+                    .fillMaxWidth()
+            ) {
+                content()
+            }
+        }
+    }
 }
 
 @Composable

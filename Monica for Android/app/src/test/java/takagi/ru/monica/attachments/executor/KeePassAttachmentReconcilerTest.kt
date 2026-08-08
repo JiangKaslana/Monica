@@ -10,6 +10,7 @@ import org.junit.Test
 import takagi.ru.monica.attachments.data.AttachmentDao
 import takagi.ru.monica.attachments.model.Attachment
 import takagi.ru.monica.attachments.model.AttachmentDownloadState
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.repository.AttachmentRepository
 import takagi.ru.monica.utils.KeePassKdbxService
@@ -28,7 +29,7 @@ class KeePassAttachmentReconcilerTest {
 
         assertEquals(1, report.inserted)
         val inserted = dao.items.single()
-        assertEquals(42, inserted.parentPasswordId)
+        assertEquals(42L, inserted.parentPasswordId)
         assertEquals(AttachmentSource.KEEPASS.name, inserted.source)
         assertEquals("invoice.pdf", inserted.fileName)
         assertEquals(AttachmentDownloadState.PENDING.name, inserted.downloadState)
@@ -87,6 +88,33 @@ class KeePassAttachmentReconcilerTest {
         assertEquals(setOf("first.txt", "second.txt"), names)
         assertEquals(2, refs.size)
         assertTrue(refs.all { KeePassAttachmentRef.decode(it!!).hashHex == "samehash" })
+    }
+
+    @Test
+    fun reconcileSnapshot_keepsSecureItemOwnerSeparateFromSameNumericPasswordId() = runBlocking {
+        val dao = FakeAttachmentDao(
+            attachment(
+                id = 1,
+                keepassBinaryRef = KeePassAttachmentRef.from("password-hash", "password.txt").encode(),
+                fileName = "password.txt"
+            )
+        )
+        val reconciler = reconcilerFor(dao)
+
+        val report = reconciler.reconcileSnapshot(
+            owner = AttachmentOwner.secureItem(42),
+            remoteAttachments = listOf(
+                kpInfo(hashHex = "secure-hash", fileName = "secure.txt", sizeBytes = 8)
+            )
+        )
+
+        assertEquals(1, report.inserted)
+        assertEquals(2, dao.items.size)
+        assertEquals(42L, dao.items.first().parentPasswordId)
+        val secureAttachment = dao.items.single { it.parentSecureItemId != null }
+        assertEquals(42L, secureAttachment.parentSecureItemId)
+        assertNull(secureAttachment.parentPasswordId)
+        assertEquals("secure.txt", secureAttachment.fileName)
     }
 
     private fun reconcilerFor(
@@ -150,11 +178,20 @@ class KeePassAttachmentReconcilerTest {
         override fun observeActiveByParent(passwordId: Long): Flow<List<Attachment>> =
             flowOf(items.filter { it.parentPasswordId == passwordId && !it.isDeleted })
 
+        override fun observeActiveBySecureItem(secureItemId: Long): Flow<List<Attachment>> =
+            flowOf(items.filter { it.parentSecureItemId == secureItemId && !it.isDeleted })
+
         override suspend fun getAllByParent(passwordId: Long): List<Attachment> =
             items.filter { it.parentPasswordId == passwordId }
 
+        override suspend fun getAllBySecureItem(secureItemId: Long): List<Attachment> =
+            items.filter { it.parentSecureItemId == secureItemId }
+
         override suspend fun getActiveByParent(passwordId: Long): List<Attachment> =
             items.filter { it.parentPasswordId == passwordId && !it.isDeleted }
+
+        override suspend fun getActiveBySecureItem(secureItemId: Long): List<Attachment> =
+            items.filter { it.parentSecureItemId == secureItemId && !it.isDeleted }
 
         override suspend fun getById(id: Long): Attachment? =
             items.firstOrNull { it.id == id }
@@ -162,28 +199,52 @@ class KeePassAttachmentReconcilerTest {
         override suspend fun getByParentAndSource(passwordId: Long, source: String): List<Attachment> =
             items.filter { it.parentPasswordId == passwordId && it.source == source }
 
+        override suspend fun getBySecureItemAndSource(
+            secureItemId: Long,
+            source: String
+        ): List<Attachment> = items.filter {
+            it.parentSecureItemId == secureItemId && it.source == source
+        }
+
         override suspend fun findByBitwardenAttachmentId(attachmentId: String): Attachment? =
             items.firstOrNull { it.bitwardenAttachmentId == attachmentId }
 
         override suspend fun countActiveByParent(passwordId: Long): Int =
             getActiveByParent(passwordId).size
 
+        override suspend fun countActiveBySecureItem(secureItemId: Long): Int =
+            getActiveBySecureItem(secureItemId).size
+
         override suspend fun countActiveByParents(passwordIds: List<Long>): Int =
             items.count { it.parentPasswordId in passwordIds && !it.isDeleted }
 
         override suspend fun parentsWithActiveAttachments(passwordIds: List<Long>): List<Long> =
             items.filter { it.parentPasswordId in passwordIds && !it.isDeleted }
-                .map { it.parentPasswordId }
+                .mapNotNull { it.parentPasswordId }
                 .distinct()
 
         override fun observeParentsWithActiveAttachments(): Flow<List<Long>> =
-            flowOf(items.filter { !it.isDeleted }.map { it.parentPasswordId }.distinct())
+            flowOf(items.filter { !it.isDeleted }.mapNotNull { it.parentPasswordId }.distinct())
+
+        override suspend fun secureItemsWithActiveAttachments(
+            secureItemIds: List<Long>
+        ): List<Long> = items
+            .filter { it.parentSecureItemId in secureItemIds && !it.isDeleted }
+            .mapNotNull { it.parentSecureItemId }
+            .distinct()
+
+        override fun observeSecureItemsWithActiveAttachments(): Flow<List<Long>> =
+            flowOf(items.filter { !it.isDeleted }.mapNotNull { it.parentSecureItemId }.distinct())
 
         override suspend fun selectAllLocalPaths(): List<String?> =
             items.map { it.localPath }
 
         override suspend fun selectLocalPathsByMdbxDatabaseId(databaseId: Long): List<String> =
             emptyList()
+
+        override suspend fun selectSecureItemLocalPathsByMdbxDatabaseId(
+            databaseId: Long
+        ): List<String> = emptyList()
 
         override suspend fun countByLocalPath(localPath: String): Int =
             items.count { it.localPath == localPath }
@@ -217,6 +278,16 @@ class KeePassAttachmentReconcilerTest {
             return changed
         }
 
+        override suspend fun rewriteSecureItemSourceToLocal(
+            secureItemId: Long,
+            fromSource: String,
+            now: Long
+        ): Int = rewriteOwnerSourceToLocal(
+            matches = { it.parentSecureItemId == secureItemId },
+            fromSource = fromSource,
+            now = now
+        )
+
         override suspend fun insert(attachment: Attachment): Long {
             val id = nextId++
             items += attachment.copy(id = id)
@@ -242,6 +313,12 @@ class KeePassAttachmentReconcilerTest {
             return before - items.size
         }
 
+        override suspend fun purgeBySecureItem(secureItemId: Long): Int {
+            val before = items.size
+            items.removeIf { it.parentSecureItemId == secureItemId }
+            return before - items.size
+        }
+
         override suspend fun softDeleteByParent(
             passwordId: Long,
             deletedAt: Long,
@@ -252,6 +329,19 @@ class KeePassAttachmentReconcilerTest {
 
         override suspend fun restoreByParent(passwordId: Long, updatedAt: Long): Int =
             updateMatching(passwordId) {
+                it.copy(isDeleted = false, deletedAt = null, updatedAt = updatedAt)
+            }
+
+        override suspend fun softDeleteBySecureItem(
+            secureItemId: Long,
+            deletedAt: Long,
+            updatedAt: Long
+        ): Int = updateSecureItemMatching(secureItemId) {
+            it.copy(isDeleted = true, deletedAt = deletedAt, updatedAt = updatedAt)
+        }
+
+        override suspend fun restoreBySecureItem(secureItemId: Long, updatedAt: Long): Int =
+            updateSecureItemMatching(secureItemId) {
                 it.copy(isDeleted = false, deletedAt = null, updatedAt = updatedAt)
             }
 
@@ -273,6 +363,52 @@ class KeePassAttachmentReconcilerTest {
                     transform(it)
                 } else {
                     it
+                }
+            }
+            return changed
+        }
+
+        private fun updateSecureItemMatching(
+            secureItemId: Long,
+            transform: (Attachment) -> Attachment
+        ): Int {
+            var changed = 0
+            items.replaceAll {
+                if (it.parentSecureItemId == secureItemId) {
+                    changed++
+                    transform(it)
+                } else {
+                    it
+                }
+            }
+            return changed
+        }
+
+        private fun rewriteOwnerSourceToLocal(
+            matches: (Attachment) -> Boolean,
+            fromSource: String,
+            now: Long
+        ): Int {
+            var changed = 0
+            items.replaceAll { item ->
+                if (
+                    matches(item) &&
+                    item.source == fromSource &&
+                    item.localPath != null &&
+                    item.wrappedCek != null &&
+                    !item.isDeleted
+                ) {
+                    changed++
+                    item.copy(
+                        source = AttachmentSource.LOCAL.name,
+                        bitwardenAttachmentId = null,
+                        bitwardenUrl = null,
+                        bitwardenFileKeyEnc = null,
+                        keepassBinaryRef = null,
+                        updatedAt = now
+                    )
+                } else {
+                    item
                 }
             }
             return changed

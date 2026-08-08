@@ -317,7 +317,11 @@ fun TotpCodeCard(
     } else {
         null
     }
-    val appIcon = if (settings.iconCardsEnabled && associatedAppPackage.isNotBlank()) {
+    val appIcon = if (
+        settings.iconCardsEnabled &&
+        associatedAppPackage.isNotBlank() &&
+        !takagi.ru.monica.autofill_ng.ui.isWebAddress(iconWebsite)
+    ) {
         takagi.ru.monica.autofill_ng.ui.rememberAppIcon(packageName = associatedAppPackage)
     } else {
         null

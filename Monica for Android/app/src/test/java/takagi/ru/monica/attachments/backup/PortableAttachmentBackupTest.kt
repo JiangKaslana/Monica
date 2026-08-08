@@ -40,7 +40,7 @@ class PortableAttachmentBackupTest {
     fun decodeManifest_returnsEmptyManifestForBrokenInput() {
         val decoded = PortableAttachmentBackup.decodeManifest("{not-json")
 
-        assertEquals(1, decoded.version)
+        assertEquals(2, decoded.version)
         assertTrue(decoded.entries.isEmpty())
     }
 
@@ -59,6 +59,13 @@ class PortableAttachmentBackupTest {
 
         assertTrue(valid.isValid())
         assertFalse(valid.copy(parentPasswordId = 0).isValid())
+        assertTrue(
+            valid.copy(
+                parentPasswordId = null,
+                parentSecureItemId = 2
+            ).isValid()
+        )
+        assertFalse(valid.copy(parentSecureItemId = 2).isValid())
         assertFalse(valid.copy(fileName = "").isValid())
         assertFalse(valid.copy(payloadPath = "").isValid())
     }

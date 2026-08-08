@@ -198,8 +198,10 @@ import takagi.ru.monica.ui.password.getGroupKeyForMode
 import takagi.ru.monica.ui.password.getPasswordGroupTitle
 import takagi.ru.monica.ui.password.getPasswordInfoKey
 import takagi.ru.monica.ui.vaultv2.VaultV2Pane
+import takagi.ru.monica.ui.vaultv2.VaultV2DetailKind
 import takagi.ru.monica.ui.vaultv2.VaultV2PaneState
 import takagi.ru.monica.ui.vaultv2.VaultV2RetainedStateViewModel
+import takagi.ru.monica.ui.vaultv2.VaultV2TabPane
 import takagi.ru.monica.ui.vaultv2.rememberVaultV2PaneState
 import takagi.ru.monica.data.bitwarden.BitwardenPendingOperation
 import takagi.ru.monica.data.bitwarden.BitwardenSend
@@ -982,6 +984,7 @@ fun SimpleMainScreen(
     }
     var sendPaneState by remember { mutableStateOf(SendPaneUiState()) }
     var selectedPasskey by remember { mutableStateOf<PasskeyEntry?>(null) }
+    var vaultV2DetailKind by rememberSaveable { mutableStateOf<VaultV2DetailKind?>(null) }
     var pendingPasskeyDelete by remember { mutableStateOf<PasskeyEntry?>(null) }
     var selectedTimelineLog by remember { mutableStateOf<TimelineEvent.StandardLog?>(null) }
     val sendState by bitwardenViewModel.sendState.collectAsState()
@@ -1226,6 +1229,7 @@ fun SimpleMainScreen(
         passwordHistoryInitialTrashScopeKey = null
     }
     val isPasskeyDataNeeded = currentTab == BottomNavItem.Passkey ||
+        currentTab == BottomNavItem.VaultV2 ||
         selectedPasskey != null ||
         pendingPasskeyDelete != null
     val isQuickAccessDataNeeded = appSettings.passwordListQuickAccessEnabled || showPasswordQuickAccessSheet
@@ -1319,6 +1323,39 @@ fun SimpleMainScreen(
     val wideNavigationRailWidth = 80.dp
     val wideFabHostWidth = wideNavigationRailWidth + wideListPaneWidth
 
+    val clearVaultV2WideDetail: () -> Unit = {
+        vaultV2DetailKind = null
+        resetPasswordPaneState()
+        resetTotpPaneState()
+        resetCardWalletPaneState()
+        resetNotePaneState()
+        selectedPasskey = null
+    }
+    fun prepareVaultV2WideDetail(kind: VaultV2DetailKind) {
+        if (isCompactWidth || currentTab != BottomNavItem.VaultV2) return
+        clearVaultV2WideDetail()
+        vaultV2DetailKind = kind
+    }
+    val vaultV2HasWideDetail =
+        !isCompactWidth && currentTab == BottomNavItem.VaultV2 && vaultV2DetailKind != null
+    val vaultV2SuppressesFab = vaultV2HasWideDetail && when (vaultV2DetailKind) {
+        VaultV2DetailKind.PASSWORD -> isAddingPasswordInline || inlinePasswordEditorId != null
+        VaultV2DetailKind.AUTHENTICATOR -> isAddingTotpInline || selectedTotpId != null
+        VaultV2DetailKind.BANK_CARD -> isAddingBankCardInline ||
+            inlineBankCardEditorId != null || selectedBankCardId != null
+        VaultV2DetailKind.DOCUMENT -> isAddingDocumentInline ||
+            inlineDocumentEditorId != null || selectedDocumentId != null
+        VaultV2DetailKind.BILLING_ADDRESS -> isAddingBillingAddressInline ||
+            inlineBillingAddressEditorId != null || selectedBillingAddressId != null
+        VaultV2DetailKind.NOTE -> isAddingNoteInline || inlineNoteEditorId != null
+        VaultV2DetailKind.PASSKEY, null -> false
+    }
+    LaunchedEffect(currentTab.key, isCompactWidth) {
+        if (currentTab != BottomNavItem.VaultV2 || isCompactWidth) {
+            clearVaultV2WideDetail()
+        }
+    }
+
     // --- Navigation/interaction handlers hub ---
     // This function centralizes open/edit/back intents so tab/pane switching stays consistent.
     fun buildMainScreenHandlers(): MainScreenHandlers {
@@ -1337,6 +1374,7 @@ fun SimpleMainScreen(
                 )
                 onNavigateToAddPassword(null)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.PASSWORD)
                 pendingInlinePasswordAddStorageDefaults = resolvedDefaults
                 openInlinePasswordAdd()
             }
@@ -1345,6 +1383,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddPassword(passwordId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.PASSWORD)
                 openInlinePasswordEditor(passwordId)
             }
         }
@@ -1355,6 +1394,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddTotp(null)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.AUTHENTICATOR)
                 openInlineTotpAdd()
             }
         }
@@ -1366,6 +1406,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddBankCard(null)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.BANK_CARD)
                 openInlineBankCardAdd()
             }
         }
@@ -1373,6 +1414,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddBankCard(cardId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.BANK_CARD)
                 openInlineBankCardEditor(cardId)
             }
         }
@@ -1384,6 +1426,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddDocument(null)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.DOCUMENT)
                 openInlineDocumentAdd()
             }
         }
@@ -1391,6 +1434,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddDocument(documentId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.DOCUMENT)
                 openInlineDocumentEditor(documentId)
             }
         }
@@ -1402,6 +1446,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddBillingAddress(null)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.BILLING_ADDRESS)
                 openInlineBillingAddressAdd()
             }
         }
@@ -1409,6 +1454,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddBillingAddress(addressId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.BILLING_ADDRESS)
                 openInlineBillingAddressEditor(addressId)
             }
         }
@@ -1434,6 +1480,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddNote(noteId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.NOTE)
                 openInlineNoteEditor(noteId)
             }
         }
@@ -1450,6 +1497,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToPasswordDetail(passwordId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.PASSWORD)
                 openInlinePasswordDetail(passwordId)
             }
         }
@@ -1457,6 +1505,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToAddTotp(totpId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.AUTHENTICATOR)
                 openInlineTotpDetail(totpId)
             }
         }
@@ -1464,6 +1513,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToBankCardDetail(cardId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.BANK_CARD)
                 openInlineBankCardDetail(cardId)
             }
         }
@@ -1471,6 +1521,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToDocumentDetail(documentId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.DOCUMENT)
                 openInlineDocumentDetail(documentId)
             }
         }
@@ -1478,6 +1529,7 @@ fun SimpleMainScreen(
             if (isCompactWidth) {
                 onNavigateToBillingAddressDetail(addressId)
             } else {
+                prepareVaultV2WideDetail(VaultV2DetailKind.BILLING_ADDRESS)
                 openInlineBillingAddressDetail(addressId)
             }
         }
@@ -1560,6 +1612,9 @@ fun SimpleMainScreen(
                         } == true
                     ) {
                         selectedPasskey = null
+                        if (currentTab == BottomNavItem.VaultV2) {
+                            vaultV2DetailKind = null
+                        }
                     }
                     pendingPasskeyDelete = null
                 }
@@ -1649,6 +1704,19 @@ fun SimpleMainScreen(
     val handleSendAddOpen = handlers.sendAddOpen
     val handleInlineSendEditorBack = handlers.inlineSendEditorBack
     val handleTimelineLogOpen = handlers.timelineLogOpen
+    val handleVaultV2PasskeyOpen: (Long) -> Unit = { passkeyId ->
+        if (isCompactWidth) {
+            onNavigateToPasskeyDetail(passkeyId)
+        } else {
+            val passkey = localPasskeys.firstOrNull { it.id == passkeyId }
+            if (passkey != null) {
+                prepareVaultV2WideDetail(VaultV2DetailKind.PASSKEY)
+                selectedPasskey = passkey
+            } else {
+                onNavigateToPasskeyDetail(passkeyId)
+            }
+        }
+    }
 
     // --- Tab switch cleanup effects ---
     // Reset detail/editor panes on tab changes to avoid stale selection or mixed mode state.
@@ -1846,6 +1914,186 @@ fun SimpleMainScreen(
     }
     LaunchedEffect(syncHintVisible, queuedMiniHints.size, activeMiniHints.size) {
         tryActivateQueuedMiniHints()
+    }
+
+    @Composable
+    fun RenderVaultV2Tab() {
+        if (passwordHistoryPageMode.isVisible) {
+            TimelineScreen(
+                viewModel = timelineViewModel,
+                onLogSelected = handleTimelineLogOpen,
+                splitPaneMode = false,
+                initialTab = passwordHistoryPageMode.tab ?: HistoryTab.TIMELINE,
+                initialTrashScopeKey = passwordHistoryInitialTrashScopeKey,
+                enableTabSwitch = false,
+                showBackButton = true,
+                onNavigateBack = closeHistoryPage
+            )
+            return
+        }
+
+        VaultV2TabPane(
+            isCompactWidth = isCompactWidth,
+            wideListPaneWidth = wideListPaneWidth,
+            hasWideDetail = vaultV2HasWideDetail,
+            onClearWideDetail = clearVaultV2WideDetail,
+            listContent = {
+                VaultV2Pane(
+                    passwordViewModel = passwordViewModel,
+                    totpViewModel = totpViewModel,
+                    bankCardViewModel = bankCardViewModel,
+                    documentViewModel = documentViewModel,
+                    noteViewModel = noteViewModel,
+                    passkeyViewModel = passkeyViewModel,
+                    keepassDatabases = keepassDatabases,
+                    mdbxDatabases = mdbxDatabases,
+                    bitwardenVaults = bitwardenVaults,
+                    localKeePassViewModel = localKeePassViewModel,
+                    mdbxViewModel = mdbxViewModel,
+                    settingsViewModel = settingsViewModel,
+                    state = vaultV2PaneState,
+                    onOpenPassword = handlePasswordDetailOpen,
+                    onOpenTotp = handleTotpOpen,
+                    onOpenBankCard = handleBankCardOpen,
+                    onOpenDocument = handleDocumentOpen,
+                    onOpenNote = { handleNoteOpen(it) },
+                    onOpenPasskey = handleVaultV2PasskeyOpen,
+                    onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
+                    onOpenHistory = openHistoryPage,
+                    onOpenTrashPage = openTrashPage,
+                    onOpenArchivePage = vaultV2PaneState::openArchiveView,
+                    onOpenCommonAccountTemplates = onNavigateToCommonAccountTemplates,
+                    onScanFidoQr = onNavigateToFidoQrScan,
+                    onOpenStandaloneSettings = onNavigateToStandaloneSettings,
+                    showStandaloneSettingsEntry = shouldHideBottomNavigation,
+                    appSettings = appSettings,
+                    securityManager = securityManager,
+                    biometricEnabled = appSettings.biometricEnabled,
+                    useEmbeddedHistoryPages = isCompactWidth,
+                    modifier = Modifier.fillMaxSize()
+                )
+            },
+            detailContent = {
+                when (vaultV2DetailKind) {
+                    VaultV2DetailKind.PASSWORD -> PasswordDetailPaneContent(
+                        isAddingPasswordInline = isAddingPasswordInline,
+                        inlinePasswordEditorId = inlinePasswordEditorId,
+                        selectedPasswordId = selectedPasswordId,
+                        passwordViewModel = passwordViewModel,
+                        totpViewModel = totpViewModel,
+                        bankCardViewModel = bankCardViewModel,
+                        noteViewModel = noteViewModel,
+                        localKeePassViewModel = localKeePassViewModel,
+                        passwordNewItemDefaults = pendingInlinePasswordAddStorageDefaults
+                            ?: passwordNewItemDefaults,
+                        mdbxDatabases = mdbxDatabases,
+                        pendingPasswordAuthenticatorQrResult = pendingPasswordAuthenticatorQrResult,
+                        onConsumePendingPasswordAuthenticatorQrResult =
+                            onConsumePendingPasswordAuthenticatorQrResult,
+                        onScanPasswordAuthenticatorQrCode = onScanPasswordAuthenticatorQrCode,
+                        onInlinePasswordEditorBack = {
+                            handleInlinePasswordEditorBack()
+                            if (selectedPasswordId == null) {
+                                vaultV2DetailKind = null
+                            }
+                        },
+                        onNavigateToAddWifi = onNavigateToAddWifi,
+                        onNavigateToAddSshKey = onNavigateToAddSshKey,
+                        passkeyViewModel = passkeyViewModel,
+                        biometricEnabled = appSettings.biometricEnabled,
+                        iconCardsEnabled = appSettings.iconCardsEnabled && appSettings.passwordPageIconEnabled,
+                        unmatchedIconHandlingStrategy = appSettings.unmatchedIconHandlingStrategy,
+                        onClearSelectedPassword = clearVaultV2WideDetail,
+                        onNavigateToNoteDetail = { noteId -> handleNoteOpen(noteId) },
+                        onEditPassword = handlePasswordEditOpen
+                    )
+
+                    VaultV2DetailKind.AUTHENTICATOR -> AuthenticatorDetailPaneContent(
+                        totpViewModel = totpViewModel,
+                        passwordViewModel = passwordViewModel,
+                        localKeePassViewModel = localKeePassViewModel,
+                        isAddingTotpInline = isAddingTotpInline,
+                        selectedTotpId = selectedTotpId,
+                        totpNewItemDefaults = pendingInlineTotpAddStorageDefaults ?: totpNewItemDefaults,
+                        onInlineTotpEditorBack = {
+                            resetTotpPaneState()
+                            vaultV2DetailKind = null
+                        },
+                        onNavigateToQuickTotpScan = onNavigateToQuickTotpScan
+                    )
+
+                    VaultV2DetailKind.BANK_CARD,
+                    VaultV2DetailKind.DOCUMENT,
+                    VaultV2DetailKind.BILLING_ADDRESS -> CardWalletDetailPaneContent(
+                        bankCardViewModel = bankCardViewModel,
+                        documentViewModel = documentViewModel,
+                        billingAddressViewModel = billingAddressViewModel,
+                        isAddingBankCardInline = isAddingBankCardInline,
+                        inlineBankCardEditorId = inlineBankCardEditorId,
+                        onInlineBankCardEditorBack = {
+                            handleInlineBankCardEditorBack()
+                            vaultV2DetailKind = null
+                        },
+                        isAddingDocumentInline = isAddingDocumentInline,
+                        inlineDocumentEditorId = inlineDocumentEditorId,
+                        onInlineDocumentEditorBack = {
+                            handleInlineDocumentEditorBack()
+                            vaultV2DetailKind = null
+                        },
+                        isAddingBillingAddressInline = isAddingBillingAddressInline,
+                        inlineBillingAddressEditorId = inlineBillingAddressEditorId,
+                        onInlineBillingAddressEditorBack = {
+                            handleInlineBillingAddressEditorBack()
+                            vaultV2DetailKind = null
+                        },
+                        selectedBankCardId = selectedBankCardId,
+                        onClearSelectedBankCard = clearVaultV2WideDetail,
+                        onEditBankCard = handleBankCardEditOpen,
+                        selectedDocumentId = selectedDocumentId,
+                        onClearSelectedDocument = clearVaultV2WideDetail,
+                        onEditDocument = handleDocumentEditOpen,
+                        selectedBillingAddressId = selectedBillingAddressId,
+                        onClearSelectedBillingAddress = clearVaultV2WideDetail,
+                        onEditBillingAddress = handleBillingAddressEditOpen,
+                        initialCategoryId = pendingInlineWalletAddStorageDefaults?.categoryId,
+                        initialKeePassDatabaseId = pendingInlineWalletAddStorageDefaults?.keepassDatabaseId,
+                        initialKeePassGroupPath = pendingInlineWalletAddStorageDefaults?.keepassGroupPath,
+                        initialMdbxDatabaseId = pendingInlineWalletAddStorageDefaults?.mdbxDatabaseId,
+                        initialMdbxFolderId = pendingInlineWalletAddStorageDefaults?.mdbxFolderId,
+                        initialBitwardenVaultId = pendingInlineWalletAddStorageDefaults?.bitwardenVaultId,
+                        initialBitwardenFolderId = pendingInlineWalletAddStorageDefaults?.bitwardenFolderId
+                    )
+
+                    VaultV2DetailKind.NOTE -> NoteDetailPaneContent(
+                        noteViewModel = noteViewModel,
+                        isAddingNoteInline = isAddingNoteInline,
+                        inlineNoteEditorId = inlineNoteEditorId,
+                        onInlineNoteEditorBack = {
+                            resetNotePaneState()
+                            vaultV2DetailKind = null
+                        },
+                        initialCategoryId = pendingInlineNoteAddStorageDefaults?.categoryId,
+                        initialKeePassDatabaseId = pendingInlineNoteAddStorageDefaults?.keepassDatabaseId,
+                        initialKeePassGroupPath = pendingInlineNoteAddStorageDefaults?.keepassGroupPath,
+                        initialMdbxDatabaseId = pendingInlineNoteAddStorageDefaults?.mdbxDatabaseId,
+                        initialBitwardenVaultId = pendingInlineNoteAddStorageDefaults?.bitwardenVaultId,
+                        initialBitwardenFolderId = pendingInlineNoteAddStorageDefaults?.bitwardenFolderId
+                    )
+
+                    VaultV2DetailKind.PASSKEY -> PasskeyDetailPaneContent(
+                        selectedPasskey = selectedPasskey,
+                        passkeyTotalCount = passkeyTotalCount,
+                        passkeyBoundCount = passkeyBoundCount,
+                        resolvePasswordTitle = { passwordId -> passwordById[passwordId]?.title },
+                        onOpenPasswordDetail = handlePasswordDetailOpen,
+                        onUnbindPasskey = handlePasskeyUnbind,
+                        onDeletePasskey = { passkey -> pendingPasskeyDelete = passkey }
+                    )
+
+                    null -> Unit
+                }
+            }
+        )
     }
 
     // --- Main surface composition ---
@@ -2107,45 +2355,7 @@ fun SimpleMainScreen(
             AuthenticatorPasskeyAnimatedContent(currentTab = currentTab) { displayedTab ->
             when (displayedTab) {
                 BottomNavItem.VaultV2 -> {
-                    VaultV2Pane(
-                        passwordViewModel = passwordViewModel,
-                        totpViewModel = totpViewModel,
-                        bankCardViewModel = bankCardViewModel,
-                        documentViewModel = documentViewModel,
-                        noteViewModel = noteViewModel,
-                        passkeyViewModel = passkeyViewModel,
-                    keepassDatabases = keepassDatabases,
-                    mdbxDatabases = mdbxDatabases,
-                    bitwardenVaults = bitwardenVaults,
-                    localKeePassViewModel = localKeePassViewModel,
-                    mdbxViewModel = mdbxViewModel,
-                    settingsViewModel = settingsViewModel,
-                    state = vaultV2PaneState,
-                    onOpenPassword = handlePasswordDetailOpen,
-                    onOpenTotp = handleTotpOpen,
-                        onOpenBankCard = handleBankCardOpen,
-                    onOpenDocument = handleDocumentOpen,
-                    onOpenNote = { handleNoteOpen(it) },
-                    onOpenPasskey = onNavigateToPasskeyDetail,
-                    onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
-                    onOpenHistory = {
-                        openHistoryPage()
-                    },
-                    onOpenTrashPage = {
-                        openTrashPage()
-                    },
-                    onOpenArchivePage = {
-                        vaultV2PaneState.openArchiveView()
-                    },
-                    onOpenCommonAccountTemplates = onNavigateToCommonAccountTemplates,
-                    onScanFidoQr = onNavigateToFidoQrScan,
-                    onOpenStandaloneSettings = onNavigateToStandaloneSettings,
-                    showStandaloneSettingsEntry = shouldHideBottomNavigation,
-                    appSettings = appSettings,
-                    securityManager = securityManager,
-                    biometricEnabled = appSettings.biometricEnabled,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    RenderVaultV2Tab()
                 }
                 BottomNavItem.Passwords -> {
                     PasswordTabPane(
@@ -2406,6 +2616,8 @@ fun SimpleMainScreen(
                         pendingSteamQrAccountId = pendingSteamQrAccountId,
                         onConsumePendingSteamQrResult = onConsumePendingSteamQrResult,
                         onScanSteamQrCode = onScanSteamQrCode,
+                        isCompactWidth = isCompactWidth,
+                        wideListPaneWidth = wideListPaneWidth,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -2522,45 +2734,7 @@ fun SimpleMainScreen(
                 AuthenticatorPasskeyAnimatedContent(currentTab = currentTab) { displayedTab ->
                 when (displayedTab) {
                     BottomNavItem.VaultV2 -> {
-                        VaultV2Pane(
-                            passwordViewModel = passwordViewModel,
-                            totpViewModel = totpViewModel,
-                            bankCardViewModel = bankCardViewModel,
-                            documentViewModel = documentViewModel,
-                            noteViewModel = noteViewModel,
-                            passkeyViewModel = passkeyViewModel,
-                        keepassDatabases = keepassDatabases,
-                        mdbxDatabases = mdbxDatabases,
-                        bitwardenVaults = bitwardenVaults,
-                        localKeePassViewModel = localKeePassViewModel,
-                        mdbxViewModel = mdbxViewModel,
-                        settingsViewModel = settingsViewModel,
-                        state = vaultV2PaneState,
-                        onOpenPassword = handlePasswordDetailOpen,
-                        onOpenTotp = handleTotpOpen,
-                            onOpenBankCard = handleBankCardOpen,
-                        onOpenDocument = handleDocumentOpen,
-                        onOpenNote = { handleNoteOpen(it) },
-                        onOpenPasskey = onNavigateToPasskeyDetail,
-                        onOpenMdbxCommitHistory = onNavigateToMdbxCommitHistory,
-                        onOpenHistory = {
-                            openHistoryPage()
-                        },
-                        onOpenTrashPage = {
-                            openTrashPage()
-                        },
-                        onOpenArchivePage = {
-                            vaultV2PaneState.openArchiveView()
-                        },
-                        onOpenCommonAccountTemplates = onNavigateToCommonAccountTemplates,
-                        onScanFidoQr = onNavigateToFidoQrScan,
-                        onOpenStandaloneSettings = onNavigateToStandaloneSettings,
-                        showStandaloneSettingsEntry = shouldHideBottomNavigation,
-                        appSettings = appSettings,
-                        securityManager = securityManager,
-                        biometricEnabled = appSettings.biometricEnabled,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                        RenderVaultV2Tab()
                     }
                     BottomNavItem.Passwords -> {
                         PasswordTabPane(
@@ -2821,6 +2995,8 @@ fun SimpleMainScreen(
                             pendingSteamQrAccountId = pendingSteamQrAccountId,
                             onConsumePendingSteamQrResult = onConsumePendingSteamQrResult,
                             onScanSteamQrCode = onScanSteamQrCode,
+                            isCompactWidth = isCompactWidth,
+                            wideListPaneWidth = wideListPaneWidth,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -2961,6 +3137,7 @@ fun SimpleMainScreen(
         isCompactWidth = isCompactWidth,
         shouldHideBottomNavigation = shouldHideBottomNavigation,
         wideFabHostWidth = wideFabHostWidth,
+        vaultV2HasWideDetail = vaultV2SuppressesFab,
         appSettings = appSettings,
         passwordHistoryPageMode = passwordHistoryPageMode,
         isAnySelectionMode = isAnySelectionMode,

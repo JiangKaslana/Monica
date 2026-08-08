@@ -28,9 +28,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import takagi.ru.monica.R
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.facade.AttachmentFacade
+import takagi.ru.monica.attachments.model.AttachmentOwner
+import takagi.ru.monica.attachments.model.AttachmentSource
+import takagi.ru.monica.attachments.ui.AttachmentPendingDraft
+import takagi.ru.monica.attachments.ui.AttachmentsEditSection
+import takagi.ru.monica.attachments.ui.flushPendingDraftsTo
+import takagi.ru.monica.bitwarden.BitwardenVaultPremiumStore
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
+import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.CommonAccountPreferences
+import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.PasswordDatabase
+import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.data.bitwarden.BitwardenVault
 import takagi.ru.monica.data.CustomFieldDraft
 import takagi.ru.monica.data.model.CardWalletDataCodec
@@ -42,6 +53,7 @@ import takagi.ru.monica.data.model.displayFullName
 import takagi.ru.monica.data.model.toStorageTarget
 import takagi.ru.monica.data.model.withStorageTargetSelected
 import takagi.ru.monica.data.model.withoutStorageTarget
+import takagi.ru.monica.keepass.KeePassSecureItemPhotoAttachments
 import takagi.ru.monica.ui.components.CommonNameSuggestionSheet
 import takagi.ru.monica.ui.components.CustomFieldEditorSection
 import takagi.ru.monica.ui.components.DualPhotoPicker
@@ -96,6 +108,7 @@ fun AddEditDocumentScreen(
         )
     }
     val settingsManager = remember { SettingsManager(context) }
+    val appSettings by settingsManager.settingsFlow.collectAsState(initial = AppSettings())
     val commonAccountPreferences = remember { CommonAccountPreferences(context) }
     
     var title by rememberSaveable { mutableStateOf("") }
@@ -129,6 +142,8 @@ fun AddEditDocumentScreen(
     var isFavorite by rememberSaveable { mutableStateOf(false) }
     var showDocumentTypeMenu by remember { mutableStateOf(false) }
     var customFields by remember { mutableStateOf<List<CustomFieldDraft>>(emptyList()) }
+    val pendingAttachmentDrafts = remember { mutableStateListOf<AttachmentPendingDraft>() }
+    var existingDocumentItem by remember(documentId) { mutableStateOf<SecureItem?>(null) }
     var identityDetailsExpanded by rememberSaveable { mutableStateOf(false) }
     var addressDetailsExpanded by rememberSaveable { mutableStateOf(false) }
     var showCommonNamePicker by rememberSaveable { mutableStateOf(false) }
@@ -170,6 +185,31 @@ fun AddEditDocumentScreen(
         if (documentId != null) viewModel.allDocuments else flowOf(emptyList())
     }
     val allDocuments by allDocumentsFlow.collectAsState(initial = emptyList())
+    val attachmentBitwardenVault = remember(existingDocumentItem?.bitwardenVaultId, bitwardenVaults) {
+        existingDocumentItem?.bitwardenVaultId?.let { vaultId ->
+            bitwardenVaults.firstOrNull { it.id == vaultId }
+        }
+    }
+    val attachmentBitwardenContext = remember(
+        attachmentBitwardenVault,
+        existingDocumentItem?.bitwardenCipherId
+    ) {
+        attachmentBitwardenVault?.let { vault ->
+            viewModel.getAttachmentBitwardenContext(vault, existingDocumentItem?.bitwardenCipherId)
+        }
+    }
+    val attachmentKeePassContext = remember(
+        existingDocumentItem?.keepassDatabaseId,
+        existingDocumentItem?.keepassEntryUuid
+    ) {
+        val databaseId = existingDocumentItem?.keepassDatabaseId
+        val entryUuid = existingDocumentItem?.keepassEntryUuid?.takeIf { it.isNotBlank() }
+        if (databaseId != null && entryUuid != null) {
+            AttachmentFacade.KeePassContext(databaseId = databaseId, entryUuid = entryUuid)
+        } else {
+            null
+        }
+    }
     fun syncLegacyStorageState(targets: List<StorageTarget>) {
         when (val primaryTarget = targets.firstOrNull()) {
             is StorageTarget.MonicaLocal -> {
@@ -297,6 +337,7 @@ fun AddEditDocumentScreen(
             withContext(Dispatchers.IO) {
                 viewModel.getDocumentById(documentId)
             }?.let { item ->
+                existingDocumentItem = item
                 val parsedImagePaths = withContext(Dispatchers.Default) {
                     parseSecureItemImagePaths(item.imagePaths)
                 }
@@ -349,6 +390,7 @@ fun AddEditDocumentScreen(
                 hasLoadedExistingDocumentFields = true
             }
         } else {
+            existingDocumentItem = null
             hasLoadedExistingDocumentFields = false
             currentReplicaGroupId = null
             existingReplicaTargetKeys = emptySet()
@@ -385,6 +427,32 @@ fun AddEditDocumentScreen(
             customFields = emptyList()
             frontImageFileName = null
             backImageFileName = null
+        }
+    }
+
+    LaunchedEffect(
+        existingDocumentItem?.id,
+        existingDocumentItem?.keepassDatabaseId,
+        existingDocumentItem?.keepassEntryUuid
+    ) {
+        val item = existingDocumentItem ?: return@LaunchedEffect
+        if (item.keepassDatabaseId == null || item.keepassEntryUuid.isNullOrBlank()) {
+            return@LaunchedEffect
+        }
+        launch(Dispatchers.IO) {
+            runCatching {
+                AttachmentContainer.keepassReconciler(context).reconcile(
+                    owner = AttachmentOwner.secureItem(item.id),
+                    databaseId = item.keepassDatabaseId,
+                    entryUuid = item.keepassEntryUuid,
+                    excludedFileNames = KeePassSecureItemPhotoAttachments.managedFileNames(ItemType.DOCUMENT)
+                )
+            }.onFailure { error ->
+                android.util.Log.w(
+                    "AddEditDocumentScreen",
+                    "KeePass attachment metadata reconcile failed: ${error::class.simpleName}"
+                )
+            }
         }
     }
 
@@ -480,6 +548,7 @@ fun AddEditDocumentScreen(
         )
         val imagePathsJson = Json.encodeToString(imagePathsList)
 
+        val shouldFlushAttachmentDrafts = documentId == null && pendingAttachmentDrafts.isNotEmpty()
         viewModel.saveDocumentAcrossTargets(
             id = documentId,
             title = title.ifBlank {
@@ -495,7 +564,46 @@ fun AddEditDocumentScreen(
             notes = notes,
             isFavorite = isFavorite,
             imagePaths = imagePathsJson,
-            targets = effectiveTargets
+            targets = effectiveTargets,
+            onPrimaryCreated = if (shouldFlushAttachmentDrafts) {
+                { newId ->
+                    val savedItem = viewModel.getDocumentById(newId)
+                    val savedKeePassContext = savedItem?.let { item ->
+                        val databaseId = item.keepassDatabaseId
+                        val entryUuid = item.keepassEntryUuid?.takeIf { it.isNotBlank() }
+                        if (databaseId != null && entryUuid != null) {
+                            AttachmentFacade.KeePassContext(databaseId, entryUuid)
+                        } else {
+                            null
+                        }
+                    }
+                    val savedVault = savedItem?.bitwardenVaultId?.let { vaultId ->
+                        bitwardenVaults.firstOrNull { it.id == vaultId }
+                    }
+                    val savedBitwardenContext = savedVault?.let { vault ->
+                        viewModel.getAttachmentBitwardenContext(vault, savedItem?.bitwardenCipherId)
+                    }
+                    flushPendingDraftsTo(
+                        context = context,
+                        owner = AttachmentOwner.secureItem(newId),
+                        pendingDrafts = pendingAttachmentDrafts,
+                        isPlusActivated = appSettings.isPlusActivated,
+                        attachmentSource = when {
+                            savedBitwardenContext != null -> AttachmentSource.BITWARDEN
+                            savedKeePassContext != null -> AttachmentSource.KEEPASS
+                            else -> AttachmentSource.LOCAL
+                        },
+                        bitwardenContext = savedBitwardenContext,
+                        bitwardenPremium = savedVault?.let {
+                            BitwardenVaultPremiumStore.isPremium(context, it.id)
+                        } ?: true,
+                        keepassContext = savedKeePassContext
+                    )
+                    onNavigateBack()
+                }
+            } else {
+                {}
+            }
         )
         coroutineScope.launch {
             settingsManager.updateRememberedStorageTarget(
@@ -512,7 +620,9 @@ fun AddEditDocumentScreen(
             )
         }
         syncVaultIds.forEach(bitwardenRepository::requestLocalMutationSync)
-        onNavigateBack()
+        if (!shouldFlushAttachmentDrafts) {
+            onNavigateBack()
+        }
     }
     val toggleFavoriteAction: () -> Unit = {
         val updated = !isFavorite
@@ -836,7 +946,26 @@ fun AddEditDocumentScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-            
+
+            val draftAttachmentTarget = selectedStorageTargets.firstOrNull()
+            AttachmentsEditSection(
+                owner = existingDocumentItem?.let { AttachmentOwner.secureItem(it.id) },
+                isPlusActivated = appSettings.isPlusActivated,
+                attachmentSource = when {
+                    existingDocumentItem?.bitwardenVaultId != null -> AttachmentSource.BITWARDEN
+                    existingDocumentItem?.keepassDatabaseId != null -> AttachmentSource.KEEPASS
+                    documentId == null && draftAttachmentTarget is StorageTarget.KeePass -> AttachmentSource.KEEPASS
+                    else -> AttachmentSource.LOCAL
+                },
+                bitwardenContext = attachmentBitwardenContext,
+                bitwardenPremium = attachmentBitwardenVault?.let {
+                    BitwardenVaultPremiumStore.isPremium(context, it.id)
+                } ?: true,
+                keepassContext = attachmentKeePassContext,
+                pendingDrafts = if (documentId == null) pendingAttachmentDrafts else null,
+                excludedFileNames = KeePassSecureItemPhotoAttachments.managedFileNames(ItemType.DOCUMENT)
+            )
+
             // Notes InfoCard
             InfoCard(title = stringResource(R.string.section_notes)) {
                 OutlinedTextField(

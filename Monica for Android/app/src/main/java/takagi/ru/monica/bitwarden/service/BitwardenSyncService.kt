@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.bitwarden.BitwardenVaultPremiumStore
 import takagi.ru.monica.bitwarden.api.*
 import takagi.ru.monica.bitwarden.BitwardenVaultIdentity
@@ -350,7 +351,7 @@ class BitwardenSyncService(
                             android.util.Log.w(TAG, "Cipher sync error: ${result.message}")
                         }
                     }
-                    // 附件元数据对齐：仅对已有本地 PasswordEntry 的 cipher 执行
+                    // 附件元数据对齐：Bitwarden 的附件属于 Cipher，可对应密码或安全项。
                     val remoteUnchanged =
                         result is CipherSyncResult.Skipped &&
                             result.reason == CipherSyncProcessor.SKIP_REMOTE_UNCHANGED
@@ -359,13 +360,18 @@ class BitwardenSyncService(
                             (!remoteUnchanged || cipherApi.attachments.isNotEmpty())
                     if (shouldReconcileAttachments) {
                         runCatching {
-                            val localEntry = passwordEntryDao.getByBitwardenCipherIdInVault(
+                            val localPassword = passwordEntryDao.getByBitwardenCipherIdInVault(
                                 vaultId = vault.id,
                                 cipherId = cipherApi.id
                             )
-                            if (localEntry != null) {
+                            val owner = localPassword?.let { AttachmentOwner.password(it.id) }
+                                ?: secureItemDao.getByBitwardenCipherIdInVault(
+                                    vaultId = vault.id,
+                                    cipherId = cipherApi.id
+                                )?.let { AttachmentOwner.secureItem(it.id) }
+                            if (owner != null) {
                                 attachmentReconciler.reconcile(
-                                    passwordId = localEntry.id,
+                                    owner = owner,
                                     remoteAttachments = cipherApi.attachments
                                 )
                             }

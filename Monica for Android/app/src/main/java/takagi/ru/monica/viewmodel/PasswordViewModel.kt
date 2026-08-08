@@ -756,10 +756,11 @@ class PasswordViewModel(
         )
 
     /**
-     * Smart Deduplication Logic
-     * Display-layer dedupe for "All" view:
-     * 1) merge same account across sources
-     * 2) then keep one entry per unique password value within that account
+     * Smart display deduplication for the "All" view.
+     *
+     * Only rows with an explicit replica/source identity are collapsed. A
+     * normal local row is an independent record, so identical title/account/
+     * website/password values must remain visible as separate items.
      */
     private fun dedupeSmart(entries: List<PasswordEntry>): List<PasswordEntry> {
         if (entries.size <= 1) return entries
@@ -778,20 +779,11 @@ class PasswordViewModel(
                 entry to runCatching { securityManager.decryptData(entry.password) }.getOrNull()
             }
 
-            val hasAnyDecrypted = decrypted.any { (_, password) -> password != null }
-            if (!hasAnyDecrypted) {
-                // When auth/MDK is unavailable, still collapse source-duplicates by account key.
-                pickBestEntry(groupEntries)?.let { deduped.add(it) }
-                continue
-            }
-
-            val knownPasswordBuckets = decrypted
-                .filter { (_, password) -> password != null }
-                .groupBy({ (_, password) -> password!! }, { (entry, _) -> entry })
-
-            for ((_, candidates) in knownPasswordBuckets) {
-                pickBestEntry(candidates)?.let { deduped.add(it) }
-            }
+            // Only collapse rows that carry an explicit source identity. A
+            // normal local row has no such identity, and two local rows may be
+            // intentionally identical; keeping one here made a second entry
+            // look as if it had overwritten the first one.
+            deduped += dedupePasswordDisplayRows(decrypted, ::pickBestEntry)
         }
 
         return deduped.sortedBy { indexById[it.id] ?: Int.MAX_VALUE }
@@ -895,12 +887,14 @@ class PasswordViewModel(
     }
 
     private fun buildExactDisplayKey(entry: PasswordEntry): String {
-        val sourceKey = when (val ownership = entry.resolveOwnership()) {
-            is PasswordOwnership.KeePass -> "kp:${ownership.databaseId}:${entry.keepassEntryUuid.orEmpty()}:${entry.keepassGroupPath.orEmpty()}"
-            is PasswordOwnership.Bitwarden -> "bw:${ownership.vaultId}:${entry.bitwardenCipherId.orEmpty()}:${entry.bitwardenFolderId.orEmpty()}"
-            is PasswordOwnership.Mdbx -> "mdbx:${ownership.databaseId}"
-            is PasswordOwnership.Conflict -> "conflict:${entry.keepassDatabaseId}:${entry.bitwardenVaultId}:${entry.keepassEntryUuid.orEmpty()}:${entry.bitwardenCipherId.orEmpty()}"
-            PasswordOwnership.MonicaLocal -> "local:${entry.categoryId ?: -1}"
+        val stableIdentity = passwordDisplayStableIdentityKey(entry)
+        // The replica group may contain intentional same-target multi-password
+        // siblings. The smart path handles cross-target replicas; this exact
+        // fallback must keep each persisted sibling visible.
+        val sourceKey = if (stableIdentity.isNullOrBlank() || stableIdentity.startsWith("replica:")) {
+            "row:${entry.id}"
+        } else {
+            stableIdentity
         }
 
         return listOf(

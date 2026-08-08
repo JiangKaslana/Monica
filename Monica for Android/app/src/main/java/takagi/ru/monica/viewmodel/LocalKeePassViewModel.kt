@@ -74,6 +74,7 @@ import takagi.ru.monica.utils.WebDavKeePassFileSource
 import takagi.ru.monica.utils.WebDavKeePassSupport
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * 本地 KeePass 数据库管理 ViewModel
@@ -1698,9 +1699,11 @@ class LocalKeePassViewModel(
                     }
                     
                     // 导出到目标位置
-                    context.contentResolver.openOutputStream(destinationUri)?.use { output ->
+                    val output = context.contentResolver.openOutputStream(destinationUri)
+                        ?: throw IOException("无法打开目标文件")
+                    output.use { outputStream ->
                         internalFile.inputStream().use { input ->
-                            input.copyTo(output)
+                            input.copyTo(outputStream)
                         }
                     }
                 }

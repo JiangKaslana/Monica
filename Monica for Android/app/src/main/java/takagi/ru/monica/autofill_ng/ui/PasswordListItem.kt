@@ -276,7 +276,7 @@ fun PasswordListItem(
  * 显示逻辑:
  * 1. 图标开关关闭时，始终显示默认钥匙图标
  * 2. 图标开关开启时，优先级与主应用密码列表一致
- *    SIMPLE_ICON -> UPLOADED -> AutoMatched -> Favicon -> AppIcon -> DefaultKey
+ *    SIMPLE_ICON -> UPLOADED -> AutoMatched -> Favicon -> AppIcon(app-only) -> DefaultKey
  */
 @Composable
 private fun AppIconOrFallback(
@@ -325,7 +325,10 @@ private fun AppIconOrFallback(
                 null
             }
 
-            val appIcon = if (primaryAppPackageName.isNotBlank()) {
+            val appIcon = if (
+                primaryAppPackageName.isNotBlank() &&
+                !isWebAddress(password.website)
+            ) {
                 rememberAppIcon(primaryAppPackageName)
             } else {
                 null

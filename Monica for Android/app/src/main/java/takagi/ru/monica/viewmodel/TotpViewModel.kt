@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -59,6 +60,10 @@ import java.util.concurrent.ConcurrentHashMap
 import takagi.ru.monica.utils.SavedCategoryFilterState
 import takagi.ru.monica.utils.SettingsManager
 import takagi.ru.monica.util.TotpDataResolver
+import takagi.ru.monica.util.TotpMigrationBatchPlan
+import takagi.ru.monica.util.TotpParseResult
+import takagi.ru.monica.util.planTotpMigrationBatch
+import kotlin.coroutines.resume
 
 /**
  * 验证器分类过滤器
@@ -81,6 +86,13 @@ sealed class TotpCategoryFilter {
     data class BitwardenVaultUncategorized(val vaultId: Long) : TotpCategoryFilter()
     data class MdbxDatabase(val databaseId: Long) : TotpCategoryFilter()
 }
+
+data class TotpMigrationSaveResult(
+    val importedCount: Int,
+    val duplicateCount: Int,
+    val failedCount: Int,
+    val validationRejected: Boolean
+)
 
 data class ParsedTotpItem(
     val item: SecureItem,
@@ -882,6 +894,20 @@ class TotpViewModel(
         }
     }
 
+    fun findTotpByData(
+        data: TotpData,
+        targets: List<StorageTarget>
+    ): SecureItem? {
+        val targetScopes = targets.map { it.storageScopeKey() }.toSet()
+        val targetKey = buildTotpIdentityKey(data)
+        val candidates = allTotpItems.value.ifEmpty { totpItems.value }
+        return candidates.firstOrNull { item ->
+            !item.isDeleted &&
+                (targetScopes.isEmpty() || item.toStorageTarget().storageScopeKey() in targetScopes) &&
+                parseStoredTotpData(item)?.let(::buildTotpIdentityKey) == targetKey
+        }
+    }
+
     /**
      * Save the authenticator owned by a password row.
      *
@@ -1238,6 +1264,77 @@ class TotpViewModel(
             }
             onComplete(saved)
         }
+    }
+
+    fun saveTotpMigrationBatch(
+        items: List<TotpParseResult>,
+        targets: List<StorageTarget>,
+        onComplete: (TotpMigrationSaveResult) -> Unit
+    ) {
+        viewModelScope.launch {
+            val distinctTargets = targets.distinctBy(StorageTarget::stableKey)
+            val plan = planTotpMigrationBatch(items)
+            if (distinctTargets.isEmpty() || plan is TotpMigrationBatchPlan.Rejected) {
+                onComplete(
+                    TotpMigrationSaveResult(
+                        importedCount = 0,
+                        duplicateCount = 0,
+                        failedCount = items.size,
+                        validationRejected = true
+                    )
+                )
+                return@launch
+            }
+
+            val readyPlan = plan as TotpMigrationBatchPlan.Ready
+
+            var importedCount = 0
+            var failedCount = 0
+            readyPlan.items.forEach { item ->
+                val title = item.label
+                    .ifBlank { item.totpData.issuer }
+                    .ifBlank { item.totpData.accountName }
+                val saved = saveTotpAcrossTargetsAwait(
+                    title = title,
+                    totpData = item.totpData,
+                    targets = distinctTargets
+                )
+                if (saved) {
+                    importedCount++
+                } else {
+                    failedCount++
+                }
+            }
+
+            onComplete(
+                TotpMigrationSaveResult(
+                    importedCount = importedCount,
+                    duplicateCount = readyPlan.duplicateCount,
+                    failedCount = failedCount,
+                    validationRejected = false
+                )
+            )
+        }
+    }
+
+    private suspend fun saveTotpAcrossTargetsAwait(
+        title: String,
+        totpData: TotpData,
+        targets: List<StorageTarget>
+    ): Boolean = suspendCancellableCoroutine { continuation ->
+        saveTotpAcrossTargets(
+            id = null,
+            title = title,
+            notes = "",
+            totpData = totpData,
+            isFavorite = false,
+            targets = targets,
+            onComplete = { saved ->
+                if (continuation.isActive) {
+                    continuation.resume(saved)
+                }
+            }
+        )
     }
 
     private suspend fun saveTotpItemInternal(

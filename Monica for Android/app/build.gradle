@@ -15,7 +15,7 @@ android {
     // Intentionally frozen: same-signature sideloaded builds must remain mutually replaceable
     // for emergency rollback. Do not increment this value for routine releases.
     def appVersionCode = 12
-    def baseVersionName = previewVersionSuffix ? "1.0.299-${previewVersionSuffix}" : "1.0.299"
+    def baseVersionName = previewVersionSuffix ? "1.0.300-${previewVersionSuffix}" : "1.0.300"
     def normalizeTwoDigits = { raw ->
         def value = raw?.toString()?.trim()?.replaceAll('\\D', '')
         if (!value) {
@@ -95,7 +95,8 @@ android {
         minSdk 26
         targetSdk 34
         versionCode appVersionCode
-        versionName baseVersionName
+        // Android system App Info and crash reports should expose the exact APK build.
+        versionName fullVersionName
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -108,6 +109,7 @@ android {
         } catch (ignored) {}
         buildConfigField 'String', 'GIT_SHA', "\"${gitSha}\""
         buildConfigField 'String', 'BUILD_TIME', "\"${new Date().format('yyyy-MM-dd HH:mm:ss z')}\""
+        buildConfigField 'String', 'BASE_VERSION_NAME', "\"${baseVersionName}\""
         buildConfigField 'String', 'FULL_VERSION_NAME', "\"${fullVersionName}\""
         buildConfigField 'String', 'BUILD_DETAIL_TAG', "\"${buildDateTag}${buildVersionTag}-${buildDailySeq}\""
         buildConfigField 'int', 'BW_DIAG_SCHEMA', '1'
@@ -156,7 +158,7 @@ android {
             // 目标格式: Monica-Android-[架构]-[版本号]-yyMMddVV-SS.APK
             def apkPrefix = 'Monica'
             def archTag = resolveArchTag(output)
-            def versionNameTag = sanitizeTag(project.findProperty('apkVersionName') ?: variant.versionName ?: defaultConfig.versionName, '0.0.0')
+            def versionNameTag = sanitizeTag(project.findProperty('apkVersionName') ?: baseVersionName, '0.0.0')
             def namePrefix = "${apkPrefix}-Android-${archTag}-${versionNameTag}-${buildDateTag}${buildVersionTag}"
             outputFileName = "${namePrefix}-${buildDailySeq}.APK"
         }

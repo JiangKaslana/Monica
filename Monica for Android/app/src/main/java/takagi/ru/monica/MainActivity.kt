@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -381,7 +382,8 @@ class MainActivity : BaseMonicaActivity() {
         val secureItemRepository = takagi.ru.monica.repository.SecureItemRepository(
             database.secureItemDao(),
             mdbxRepository,
-            securityManager::decryptDataIfMonicaCiphertext
+            securityManager::decryptDataIfMonicaCiphertext,
+            takagi.ru.monica.attachments.repository.AttachmentRepository(database.attachmentDao())
         )
         val settingsManager = SettingsManager(this)
         
@@ -1396,50 +1398,52 @@ fun MonicaContent(
                     }
                 }
             }
-            AddEditPasswordScreen(
-                viewModel = viewModel,
-                totpViewModel = totpViewModel,
-                bankCardViewModel = bankCardViewModel,
-                noteViewModel = noteViewModel,
-                localKeePassViewModel = localKeePassViewModel,
-                localMdbxViewModel = mdbxViewModel,
-                passwordId = if (passwordId == -1L) null else passwordId,
-                initialCategoryId = pendingStorageDefaults?.categoryId,
-                initialKeePassDatabaseId = pendingStorageDefaults?.keepassDatabaseId,
-                initialKeePassGroupPath = pendingStorageDefaults?.keepassGroupPath,
-                initialMdbxDatabaseId = pendingStorageDefaults?.mdbxDatabaseId,
-                initialMdbxFolderId = pendingStorageDefaults?.mdbxFolderId,
-                initialBitwardenVaultId = pendingStorageDefaults?.bitwardenVaultId,
-                initialBitwardenFolderId = pendingStorageDefaults?.bitwardenFolderId,
-                pendingQrResult = qrResult,
-                initialLoginType = initialType,
-                onConsumePendingQrResult = {
-                    backStackEntry.savedStateHandle.remove<String>("qr_result")
-                },
-                onScanAuthenticatorQrCode = {
-                    navController.navigate(Screen.QrScanner.route) {
-                        launchSingleTop = true
-                    }
-                },
-                onSwitchToWifi = { targetId ->
-                    val route = Screen.AddEditWifi.createRoute(targetId)
-                    navController.navigate(route) {
-                        popUpTo(Screen.AddEditPassword.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                },
-                onSwitchToSshKey = { targetId ->
-                    val route = Screen.AddEditSshKey.createRoute(targetId)
-                    navController.navigate(route) {
-                        popUpTo(Screen.AddEditPassword.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                },
-                onSaveCompleted = { savedPasswordId ->
-                    replacementPasswordDetailId = savedPasswordId
-                },
-                onNavigateBack = navigateBackFromAddEditPassword
-            )
+            key(passwordId) {
+                AddEditPasswordScreen(
+                    viewModel = viewModel,
+                    totpViewModel = totpViewModel,
+                    bankCardViewModel = bankCardViewModel,
+                    noteViewModel = noteViewModel,
+                    localKeePassViewModel = localKeePassViewModel,
+                    localMdbxViewModel = mdbxViewModel,
+                    passwordId = if (passwordId == -1L) null else passwordId,
+                    initialCategoryId = pendingStorageDefaults?.categoryId,
+                    initialKeePassDatabaseId = pendingStorageDefaults?.keepassDatabaseId,
+                    initialKeePassGroupPath = pendingStorageDefaults?.keepassGroupPath,
+                    initialMdbxDatabaseId = pendingStorageDefaults?.mdbxDatabaseId,
+                    initialMdbxFolderId = pendingStorageDefaults?.mdbxFolderId,
+                    initialBitwardenVaultId = pendingStorageDefaults?.bitwardenVaultId,
+                    initialBitwardenFolderId = pendingStorageDefaults?.bitwardenFolderId,
+                    pendingQrResult = qrResult,
+                    initialLoginType = initialType,
+                    onConsumePendingQrResult = {
+                        backStackEntry.savedStateHandle.remove<String>("qr_result")
+                    },
+                    onScanAuthenticatorQrCode = {
+                        navController.navigate(Screen.QrScanner.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onSwitchToWifi = { targetId ->
+                        val route = Screen.AddEditWifi.createRoute(targetId)
+                        navController.navigate(route) {
+                            popUpTo(Screen.AddEditPassword.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onSwitchToSshKey = { targetId ->
+                        val route = Screen.AddEditSshKey.createRoute(targetId)
+                        navController.navigate(route) {
+                            popUpTo(Screen.AddEditPassword.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onSaveCompleted = { savedPasswordId ->
+                        replacementPasswordDetailId = savedPasswordId
+                    },
+                    onNavigateBack = navigateBackFromAddEditPassword
+                )
+            }
             }
         }
 
@@ -1820,6 +1824,7 @@ fun MonicaContent(
                     hasPendingStorageDefaults -> pendingStorageDefaults?.bitwardenFolderId
                     else -> filterDefaults.bitwardenFolderId
                 }
+                key(totpId) {
                 takagi.ru.monica.ui.screens.AddEditTotpScreen(
                     totpId = if (totpId > 0) totpId else null,
                     initialData = initialData,
@@ -1864,6 +1869,18 @@ fun MonicaContent(
                             }
                         )
                     },
+                    onBatchImport = { items, targets, onComplete ->
+                        totpViewModel.saveTotpMigrationBatch(
+                            items = items,
+                            targets = targets,
+                            onComplete = { result ->
+                                if (result.importedCount > 0) {
+                                    totpViewModel.revealSavedTotpTargets(targets)
+                                }
+                                onComplete(result)
+                            }
+                        )
+                    },
                     onNavigateBack = {
                         navController.popBackStack()
                     },
@@ -1871,6 +1888,7 @@ fun MonicaContent(
                         navController.navigate(Screen.QrScanner.route)
                     }
                 )
+                }
             }
             }
         }
@@ -2404,32 +2422,38 @@ fun MonicaContent(
             )
         }
 
-        // 快速扫码添加验证器 - 扫描后直接保存到数据库
+        // 快速扫码添加验证器：单条直接保存，迁移二维码先预览再批量保存
         composable(Screen.QuickTotpScan.route) {
             val context = LocalContext.current
-            takagi.ru.monica.ui.screens.QrScannerScreen(
-                onQrCodeScanned = { qrData ->
-                    fun quickScanTargetsForCurrentFilter(): List<StorageTarget> {
-                        return when (val filter = totpViewModel.categoryFilter.value) {
-                            TotpCategoryFilter.All,
-                            TotpCategoryFilter.Local,
-                            TotpCategoryFilter.Starred,
-                            TotpCategoryFilter.Uncategorized,
-                            TotpCategoryFilter.LocalStarred,
-                            TotpCategoryFilter.LocalUncategorized -> listOf(StorageTarget.MonicaLocal(null))
-                            is TotpCategoryFilter.Custom -> listOf(StorageTarget.MonicaLocal(filter.categoryId))
-                            is TotpCategoryFilter.KeePassDatabase -> listOf(StorageTarget.KeePass(filter.databaseId, null))
-                            is TotpCategoryFilter.KeePassGroupFilter -> listOf(StorageTarget.KeePass(filter.databaseId, filter.groupPath))
-                            is TotpCategoryFilter.KeePassDatabaseStarred -> listOf(StorageTarget.KeePass(filter.databaseId, null))
-                            is TotpCategoryFilter.KeePassDatabaseUncategorized -> listOf(StorageTarget.KeePass(filter.databaseId, null))
-                            is TotpCategoryFilter.BitwardenVault -> listOf(StorageTarget.Bitwarden(filter.vaultId, null))
-                            is TotpCategoryFilter.BitwardenFolderFilter -> listOf(StorageTarget.Bitwarden(filter.vaultId, filter.folderId))
-                            is TotpCategoryFilter.BitwardenVaultStarred -> listOf(StorageTarget.Bitwarden(filter.vaultId, null))
-                            is TotpCategoryFilter.BitwardenVaultUncategorized -> listOf(StorageTarget.Bitwarden(filter.vaultId, null))
-                            is TotpCategoryFilter.MdbxDatabase -> listOf(StorageTarget.Mdbx(filter.databaseId))
-                        }
-                    }
+            var pendingMigrationItems by remember {
+                mutableStateOf<List<takagi.ru.monica.util.TotpParseResult>?>(null)
+            }
+            var isMigrationSaving by remember { mutableStateOf(false) }
 
+            fun quickScanTargetsForCurrentFilter(): List<StorageTarget> {
+                return when (val filter = totpViewModel.categoryFilter.value) {
+                    TotpCategoryFilter.All,
+                    TotpCategoryFilter.Local,
+                    TotpCategoryFilter.Starred,
+                    TotpCategoryFilter.Uncategorized,
+                    TotpCategoryFilter.LocalStarred,
+                    TotpCategoryFilter.LocalUncategorized -> listOf(StorageTarget.MonicaLocal(null))
+                    is TotpCategoryFilter.Custom -> listOf(StorageTarget.MonicaLocal(filter.categoryId))
+                    is TotpCategoryFilter.KeePassDatabase -> listOf(StorageTarget.KeePass(filter.databaseId, null))
+                    is TotpCategoryFilter.KeePassGroupFilter -> listOf(StorageTarget.KeePass(filter.databaseId, filter.groupPath))
+                    is TotpCategoryFilter.KeePassDatabaseStarred -> listOf(StorageTarget.KeePass(filter.databaseId, null))
+                    is TotpCategoryFilter.KeePassDatabaseUncategorized -> listOf(StorageTarget.KeePass(filter.databaseId, null))
+                    is TotpCategoryFilter.BitwardenVault -> listOf(StorageTarget.Bitwarden(filter.vaultId, null))
+                    is TotpCategoryFilter.BitwardenFolderFilter -> listOf(StorageTarget.Bitwarden(filter.vaultId, filter.folderId))
+                    is TotpCategoryFilter.BitwardenVaultStarred -> listOf(StorageTarget.Bitwarden(filter.vaultId, null))
+                    is TotpCategoryFilter.BitwardenVaultUncategorized -> listOf(StorageTarget.Bitwarden(filter.vaultId, null))
+                    is TotpCategoryFilter.MdbxDatabase -> listOf(StorageTarget.Mdbx(filter.databaseId))
+                }
+            }
+
+            if (pendingMigrationItems == null) {
+                takagi.ru.monica.ui.screens.QrScannerScreen(
+                    onQrCodeScanned = onQrCodeScanned@{ qrData ->
                     fun resolveTitle(item: takagi.ru.monica.util.TotpParseResult): String {
                         return item.label.takeIf { it.isNotBlank() }
                             ?: item.totpData.issuer.takeIf { it.isNotBlank() }
@@ -2478,70 +2502,17 @@ fun MonicaContent(
                             }
                         }
                         is takagi.ru.monica.util.TotpScanParseResult.Multiple -> {
-                            var addedCount = 0
-                            var duplicateCount = 0
-                            var invalidCount = 0
-                            val batchSecretSet = mutableSetOf<String>()
-                            val pendingItems = mutableListOf<Pair<String, takagi.ru.monica.data.model.TotpData>>()
-
-                            scanResult.items.forEach { item ->
-                                val secret = item.totpData.secret.trim()
-                                if (secret.isBlank()) {
-                                    invalidCount++
-                                    return@forEach
-                                }
-
-                                if (!batchSecretSet.add(secret)) {
-                                    duplicateCount++
-                                    return@forEach
-                                }
-
-                                val existingItem = totpViewModel.findTotpBySecret(secret)
-                                if (existingItem != null) {
-                                    duplicateCount++
-                                    return@forEach
-                                }
-
-                                val title = resolveTitle(item)
-                                pendingItems += title to item.totpData
-                            }
-
-                            if (pendingItems.isEmpty()) {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(
-                                        R.string.qr_authenticator_migration_result,
-                                        addedCount,
-                                        duplicateCount,
-                                        invalidCount
-                                    ),
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            } else {
-                                var completedCount = 0
-                                pendingItems.forEach { (title, totpData) ->
-                                    saveScannedTotp(title, totpData) { saved ->
-                                        completedCount++
-                                        if (saved) {
-                                            addedCount++
-                                        } else {
-                                            invalidCount++
-                                        }
-                                        if (completedCount == pendingItems.size) {
-                                            Toast.makeText(
-                                                context,
-                                                context.getString(
-                                                    R.string.qr_authenticator_migration_result,
-                                                    addedCount,
-                                                    duplicateCount,
-                                                    invalidCount
-                                                ),
-                                                Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    }
-                                }
-                            }
+                            pendingMigrationItems = scanResult.items
+                            return@onQrCodeScanned
+                        }
+                        is takagi.ru.monica.util.TotpScanParseResult.MigrationFailure -> {
+                            Toast.makeText(
+                                context,
+                                context.getString(
+                                    takagi.ru.monica.ui.components.migrationFailureMessageRes(scanResult.reason)
+                                ),
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
                         takagi.ru.monica.util.TotpScanParseResult.UnsupportedPhoneFactor -> {
                             Toast.makeText(
@@ -2559,11 +2530,58 @@ fun MonicaContent(
                         }
                     }
                     navController.popBackStack()
-                },
-                onNavigateBack = {
-                    navController.popBackStack()
-                }
-            )
+                    },
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    }
+                )
+            } else {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.surface
+                ) {}
+            }
+
+            pendingMigrationItems?.let { migrationItems ->
+                val targets = quickScanTargetsForCurrentFilter()
+                takagi.ru.monica.ui.components.TotpMigrationReviewDialog(
+                    items = migrationItems,
+                    existingTitleFor = { data ->
+                        totpViewModel.findTotpByData(data, targets)?.title
+                    },
+                    isSaving = isMigrationSaving,
+                    onDismiss = {
+                        pendingMigrationItems = null
+                        isMigrationSaving = false
+                        navController.popBackStack()
+                    },
+                    onImport = { selectedItems ->
+                        isMigrationSaving = true
+                        totpViewModel.saveTotpMigrationBatch(
+                            items = selectedItems,
+                            targets = targets,
+                            onComplete = { result ->
+                                isMigrationSaving = false
+                                Toast.makeText(
+                                    context,
+                                    context.getString(
+                                        R.string.qr_authenticator_migration_result,
+                                        result.importedCount,
+                                        result.duplicateCount,
+                                        result.failedCount
+                                    ),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                if (result.importedCount > 0) {
+                                    totpViewModel.revealSavedTotpTargets(targets)
+                                    pendingMigrationItems = null
+                                    navController.popBackStack()
+                                }
+                            }
+                        )
+                    }
+                )
+            }
         }
 
         // 导出数据

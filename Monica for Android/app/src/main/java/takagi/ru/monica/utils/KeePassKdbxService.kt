@@ -32,6 +32,8 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
@@ -90,6 +92,7 @@ import takagi.ru.monica.keepass.KeePassManagedFieldScope
 import takagi.ru.monica.keepass.KeePassEntryFieldPatch
 import takagi.ru.monica.keepass.KeePassFieldRegistry
 import takagi.ru.monica.keepass.KeePassPasskeySyncCodec
+import takagi.ru.monica.keepass.KeePassSecureItemPhotoAttachments
 import takagi.ru.monica.keepass.KeePassTotpCodec
 import takagi.ru.monica.notes.domain.NoteContentCodec
 import takagi.ru.monica.passkey.PasskeyCredentialIdCodec
@@ -97,6 +100,7 @@ import takagi.ru.monica.passkey.PasskeyPrivateKeyStore
 import takagi.ru.monica.attachments.executor.KeePassAttachmentRef
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.sync.SyncDiagnostics
+import takagi.ru.monica.util.ImageManager
 import takagi.ru.monica.util.TotpDataResolver
 import takagi.ru.monica.workers.KeePassRemoteUploadWorker
 import java.io.ByteArrayInputStream
@@ -301,6 +305,8 @@ class KeePassKdbxService(
     private val dao: LocalKeePassDatabaseDao,
     private val securityManager: SecurityManager
 ) {
+    private val imageManager by lazy { ImageManager(context.applicationContext) }
+
     companion object {
         private const val TAG = "KeePassKdbxService"
         // Keep unknown-source cache short, but keep known internal files effectively "always warm".
@@ -1282,9 +1288,11 @@ class KeePassKdbxService(
                 hasRecycleBinMeta = hasRecycleBinMeta,
                 resolutionContext = resolutionContext
             )
-            val secureItems = entries.mapNotNull { context ->
+            val secureItems = mutableListOf<KeePassSecureItemData>()
+            entries.forEach { context ->
                 entryToSecureItemData(
                     entry = context.entry,
+                    keePassDatabase = keePassDatabase,
                     databaseId = databaseId,
                     groupPath = context.groupPath,
                     groupUuid = context.groupUuid,
@@ -1292,7 +1300,7 @@ class KeePassKdbxService(
                     hasRecycleBinMeta = hasRecycleBinMeta,
                     allowedTypes = allowedSecureItemTypes,
                     resolutionContext = resolutionContext
-                )
+                )?.let(secureItems::add)
             }
             val groups = buildGroupInfoList(keePassDatabase, includeRecycleBinGroups)
             dao.updateEntryCount(database.id, passwords.size)
@@ -1841,9 +1849,11 @@ class KeePassKdbxService(
             val (_, _, keePassDatabase) = loadDatabase(databaseId)
             val (entries, hasRecycleBinMeta) = collectEntryContexts(keePassDatabase)
             val resolutionContext = KeePassFieldReferenceResolver.buildContext(entries.map { it.entry })
-            val data = entries.mapNotNull { context ->
+            val data = mutableListOf<KeePassSecureItemData>()
+            entries.forEach { context ->
                 entryToSecureItemData(
                     entry = context.entry,
+                    keePassDatabase = keePassDatabase,
                     databaseId = databaseId,
                     groupPath = context.groupPath,
                     groupUuid = context.groupUuid,
@@ -1851,7 +1861,7 @@ class KeePassKdbxService(
                     hasRecycleBinMeta = hasRecycleBinMeta,
                     allowedTypes = allowedTypes,
                     resolutionContext = resolutionContext
-                )
+                )?.let(data::add)
             }
             Result.success(data)
         } catch (e: Exception) {
@@ -1885,6 +1895,9 @@ class KeePassKdbxService(
         forceSyncWrite: Boolean = false
     ): Result<Int> = withContext(Dispatchers.IO) {
         try {
+            val itemsWithPhotoUpdates = items.map { item ->
+                item to buildSecureItemPhotoUpdates(item)
+            }
             val addedCount = mutateDatabase(
                 databaseId = databaseId,
                 forceSyncWrite = forceSyncWrite
@@ -1892,11 +1905,12 @@ class KeePassKdbxService(
                 var updatedDatabase = loaded.keePassDatabase
                 var addedCount = 0
                 val pendingChangeSets = mutableListOf<KeePassChangeSet>()
-                items.forEach { item ->
+                itemsWithPhotoUpdates.forEach { (item, photoUpdates) ->
                     val updateResult = updateSecureItemInternal(
                         keePassDatabase = updatedDatabase,
                         databaseId = loaded.database.id,
-                        item = item
+                        item = item,
+                        photoUpdates = photoUpdates
                     )
                     pendingChangeSets += updateResult.changeSets
                     if (updateResult.changed) {
@@ -1915,7 +1929,20 @@ class KeePassKdbxService(
                             groupPath = item.keepassGroupPath,
                             entry = newEntry
                         )
-                        updatedDatabase = updatedDatabase.modifyParentGroup { updatedRoot }
+                        val databaseWithEntry = updatedDatabase.modifyParentGroup { updatedRoot }
+                        val photoSync = KeePassSecureItemPhotoAttachments.synchronize(
+                            database = databaseWithEntry,
+                            entryUuid = newEntry.uuid,
+                            itemType = item.itemType,
+                            updates = photoUpdates
+                        )
+                        pendingChangeSets += buildSecureItemPhotoChangeSets(
+                            databaseId = loaded.database.id,
+                            entryUuid = newEntry.uuid,
+                            baseFingerprint = buildConflictEntrySignature(newEntry),
+                            changes = photoSync.changes
+                        )
+                        updatedDatabase = photoSync.database
                         addedCount++
                     }
                 }
@@ -1988,11 +2015,13 @@ class KeePassKdbxService(
         item: SecureItem
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            val photoUpdates = buildSecureItemPhotoUpdates(item)
             mutateDatabase(databaseId) { loaded ->
                 val updateResult = updateSecureItemInternal(
                     keePassDatabase = loaded.keePassDatabase,
                     databaseId = loaded.database.id,
-                    item = item
+                    item = item,
+                    photoUpdates = photoUpdates
                 )
                 val pendingChangeSets = updateResult.changeSets.toMutableList()
                 val updatedDatabase = if (updateResult.changed) {
@@ -2011,7 +2040,20 @@ class KeePassKdbxService(
                         groupPath = item.keepassGroupPath,
                         entry = newEntry
                     )
-                    loaded.keePassDatabase.modifyParentGroup { updatedRoot }
+                    val databaseWithEntry = loaded.keePassDatabase.modifyParentGroup { updatedRoot }
+                    val photoSync = KeePassSecureItemPhotoAttachments.synchronize(
+                        database = databaseWithEntry,
+                        entryUuid = newEntry.uuid,
+                        itemType = item.itemType,
+                        updates = photoUpdates
+                    )
+                    pendingChangeSets += buildSecureItemPhotoChangeSets(
+                        databaseId = loaded.database.id,
+                        entryUuid = newEntry.uuid,
+                        baseFingerprint = buildConflictEntrySignature(newEntry),
+                        changes = photoSync.changes
+                    )
+                    photoSync.database
                 }
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
@@ -2647,6 +2689,114 @@ class KeePassKdbxService(
         )
     }
 
+    private suspend fun buildSecureItemPhotoUpdates(
+        item: SecureItem
+    ): Map<
+        KeePassSecureItemPhotoAttachments.Slot,
+        KeePassSecureItemPhotoAttachments.SlotUpdate
+    > {
+        if (item.itemType != ItemType.BANK_CARD && item.itemType != ItemType.DOCUMENT) {
+            return emptyMap()
+        }
+        val paths = decodeSecureItemImagePaths(item.imagePaths)
+            ?: return KeePassSecureItemPhotoAttachments.Slot.entries.associateWith {
+                KeePassSecureItemPhotoAttachments.SlotUpdate.Preserve
+            }
+
+        return KeePassSecureItemPhotoAttachments.Slot.entries.associateWith { slot ->
+            val index = when (slot) {
+                KeePassSecureItemPhotoAttachments.Slot.FRONT -> 0
+                KeePassSecureItemPhotoAttachments.Slot.BACK -> 1
+            }
+            val localFileName = paths.getOrNull(index).orEmpty()
+            if (localFileName.isBlank()) {
+                KeePassSecureItemPhotoAttachments.SlotUpdate.Remove
+            } else {
+                val bytes = imageManager.readImageBytes(localFileName)
+                if (bytes != null) {
+                    KeePassSecureItemPhotoAttachments.SlotUpdate.Replace(bytes)
+                } else {
+                    Log.w(
+                        TAG,
+                        "Secure item photo cache unavailable; preserving existing KDBX binary " +
+                            "itemId=${item.id} type=${item.itemType} slot=$slot"
+                    )
+                    KeePassSecureItemPhotoAttachments.SlotUpdate.Preserve
+                }
+            }
+        }
+    }
+
+    private fun decodeSecureItemImagePaths(raw: String): List<String>? {
+        if (raw.isBlank()) return listOf("", "")
+        return runCatching { Json.decodeFromString<List<String>>(raw) }.getOrNull()
+    }
+
+    private suspend fun hydrateSecureItemImagePaths(
+        itemType: ItemType,
+        entry: Entry,
+        keePassDatabase: KeePassDatabase,
+        legacyImagePaths: String
+    ): String {
+        if (itemType != ItemType.BANK_CARD && itemType != ItemType.DOCUMENT) {
+            return legacyImagePaths
+        }
+        val managedPhotos = KeePassSecureItemPhotoAttachments.readManagedPhotos(
+            database = keePassDatabase,
+            entry = entry,
+            itemType = itemType
+        )
+        if (managedPhotos.isEmpty()) return legacyImagePaths
+
+        val legacyPaths = decodeSecureItemImagePaths(legacyImagePaths).orEmpty()
+        val resolvedPaths = KeePassSecureItemPhotoAttachments.Slot.entries.map { slot ->
+            val index = when (slot) {
+                KeePassSecureItemPhotoAttachments.Slot.FRONT -> 0
+                KeePassSecureItemPhotoAttachments.Slot.BACK -> 1
+            }
+            val legacyPath = legacyPaths.getOrNull(index).orEmpty()
+            val managedPhoto = managedPhotos[slot]
+            if (managedPhoto == null) {
+                ""
+            } else {
+                imageManager.saveImageBytes(
+                    bytes = managedPhoto.bytes,
+                    stableId = managedPhoto.hashHex
+                ) ?: legacyPath
+            }
+        }
+        return Json.encodeToString(resolvedPaths)
+    }
+
+    private fun buildSecureItemPhotoChangeSets(
+        databaseId: Long,
+        entryUuid: UUID,
+        baseFingerprint: String,
+        changes: List<KeePassSecureItemPhotoAttachments.Change>
+    ): List<KeePassChangeSet> {
+        return changes.map { change ->
+            val contentBase64 = if (change.operation == KeePassChangeOperation.ADD_ATTACHMENT) {
+                Base64.encodeToString(requireNotNull(change.bytes), Base64.NO_WRAP)
+            } else {
+                null
+            }
+            KeePassChangeSet(
+                databaseId = databaseId,
+                target = KeePassChangeTarget.SECURE_ITEM,
+                operation = change.operation,
+                entryUuid = entryUuid.toString(),
+                baseFingerprint = baseFingerprint,
+                attachmentPatch = KeePassAttachmentChangePatch(
+                    fileName = change.fileName,
+                    binaryHash = change.binaryHash,
+                    protected = change.protected,
+                    compressed = change.compressed,
+                    contentBase64 = contentBase64
+                )
+            )
+        }
+    }
+
     private fun buildSecureItemFields(item: SecureItem): EntryFields {
         val monicaId = if (item.id > 0) item.id.toString() else ""
         val portableItemData = portableSecureItemDataForKeePass(item)
@@ -2840,7 +2990,11 @@ class KeePassKdbxService(
     private fun updateSecureItemInternal(
         keePassDatabase: KeePassDatabase,
         databaseId: Long?,
-        item: SecureItem
+        item: SecureItem,
+        photoUpdates: Map<
+            KeePassSecureItemPhotoAttachments.Slot,
+            KeePassSecureItemPhotoAttachments.SlotUpdate
+        > = emptyMap()
     ): KeePassEntryUpdateResult {
         val resolutionContext = buildResolutionContext(keePassDatabase)
         val (entryContexts, _) = collectEntryContexts(keePassDatabase)
@@ -2857,30 +3011,55 @@ class KeePassKdbxService(
             fieldPatch.applyTo(existing)
         }
         val result = updateEntryInGroup(keePassDatabase.content.group, matcher, updater)
-        val updatedDatabase = if (result.second) {
+        val fieldUpdatedDatabase = if (result.second) {
             keePassDatabase.modifyParentGroup { result.first }
         } else {
             keePassDatabase
         }
+        val matchedEntry = matchedContext?.entry
+        val photoSync = if (result.second && matchedEntry != null) {
+            KeePassSecureItemPhotoAttachments.synchronize(
+                database = fieldUpdatedDatabase,
+                entryUuid = matchedEntry.uuid,
+                itemType = item.itemType,
+                updates = photoUpdates
+            )
+        } else {
+            KeePassSecureItemPhotoAttachments.SyncResult(
+                database = fieldUpdatedDatabase,
+                changes = emptyList()
+            )
+        }
+        val fieldChangeSets = if (result.second) {
+            buildFieldUpdateChangeSets(
+                database = keePassDatabase,
+                databaseId = databaseId,
+                target = KeePassChangeTarget.SECURE_ITEM,
+                matchedContext = matchedContext,
+                targetGroupPath = item.keepassGroupPath,
+                fieldPatch = fieldPatch.toChangePatch(
+                    managedScope = KeePassManagedFieldScope.SECURE_ITEM,
+                    baseEntry = matchedContext?.entry
+                ),
+                includeMoveChange = false
+            )
+        } else {
+            emptyList()
+        }
+        val photoChangeSets = if (databaseId != null && matchedEntry != null) {
+            buildSecureItemPhotoChangeSets(
+                databaseId = databaseId,
+                entryUuid = matchedEntry.uuid,
+                baseFingerprint = buildConflictEntrySignature(matchedEntry),
+                changes = photoSync.changes
+            )
+        } else {
+            emptyList()
+        }
         return KeePassEntryUpdateResult(
-            database = updatedDatabase,
+            database = photoSync.database,
             changed = result.second,
-            changeSets = if (result.second) {
-                buildFieldUpdateChangeSets(
-                    database = keePassDatabase,
-                    databaseId = databaseId,
-                    target = KeePassChangeTarget.SECURE_ITEM,
-                    matchedContext = matchedContext,
-                    targetGroupPath = item.keepassGroupPath,
-                    fieldPatch = fieldPatch.toChangePatch(
-                        managedScope = KeePassManagedFieldScope.SECURE_ITEM,
-                        baseEntry = matchedContext?.entry
-                    ),
-                    includeMoveChange = false
-                )
-            } else {
-                emptyList()
-            }
+            changeSets = fieldChangeSets + photoChangeSets
         )
     }
 
@@ -3869,8 +4048,9 @@ class KeePassKdbxService(
         return data
     }
 
-    private fun entryToSecureItemData(
+    private suspend fun entryToSecureItemData(
         entry: Entry,
+        keePassDatabase: KeePassDatabase,
         databaseId: Long,
         groupPath: String?,
         groupUuid: UUID?,
@@ -3895,7 +4075,13 @@ class KeePassKdbxService(
 
             val title = getFieldValue(entry, "Title", resolutionContext)
             val notes = getFieldValue(entry, "Notes", resolutionContext)
-            val imagePaths = getFieldValue(entry, FIELD_MONICA_IMAGE_PATHS, resolutionContext)
+            val legacyImagePaths = getFieldValue(entry, FIELD_MONICA_IMAGE_PATHS, resolutionContext)
+            val imagePaths = hydrateSecureItemImagePaths(
+                itemType = itemType,
+                entry = entry,
+                keePassDatabase = keePassDatabase,
+                legacyImagePaths = legacyImagePaths
+            )
             val isFavorite = getFieldValue(entry, FIELD_MONICA_IS_FAVORITE, resolutionContext).toBoolean()
             val sourceMonicaId = getFieldValue(entry, FIELD_MONICA_ITEM_ID, resolutionContext).toLongOrNull()
             val now = Date()

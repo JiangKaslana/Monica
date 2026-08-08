@@ -3,6 +3,10 @@ package takagi.ru.monica.util
 import android.net.Uri
 import takagi.ru.monica.data.model.OtpType
 import takagi.ru.monica.data.model.TotpData
+import java.net.URI
+import java.net.URLDecoder
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -23,8 +27,18 @@ import java.util.Base64
 object TotpUriParser {
 
     private val motpRegex = Regex("^motp://(.*?):(.*?)\\?(.*)$", RegexOption.IGNORE_CASE)
-    private val migrationPrefix = "otpauth-migration://offline?data="
+    private const val migrationScheme = "otpauth-migration"
+    private const val migrationAuthority = "offline"
+    private const val maxMigrationUriLength = 64 * 1024
+    private const val maxMigrationPayloadBytes = 48 * 1024
+    private const val maxMigrationItems = 256
+    private const val maxMigrationSecretBytes = 1024
+    private const val maxMigrationTextBytes = 4096
     private const val migrationPayloadField = 1
+    private const val migrationVersionField = 2
+    private const val migrationBatchSizeField = 3
+    private const val migrationBatchIndexField = 4
+    private const val migrationBatchIdField = 5
     private const val otpSecretField = 1
     private const val otpUsernameField = 2
     private const val otpIssuerField = 3
@@ -56,12 +70,15 @@ object TotpUriParser {
         val normalized = content.trim()
         val lower = normalized.lowercase()
         return when {
-            lower.startsWith("otpauth-migration://") -> {
-                val items = parseOtpAuthMigrationUri(normalized)
-                when {
-                    items.isEmpty() -> TotpScanParseResult.InvalidFormat
-                    items.size == 1 -> TotpScanParseResult.Single(items.first())
-                    else -> TotpScanParseResult.Multiple(items)
+            lower.startsWith("$migrationScheme://") -> {
+                when (val migration = parseOtpAuthMigrationUri(normalized)) {
+                    is MigrationParseOutcome.Success -> when {
+                        migration.items.size == 1 -> TotpScanParseResult.Single(migration.items.first())
+                        else -> TotpScanParseResult.Multiple(migration.items)
+                    }
+                    is MigrationParseOutcome.Failure -> {
+                        TotpScanParseResult.MigrationFailure(migration.reason)
+                    }
                 }
             }
             lower.startsWith("otpauth://") || lower.startsWith("motp://") -> {
@@ -213,105 +230,232 @@ object TotpUriParser {
         return result
     }
 
-    private fun parseOtpAuthMigrationUri(uri: String): List<TotpParseResult> {
-        if (!uri.lowercase().startsWith(migrationPrefix)) {
-            return emptyList()
-        }
-
-        val encodedData = Uri.parse(uri).getQueryParameter("data") ?: return emptyList()
-        val payload = decodeMigrationPayload(encodedData) ?: return emptyList()
-        val rawItems = parseMigrationPayload(payload)
-        if (rawItems.isEmpty()) {
-            return emptyList()
-        }
-
-        return rawItems.mapNotNull(::toParseResult)
-    }
-
-    private fun decodeMigrationPayload(encodedData: String): ByteArray? {
-        return runCatching {
-            var base64 = encodedData
-                .replace(' ', '+')
-                .replace('-', '+')
-                .replace('_', '/')
-
-            val padding = (4 - (base64.length % 4)) % 4
-            if (padding > 0) {
-                base64 += "=".repeat(padding)
+    private fun parseOtpAuthMigrationUri(uri: String): MigrationParseOutcome {
+        return try {
+            val encodedData = extractMigrationData(uri)
+            val payload = decodeMigrationPayload(encodedData)
+            val parsedPayload = parseMigrationPayload(payload)
+            validateMigrationBatch(parsedPayload)
+            val items = parsedPayload.items.map(::toParseResult)
+            if (items.isEmpty()) {
+                migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
             }
-            Base64.getDecoder().decode(base64)
-        }.getOrNull()
+            MigrationParseOutcome.Success(items)
+        } catch (error: MigrationParseException) {
+            MigrationParseOutcome.Failure(error.reason)
+        } catch (_: Exception) {
+            MigrationParseOutcome.Failure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
     }
 
-    private fun parseMigrationPayload(payload: ByteArray): List<MigrationOtpRaw> {
+    private fun extractMigrationData(uri: String): String {
+        if (uri.length > maxMigrationUriLength) {
+            migrationFailure(MigrationFailureReason.PAYLOAD_TOO_LARGE)
+        }
+
+        val parsed = runCatching { URI(uri) }.getOrElse {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+        if (
+            !parsed.scheme.equals(migrationScheme, ignoreCase = true) ||
+            !parsed.rawAuthority.equals(migrationAuthority, ignoreCase = true) ||
+            parsed.rawFragment != null
+        ) {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+
+        val rawQuery = parsed.rawQuery ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        var encodedData: String? = null
+        rawQuery.split('&').forEach { segment ->
+            val rawKey = segment.substringBefore('=', "")
+            val rawValue = segment.substringAfter('=', "")
+            val key = decodeQueryComponent(rawKey)
+            if (key == "data") {
+                if (encodedData != null || rawValue.isBlank()) {
+                    migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                }
+                encodedData = decodeQueryComponent(rawValue)
+            }
+        }
+        return encodedData ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+    }
+
+    private fun decodeQueryComponent(value: String): String {
+        return runCatching {
+            URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+        }.getOrElse {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+    }
+
+    private fun decodeMigrationPayload(encodedData: String): ByteArray {
+        if (encodedData.length > maxMigrationUriLength) {
+            migrationFailure(MigrationFailureReason.PAYLOAD_TOO_LARGE)
+        }
+
+        var base64 = encodedData
+            .replace(' ', '+')
+            .replace('-', '+')
+            .replace('_', '/')
+        val padding = (4 - (base64.length % 4)) % 4
+        if (padding > 0) {
+            base64 += "=".repeat(padding)
+        }
+
+        val payload = runCatching { Base64.getDecoder().decode(base64) }.getOrElse {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+        if (payload.isEmpty()) {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+        if (payload.size > maxMigrationPayloadBytes) {
+            migrationFailure(MigrationFailureReason.PAYLOAD_TOO_LARGE)
+        }
+        return payload
+    }
+
+    private fun parseMigrationPayload(payload: ByteArray): MigrationPayloadRaw {
         val reader = ProtoReader(payload)
         val result = mutableListOf<MigrationOtpRaw>()
+        var version: Int? = null
+        var batchSize: Int? = null
+        var batchIndex: Int? = null
+        var batchId: Int? = null
 
         while (!reader.isAtEnd()) {
-            val tag = reader.readTag() ?: break
+            val tag = reader.readTag() ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
             val fieldNumber = tag ushr 3
             val wireType = tag and 0x07
 
-            if (fieldNumber == migrationPayloadField && wireType == WireType.LENGTH_DELIMITED) {
-                val messageBytes = reader.readBytes() ?: return emptyList()
-                parseMigrationAuthenticator(messageBytes)?.let { result += it }
-            } else if (!reader.skipField(wireType)) {
-                return emptyList()
+            when (fieldNumber) {
+                migrationPayloadField -> {
+                    requireWireType(wireType, WireType.LENGTH_DELIMITED)
+                    if (result.size >= maxMigrationItems) {
+                        migrationFailure(MigrationFailureReason.PAYLOAD_TOO_LARGE)
+                    }
+                    val messageBytes = reader.readBytes()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                    result += parseMigrationAuthenticator(messageBytes)
+                }
+                migrationVersionField -> {
+                    requireWireType(wireType, WireType.VARINT)
+                    if (version != null) migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                    version = reader.readVarInt32()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                }
+                migrationBatchSizeField -> {
+                    requireWireType(wireType, WireType.VARINT)
+                    if (batchSize != null) migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                    batchSize = reader.readVarInt32()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                }
+                migrationBatchIndexField -> {
+                    requireWireType(wireType, WireType.VARINT)
+                    if (batchIndex != null) migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                    batchIndex = reader.readVarInt32()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                }
+                migrationBatchIdField -> {
+                    requireWireType(wireType, WireType.VARINT)
+                    if (batchId != null) migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                    batchId = reader.readVarInt32()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                }
+                else -> if (!reader.skipField(wireType)) {
+                    migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                }
             }
         }
-        return result
+
+        return MigrationPayloadRaw(
+            items = result,
+            version = version,
+            batchSize = batchSize,
+            batchIndex = batchIndex,
+            batchId = batchId
+        )
     }
 
-    private fun parseMigrationAuthenticator(bytes: ByteArray): MigrationOtpRaw? {
+    private fun validateMigrationBatch(payload: MigrationPayloadRaw) {
+        if (payload.items.isEmpty()) {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+        if (payload.version != null && payload.version !in 1..2) {
+            migrationFailure(MigrationFailureReason.UNSUPPORTED_VERSION)
+        }
+
+        val batchSize = payload.batchSize ?: 1
+        val batchIndex = payload.batchIndex ?: 0
+        if (batchSize <= 0 || batchIndex < 0 || batchIndex >= batchSize) {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+        if (batchSize > 1) {
+            migrationFailure(MigrationFailureReason.MULTI_QR_BATCH)
+        }
+    }
+
+    private fun parseMigrationAuthenticator(bytes: ByteArray): MigrationOtpRaw {
         val reader = ProtoReader(bytes)
         var secret = ByteArray(0)
         var username = ""
         var issuer = ""
-        var algorithm = 1
-        var digits = 1
-        var type = 2
+        var algorithm: Int? = null
+        var digits: Int? = null
+        var type: Int? = null
         var counter = 0L
 
         while (!reader.isAtEnd()) {
-            val tag = reader.readTag() ?: break
+            val tag = reader.readTag() ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
             val fieldNumber = tag ushr 3
             val wireType = tag and 0x07
 
             when (fieldNumber) {
                 otpSecretField -> {
-                    if (wireType != WireType.LENGTH_DELIMITED) return null
-                    secret = reader.readBytes() ?: return null
+                    requireWireType(wireType, WireType.LENGTH_DELIMITED)
+                    secret = reader.readBytes()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                    if (secret.size > maxMigrationSecretBytes) {
+                        migrationFailure(MigrationFailureReason.PAYLOAD_TOO_LARGE)
+                    }
                 }
                 otpUsernameField -> {
-                    if (wireType != WireType.LENGTH_DELIMITED) return null
-                    username = reader.readString() ?: return null
+                    requireWireType(wireType, WireType.LENGTH_DELIMITED)
+                    username = reader.readString(maxMigrationTextBytes)
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
                 }
                 otpIssuerField -> {
-                    if (wireType != WireType.LENGTH_DELIMITED) return null
-                    issuer = reader.readString() ?: return null
+                    requireWireType(wireType, WireType.LENGTH_DELIMITED)
+                    issuer = reader.readString(maxMigrationTextBytes)
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
                 }
                 otpAlgorithmField -> {
-                    if (wireType != WireType.VARINT) return null
-                    algorithm = reader.readVarInt32() ?: return null
+                    requireWireType(wireType, WireType.VARINT)
+                    algorithm = reader.readVarInt32()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
                 }
                 otpDigitsField -> {
-                    if (wireType != WireType.VARINT) return null
-                    digits = reader.readVarInt32() ?: return null
+                    requireWireType(wireType, WireType.VARINT)
+                    digits = reader.readVarInt32()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
                 }
                 otpTypeField -> {
-                    if (wireType != WireType.VARINT) return null
-                    type = reader.readVarInt32() ?: return null
+                    requireWireType(wireType, WireType.VARINT)
+                    type = reader.readVarInt32()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
                 }
                 otpCounterField -> {
-                    if (wireType != WireType.VARINT) return null
-                    counter = reader.readVarInt64() ?: return null
+                    requireWireType(wireType, WireType.VARINT)
+                    counter = reader.readVarInt64()
+                        ?: migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
                 }
-                else -> if (!reader.skipField(wireType)) return null
+                else -> if (!reader.skipField(wireType)) {
+                    migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+                }
             }
         }
 
         if (secret.isEmpty()) {
-            return null
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
         }
 
         return MigrationOtpRaw(
@@ -325,40 +469,41 @@ object TotpUriParser {
         )
     }
 
-    private fun toParseResult(raw: MigrationOtpRaw): TotpParseResult? {
+    private fun toParseResult(raw: MigrationOtpRaw): TotpParseResult {
         val otpType = when (raw.type) {
             1 -> OtpType.HOTP
             2 -> OtpType.TOTP
-            else -> return null
+            else -> migrationFailure(MigrationFailureReason.UNSUPPORTED_OTP_TYPE)
         }
 
         val algorithm = when (raw.algorithm) {
             1 -> "SHA1"
             2 -> "SHA256"
             3 -> "SHA512"
-            else -> return null
+            else -> migrationFailure(MigrationFailureReason.UNSUPPORTED_ALGORITHM)
         }
 
         val digits = when (raw.digits) {
+            1 -> 6
             2 -> 8
-            else -> 6
+            else -> migrationFailure(MigrationFailureReason.UNSUPPORTED_DIGITS)
         }
 
-        var issuer = raw.issuer.trim()
+        val issuer = raw.issuer.trim()
         var accountName = raw.username.trim()
-
-        if (issuer.isBlank()) {
-            issuer = accountName
-            accountName = ""
-        } else if (accountName.startsWith("$issuer: ")) {
-            accountName = accountName.removePrefix("$issuer: ").trim()
+        if (issuer.isNotBlank() && accountName.startsWith("$issuer:", ignoreCase = true)) {
+            accountName = accountName.substring(issuer.length + 1).trim()
         }
 
-        if (issuer.isBlank()) {
-            return null
+        if (issuer.isBlank() && accountName.isBlank()) {
+            migrationFailure(MigrationFailureReason.MISSING_ACCOUNT_NAME)
         }
 
-        val label = if (accountName.isNotBlank()) "$issuer:$accountName" else issuer
+        val label = when {
+            issuer.isNotBlank() && accountName.isNotBlank() -> "$issuer:$accountName"
+            issuer.isNotBlank() -> issuer
+            else -> accountName
+        }
         val secretBase32 = base32Encode(raw.secret)
 
         return TotpParseResult(
@@ -376,6 +521,16 @@ object TotpUriParser {
             label = label,
             accountName = accountName
         )
+    }
+
+    private fun requireWireType(actual: Int, expected: Int) {
+        if (actual != expected) {
+            migrationFailure(MigrationFailureReason.MALFORMED_PAYLOAD)
+        }
+    }
+
+    private fun migrationFailure(reason: MigrationFailureReason): Nothing {
+        throw MigrationParseException(reason)
     }
 
     private fun base32Encode(data: ByteArray): String {
@@ -548,11 +703,28 @@ object TotpUriParser {
         val secret: ByteArray,
         val username: String,
         val issuer: String,
-        val algorithm: Int,
-        val digits: Int,
-        val type: Int,
+        val algorithm: Int?,
+        val digits: Int?,
+        val type: Int?,
         val counter: Long
     )
+
+    private data class MigrationPayloadRaw(
+        val items: List<MigrationOtpRaw>,
+        val version: Int?,
+        val batchSize: Int?,
+        val batchIndex: Int?,
+        val batchId: Int?
+    )
+
+    private sealed interface MigrationParseOutcome {
+        data class Success(val items: List<TotpParseResult>) : MigrationParseOutcome
+        data class Failure(val reason: MigrationFailureReason) : MigrationParseOutcome
+    }
+
+    private class MigrationParseException(
+        val reason: MigrationFailureReason
+    ) : RuntimeException()
 
     private class ProtoReader(private val data: ByteArray) {
         private var position: Int = 0
@@ -561,7 +733,7 @@ object TotpUriParser {
 
         fun readTag(): Int? {
             if (isAtEnd()) return null
-            return readVarInt32()
+            return readVarInt32()?.takeIf { it != 0 }
         }
 
         fun readVarInt32(): Int? {
@@ -591,9 +763,17 @@ object TotpUriParser {
             return result
         }
 
-        fun readString(): String? {
+        fun readString(maxBytes: Int): String? {
             val bytes = readBytes() ?: return null
-            return bytes.toString(StandardCharsets.UTF_8)
+            if (bytes.size > maxBytes) return null
+            return runCatching {
+                StandardCharsets.UTF_8
+                    .newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString()
+            }.getOrNull()
         }
 
         fun skipField(wireType: Int): Boolean {
@@ -631,6 +811,18 @@ data class TotpParseResult(
 sealed class TotpScanParseResult {
     data class Single(val item: TotpParseResult) : TotpScanParseResult()
     data class Multiple(val items: List<TotpParseResult>) : TotpScanParseResult()
+    data class MigrationFailure(val reason: MigrationFailureReason) : TotpScanParseResult()
     data object UnsupportedPhoneFactor : TotpScanParseResult()
     data object InvalidFormat : TotpScanParseResult()
+}
+
+enum class MigrationFailureReason {
+    MALFORMED_PAYLOAD,
+    PAYLOAD_TOO_LARGE,
+    UNSUPPORTED_VERSION,
+    MULTI_QR_BATCH,
+    UNSUPPORTED_ALGORITHM,
+    UNSUPPORTED_DIGITS,
+    UNSUPPORTED_OTP_TYPE,
+    MISSING_ACCOUNT_NAME
 }

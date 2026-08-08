@@ -6,12 +6,13 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import takagi.ru.monica.data.PasswordEntry
+import takagi.ru.monica.data.SecureItem
 
 /**
  * 附件元数据。
  *
- * 一条 [Attachment] 始终挂在一个 [PasswordEntry] 之下，对应 requirements.md Requirement 1：
- * - 永久删除密码时 CASCADE 清除附件元数据；
+ * 一条 [Attachment] 始终挂在一个 [PasswordEntry] 或 [SecureItem] 之下：
+ * - 永久删除所属条目时 CASCADE 清除附件元数据；
  * - 软删除/恢复通过应用层事务同步 [isDeleted]/[deletedAt]；
  * - 不强制 [fileName] 唯一，同名文件可共存。
  *
@@ -34,10 +35,17 @@ import takagi.ru.monica.data.PasswordEntry
             parentColumns = ["id"],
             childColumns = ["parent_password_id"],
             onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = SecureItem::class,
+            parentColumns = ["id"],
+            childColumns = ["parent_secure_item_id"],
+            onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [
         Index(value = ["parent_password_id"], name = "index_attachments_parent"),
+        Index(value = ["parent_secure_item_id"], name = "index_attachments_secure_item_parent"),
         Index(value = ["source"], name = "index_attachments_source"),
         Index(value = ["bitwarden_attachment_id"], name = "index_attachments_bw_id"),
         Index(value = ["keepass_binary_ref"], name = "index_attachments_kp_ref")
@@ -47,9 +55,13 @@ data class Attachment(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
 
-    /** 所属密码的数据库 id。 */
+    /** 所属密码的数据库 id；与 [parentSecureItemId] 二选一。 */
     @ColumnInfo(name = "parent_password_id")
-    val parentPasswordId: Long,
+    val parentPasswordId: Long? = null,
+
+    /** 所属安全项的数据库 id；与 [parentPasswordId] 二选一。 */
+    @ColumnInfo(name = "parent_secure_item_id")
+    val parentSecureItemId: Long? = null,
 
     /** [AttachmentSource] 的 DB 存储形式（字符串，与枚举 name 对应）。 */
     @ColumnInfo(name = "source")
@@ -117,6 +129,16 @@ data class Attachment(
     @ColumnInfo(name = "deleted_at")
     val deletedAt: Long? = null
 ) {
+    /** 返回明确区分表类型的所有者；数据库约束保证正常记录只会命中一个分支。 */
+    val owner: AttachmentOwner?
+        get() = when {
+            parentPasswordId != null && parentSecureItemId == null ->
+                AttachmentOwner.password(parentPasswordId)
+            parentPasswordId == null && parentSecureItemId != null ->
+                AttachmentOwner.secureItem(parentSecureItemId)
+            else -> null
+        }
+
     /** 便捷访问枚举值。 */
     val sourceEnum: AttachmentSource
         get() = AttachmentSource.fromDbValue(source)
