@@ -71,7 +71,7 @@ class SteamBoundaryGuardTest {
     fun steamDoesNotChangeMainPasswordDatabaseSchema() {
         val source = projectFile("app/src/main/java/takagi/ru/monica/data/PasswordDatabase.kt").readText()
 
-        assertTrue(source.contains("version = 72"))
+        assertTrue(source.contains("version = 77"))
         assertFalse(source.contains("SteamAccountEntity::class"))
         assertFalse(source.contains("abstract fun steamAccountDao"))
     }
@@ -86,6 +86,16 @@ class SteamBoundaryGuardTest {
         assertFalse(source.contains("SecureItemDao"))
         assertFalse(source.contains("ItemType.TOTP"))
         assertTrue(source.contains("SecurityManager"))
+    }
+
+    @Test
+    fun bitwardenRepositoryExposesCachedPremiumStateForAttachmentCallers() {
+        val source = projectFile(
+            "app/src/main/java/takagi/ru/monica/bitwarden/repository/BitwardenRepository.kt"
+        ).readText()
+
+        assertTrue(source.contains("fun isVaultPremium(vaultId: Long): Boolean"))
+        assertTrue(source.contains("BitwardenVaultPremiumStore.isPremium(context, vaultId)"))
     }
 
     @Test
@@ -365,8 +375,10 @@ class SteamBoundaryGuardTest {
         assertTrue(steamScreenSource.contains("val mdbxDatabasesState by passwordDatabase.localMdbxDatabaseDao()"))
         assertTrue(steamScreenSource.contains(".collectAsState(initial = null)"))
         assertTrue(steamScreenSource.contains("val mdbxDatabasesLoaded = mdbxDatabasesState != null"))
-        assertTrue(steamScreenSource.contains("LaunchedEffect(uiState.storageSource, mdbxDatabasesLoaded"))
-        assertTrue(steamScreenSource.contains("mdbxDatabasesLoaded &&"))
+        assertTrue(steamScreenSource.contains("uiState.storageSource,"))
+        assertTrue(steamScreenSource.contains("is SteamStorageSource.Mdbx ->"))
+        assertTrue(steamScreenSource.contains("is SteamStorageSource.KeePass ->"))
+        assertTrue(steamScreenSource.contains("is SteamStorageSource.Bitwarden ->"))
         assertFalse(steamScreenSource.contains("UnifiedCategoryFilterChipMenu("))
     }
 
@@ -504,7 +516,7 @@ class SteamBoundaryGuardTest {
         assertTrue(codeContent.contains("onTransferSelected: () -> Unit"))
         assertTrue(codeContent.contains("onOpenDetail: (SteamAccount) -> Unit"))
         assertTrue(codeContent.contains("appSettings: AppSettings"))
-        assertTrue(codeContent.contains("rememberTotpTickerMillis(appSettings.validatorSmoothProgress)"))
+        assertTrue(codeContent.contains("rememberTotpTickerMillis(smooth = false)"))
         assertTrue(codeContent.contains("appSettings.validatorUnifiedProgressBar == UnifiedProgressBarMode.ENABLED"))
         assertTrue(codeContent.contains("UnifiedProgressBar("))
         assertTrue(codeContent.contains("style = appSettings.validatorProgressBarStyle"))
@@ -528,7 +540,7 @@ class SteamBoundaryGuardTest {
         assertTrue(codeContent.contains("onOpenDetail(account)"))
         assertTrue(codeContent.contains("copyCode(SteamTotp.generateAuthCode(account.sharedSecret"))
         assertTrue(codeContent.contains("isSelectionMode = selectionMode"))
-        assertTrue(codeContent.contains("sharedProgressTimeMillis = sharedProgressTimeMillis"))
+        assertTrue(codeContent.contains("sharedTickSeconds = sharedTickSeconds"))
         assertTrue(codeContent.contains("appSettings = appSettings"))
         assertFalse(codeContent.contains("onLongClick = { onToggleSelection(account) }"))
         assertTrue(codeContent.contains("SteamAvatarImage("))
@@ -576,7 +588,7 @@ class SteamBoundaryGuardTest {
         assertTrue(source.contains("titleRes = R.string.steam_steamid_completion_login_title"))
         assertTrue(source.contains("showRemarkField = false"))
         assertTrue(source.contains("if (scanQr != null && account != null && account.hasRealSteamId)"))
-        assertTrue(source.contains("viewModel.refreshAuthorizedDevices(animatedDetailAccount.id)"))
+        assertTrue(source.contains("viewModel.refreshAuthorizedDevices(account.id, silent = true)"))
         assertTrue(source.contains("viewModel.revokeAuthorizedDevice("))
 
         val missingSteamIdPromptContent = source

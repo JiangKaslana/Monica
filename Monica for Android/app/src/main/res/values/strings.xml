@@ -1016,6 +1016,10 @@
     <string name="steam_mafile_invalid_steamid_message">Enter a valid SteamID64 or 32-bit Account ID.</string>
     <string name="steam_mafile_password_label">Encrypted maFile password</string>
     <string name="steam_cannot_load_mdbx_accounts">Cannot load Steam accounts from MDBX</string>
+    <string name="steam_cannot_load_keepass_accounts">Cannot load Steam accounts from KeePass</string>
+    <string name="steam_cannot_load_bitwarden_accounts">Cannot load Steam accounts from Bitwarden</string>
+    <string name="steam_keepass_storage_unavailable">KeePass storage is unavailable</string>
+    <string name="steam_bitwarden_storage_unavailable">Bitwarden storage is unavailable</string>
     <string name="steam_transfer_mafile_title">Move or copy maFile</string>
     <string name="steam_transfer_mafile_count">%1$d selected</string>
     <string name="steam_transfer_mafile_desc">Moves or copies the complete maFile, including login session data, so confirmations and login approvals keep working after transfer.</string>

@@ -49,18 +49,23 @@ import com.google.zxing.BarcodeFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import takagi.ru.monica.R
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.repository.MdbxRepositoryFactory
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.steam.data.SteamAccount
 import takagi.ru.monica.steam.data.SteamAccountRepository
+import takagi.ru.monica.steam.data.SteamBitwardenAccountStore
 import takagi.ru.monica.steam.data.SteamDatabase
+import takagi.ru.monica.steam.data.SteamKeePassAccountStore
 import takagi.ru.monica.steam.data.SteamMdbxAccountStore
 import takagi.ru.monica.steam.data.SteamStorageSource
 import takagi.ru.monica.steam.diagnostics.SteamDiagLogger
 import takagi.ru.monica.steam.network.SteamQrChallenge
 import takagi.ru.monica.ui.components.MonicaModalBottomSheet
 import takagi.ru.monica.ui.screens.QrScannerScreen
+import takagi.ru.monica.utils.KeePassKdbxService
 
 @Composable
 fun SteamQrScannerScreen(
@@ -72,6 +77,7 @@ fun SteamQrScannerScreen(
     val context = LocalContext.current
     val appContext = remember(context) { context.applicationContext }
     val securityManager = remember(appContext) { SecurityManager(appContext) }
+    val passwordDatabase = remember(appContext) { PasswordDatabase.getDatabase(appContext) }
     val repository = remember(appContext) {
         SteamAccountRepository(
             SteamDatabase.getDatabase(appContext).steamAccountDao(),
@@ -79,13 +85,28 @@ fun SteamQrScannerScreen(
         )
     }
     val mdbxAccountStore = remember(appContext) {
-        val passwordDatabase = PasswordDatabase.getDatabase(appContext)
         SteamMdbxAccountStore(
             MdbxRepositoryFactory.create(
                 context = appContext,
                 database = passwordDatabase,
                 securityManager = securityManager,
             )
+        )
+    }
+    val keepassAccountStore = remember(appContext) {
+        SteamKeePassAccountStore(
+            KeePassKdbxService(
+                context = appContext,
+                dao = passwordDatabase.localKeePassDatabaseDao(),
+                securityManager = securityManager
+            )
+        )
+    }
+    val bitwardenAccountStore = remember(appContext) {
+        SteamBitwardenAccountStore(
+            database = passwordDatabase,
+            bitwardenRepository = BitwardenRepository.getInstance(appContext),
+            attachmentFacade = AttachmentContainer.facade(appContext)
         )
     }
     val storageSource = remember(context) { readSteamStorageSource(context) }
@@ -96,13 +117,23 @@ fun SteamQrScannerScreen(
     }
     var showAccountPicker by remember { mutableStateOf(false) }
 
-    LaunchedEffect(repository, mdbxAccountStore, storageSource) {
+    LaunchedEffect(repository, mdbxAccountStore, keepassAccountStore, bitwardenAccountStore, storageSource) {
         accounts = withContext(Dispatchers.IO) {
             when (storageSource) {
                 SteamStorageSource.Local -> repository.getAccounts()
                 is SteamStorageSource.Mdbx -> runCatching {
                     mdbxAccountStore
                         .loadAccounts(storageSource.databaseId)
+                        .map { it.account }
+                }.getOrDefault(emptyList())
+                is SteamStorageSource.KeePass -> runCatching {
+                    keepassAccountStore
+                        .loadAccounts(storageSource.databaseId)
+                        .map { it.account }
+                }.getOrDefault(emptyList())
+                is SteamStorageSource.Bitwarden -> runCatching {
+                    bitwardenAccountStore
+                        .loadAccounts(storageSource.vaultId)
                         .map { it.account }
                 }.getOrDefault(emptyList())
             }

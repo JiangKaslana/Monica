@@ -246,6 +246,15 @@ class BitwardenRepository(private val context: Context) {
         return symmetricKeyCache.containsKey(vaultId) && accessTokenCache.containsKey(vaultId)
     }
 
+    /**
+     * 返回最近一次同步记录的 Premium 状态。
+     *
+     * 附件调用方必须使用保守的缓存状态，避免在未获授权的账户上绕过服务端能力检查。
+     */
+    fun isVaultPremium(vaultId: Long): Boolean {
+        return BitwardenVaultPremiumStore.isPremium(context, vaultId)
+    }
+
     fun getCachedSymmetricKey(vaultId: Long): SymmetricCryptoKey? {
         val key = symmetricKeyCache[vaultId] ?: return null
         return SymmetricCryptoKey(

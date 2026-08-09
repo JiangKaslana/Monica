@@ -80,6 +80,19 @@ class AttachmentFacade(
         val keepassContext: KeePassContext? = null
     )
 
+    data class InlineUploadRequest(
+        val owner: AttachmentOwner,
+        val source: AttachmentSource,
+        val fileName: String,
+        val mimeType: String,
+        val bytes: ByteArray,
+        val isPlusActivated: Boolean,
+        val bitwardenPremium: Boolean = true,
+        val kdbxSoftLimitAccepted: Boolean = false,
+        val bitwardenContext: BitwardenContext? = null,
+        val keepassContext: KeePassContext? = null
+    )
+
     data class BitwardenContext(
         val vaultApi: BitwardenVaultApi,
         val httpClient: OkHttpClient,
@@ -265,6 +278,107 @@ class AttachmentFacade(
         }
     }
 
+    /** Adds a small in-memory payload without materializing plaintext in a temporary file. */
+    suspend fun addInlineAttachment(request: InlineUploadRequest): Attachment =
+        withContext(Dispatchers.IO) {
+            val existingCount = repository.countActive(request.owner)
+            AttachmentQuotaPolicy.check(existingCount, request.isPlusActivated)?.let { throw it }
+            when (
+                val validation = AttachmentSizeValidator.validate(
+                    sizeBytes = request.bytes.size.toLong(),
+                    source = request.source,
+                    userAcceptedSoftLimit = request.kdbxSoftLimitAccepted
+                )
+            ) {
+                is AttachmentSizeValidator.Result.Ok -> Unit
+                is AttachmentSizeValidator.Result.TooLarge ->
+                    throw AttachmentError.TooLarge(validation.limitBytes, validation.actualBytes)
+                is AttachmentSizeValidator.Result.NeedsConfirm ->
+                    throw AttachmentError.TooLarge(validation.softLimitBytes, validation.actualBytes)
+            }
+
+            val attachment = when (request.source) {
+                AttachmentSource.LOCAL -> throw AttachmentError.IoError
+                AttachmentSource.BITWARDEN -> {
+                    if (!request.bitwardenPremium) throw AttachmentError.PremiumRequired
+                    val bw = request.bitwardenContext ?: throw AttachmentError.IoError
+                    if (!bw.isOnline) throw AttachmentError.Offline
+                    request.bytes.inputStream().use { stream ->
+                        bitwardenExecutor.upload(
+                            owner = request.owner,
+                            fileName = request.fileName,
+                            mimeType = request.mimeType,
+                            source = stream,
+                            sizeBytes = request.bytes.size.toLong(),
+                            ctx = BitwardenAttachmentExecutor.UploadContext(
+                                vaultApi = bw.vaultApi,
+                                httpClient = bw.httpClient,
+                                accessToken = bw.accessToken,
+                                cipherId = bw.cipherId,
+                                wrappingKey = bw.wrappingKey
+                            )
+                        )
+                    }
+                }
+                AttachmentSource.KEEPASS -> {
+                    val kp = request.keepassContext ?: throw AttachmentError.IoError
+                    keepassExecutor.upload(
+                        owner = request.owner,
+                        databaseId = kp.databaseId,
+                        entryUuid = kp.entryUuid,
+                        fileName = request.fileName,
+                        mimeType = request.mimeType,
+                        sourceBytes = request.bytes
+                    )
+                }
+            }
+
+            try {
+                val insertedId = repository.insert(attachment)
+                attachment.copy(id = insertedId).also { saved ->
+                    AttachmentLogger.logOk(
+                        event = AttachmentLogger.Event.UPLOAD,
+                        attachmentId = insertedId,
+                        source = saved.sourceEnum,
+                        extras = mapOf(
+                            "ownerKind" to request.owner.kind.name,
+                            "ownerId" to request.owner.id,
+                            "inline" to true
+                        )
+                    )
+                }
+            } catch (error: Throwable) {
+                when (attachment.sourceEnum) {
+                    AttachmentSource.LOCAL -> Unit
+                    AttachmentSource.BITWARDEN -> {
+                        val bw = request.bitwardenContext
+                        val remoteId = attachment.bitwardenAttachmentId
+                        if (bw != null && !remoteId.isNullOrBlank()) {
+                            runCatching {
+                                bitwardenExecutor.remove(
+                                    vaultApi = bw.vaultApi,
+                                    accessToken = bw.accessToken,
+                                    cipherId = bw.cipherId,
+                                    bitwardenAttachmentId = remoteId
+                                )
+                            }
+                        }
+                    }
+                    AttachmentSource.KEEPASS -> {
+                        val kp = request.keepassContext
+                        val ref = attachment.keepassBinaryRef
+                        if (kp != null && !ref.isNullOrBlank()) {
+                            runCatching {
+                                keepassExecutor.remove(kp.databaseId, kp.entryUuid, ref)
+                            }
+                        }
+                    }
+                }
+                attachment.localPath?.let { path -> runCatching { storage.delete(path) } }
+                throw error
+            }
+        }
+
     // ---------------------------------------------------------------- 读/导出
 
     /**
@@ -325,6 +439,42 @@ class AttachmentFacade(
         }
         repository.update(refreshed)
         refreshed.copy(id = attachmentId)
+    }
+
+    suspend fun readAttachmentBytes(
+        attachmentId: Long,
+        maxBytes: Int,
+        bitwardenContext: BitwardenContext? = null,
+        keepassContext: KeePassContext? = null
+    ): ByteArray = withContext(Dispatchers.IO) {
+        require(maxBytes > 0)
+        val ready = ensureDownloaded(
+            attachmentId = attachmentId,
+            bitwardenContext = bitwardenContext,
+            keepassContext = keepassContext
+        )
+        if (ready.sizeBytes > maxBytes.toLong()) throw AttachmentError.TooLarge(
+            limitBytes = maxBytes.toLong(),
+            actualBytes = ready.sizeBytes
+        )
+        localExecutor.openDecrypted(ready).use { input ->
+            val output = java.io.ByteArrayOutputStream(
+                ready.sizeBytes.coerceIn(0L, maxBytes.toLong()).toInt()
+            )
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                total += read
+                if (total > maxBytes) throw AttachmentError.TooLarge(
+                    limitBytes = maxBytes.toLong(),
+                    actualBytes = total.toLong()
+                )
+                output.write(buffer, 0, read)
+            }
+            output.toByteArray()
+        }
     }
 
     /**

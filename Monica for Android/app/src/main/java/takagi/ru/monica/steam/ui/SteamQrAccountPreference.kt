@@ -7,8 +7,11 @@ private const val STEAM_QR_PREFS_NAME = "steam_qr_preferences"
 private const val KEY_LAST_ACCOUNT_ID = "last_account_id"
 private const val KEY_STORAGE_SOURCE_TYPE = "storage_source_type"
 private const val KEY_STORAGE_SOURCE_MDBX_ID = "storage_source_mdbx_id"
+private const val KEY_STORAGE_SOURCE_EXTERNAL_ID = "storage_source_external_id"
 private const val STORAGE_SOURCE_LOCAL = "local"
 private const val STORAGE_SOURCE_MDBX = "mdbx"
+private const val STORAGE_SOURCE_KEEPASS = "keepass"
+private const val STORAGE_SOURCE_BITWARDEN = "bitwarden"
 
 internal fun readLastSteamQrAccountId(context: Context): Long? {
     val accountId = context.applicationContext
@@ -38,6 +41,14 @@ internal fun readSteamStorageSource(context: Context): SteamStorageSource {
             val databaseId = prefs.getLong(KEY_STORAGE_SOURCE_MDBX_ID, 0L)
             if (databaseId > 0L) SteamStorageSource.Mdbx(databaseId) else SteamStorageSource.Local
         }
+        STORAGE_SOURCE_KEEPASS -> prefs.getLong(KEY_STORAGE_SOURCE_EXTERNAL_ID, 0L)
+            .takeIf { it > 0L }
+            ?.let { SteamStorageSource.KeePass(it) }
+            ?: SteamStorageSource.Local
+        STORAGE_SOURCE_BITWARDEN -> prefs.getLong(KEY_STORAGE_SOURCE_EXTERNAL_ID, 0L)
+            .takeIf { it > 0L }
+            ?.let { SteamStorageSource.Bitwarden(it) }
+            ?: SteamStorageSource.Local
         else -> SteamStorageSource.Local
     }
 }
@@ -51,10 +62,22 @@ internal fun saveSteamStorageSource(context: Context, source: SteamStorageSource
                 SteamStorageSource.Local -> {
                     putString(KEY_STORAGE_SOURCE_TYPE, STORAGE_SOURCE_LOCAL)
                     remove(KEY_STORAGE_SOURCE_MDBX_ID)
+                    remove(KEY_STORAGE_SOURCE_EXTERNAL_ID)
                 }
                 is SteamStorageSource.Mdbx -> {
                     putString(KEY_STORAGE_SOURCE_TYPE, STORAGE_SOURCE_MDBX)
                     putLong(KEY_STORAGE_SOURCE_MDBX_ID, source.databaseId)
+                    remove(KEY_STORAGE_SOURCE_EXTERNAL_ID)
+                }
+                is SteamStorageSource.KeePass -> {
+                    putString(KEY_STORAGE_SOURCE_TYPE, STORAGE_SOURCE_KEEPASS)
+                    putLong(KEY_STORAGE_SOURCE_EXTERNAL_ID, source.databaseId)
+                    remove(KEY_STORAGE_SOURCE_MDBX_ID)
+                }
+                is SteamStorageSource.Bitwarden -> {
+                    putString(KEY_STORAGE_SOURCE_TYPE, STORAGE_SOURCE_BITWARDEN)
+                    putLong(KEY_STORAGE_SOURCE_EXTERNAL_ID, source.vaultId)
+                    remove(KEY_STORAGE_SOURCE_MDBX_ID)
                 }
             }
         }

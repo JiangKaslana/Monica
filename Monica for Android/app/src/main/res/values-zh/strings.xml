@@ -1026,6 +1026,10 @@
     <string name="steam_mafile_invalid_steamid_message">请输入有效的 SteamID64 或 32 位 Account ID。</string>
     <string name="steam_mafile_password_label">加密 maFile 密码</string>
     <string name="steam_cannot_load_mdbx_accounts">无法从 MDBX 加载 Steam 账号</string>
+    <string name="steam_cannot_load_keepass_accounts">无法从 KeePass 加载 Steam 账号</string>
+    <string name="steam_cannot_load_bitwarden_accounts">无法从 Bitwarden 加载 Steam 账号</string>
+    <string name="steam_keepass_storage_unavailable">KeePass 存储当前不可用</string>
+    <string name="steam_bitwarden_storage_unavailable">Bitwarden 存储当前不可用</string>
     <string name="steam_transfer_mafile_title">移动或复制 maFile</string>
     <string name="steam_transfer_mafile_count">已选择 %1$d 个</string>
     <string name="steam_transfer_mafile_desc">会移动或复制完整 maFile（包含登录会话等数据），迁移后交易确认和登录批准等功能不受影响。</string>

@@ -1,0 +1,79 @@
+package takagi.ru.monica.steam
+
+import java.io.File
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SteamExternalVaultStorageGuardTest {
+    @Test
+    fun storageSourcesAndPreferencesIncludeKeePassAndBitwarden() {
+        val source = projectFile(
+            "app/src/main/java/takagi/ru/monica/steam/data/SteamStorageSource.kt"
+        ).readText()
+        val preferences = projectFile(
+            "app/src/main/java/takagi/ru/monica/steam/ui/SteamQrAccountPreference.kt"
+        ).readText()
+
+        assertTrue(source.contains("data class KeePass"))
+        assertTrue(source.contains("data class Bitwarden"))
+        assertTrue(preferences.contains("STORAGE_SOURCE_KEEPASS"))
+        assertTrue(preferences.contains("STORAGE_SOURCE_BITWARDEN"))
+    }
+
+    @Test
+    fun externalStoresUseMarkerAndRealMaFileAttachments() {
+        val keepass = projectFile(
+            "app/src/main/java/takagi/ru/monica/steam/data/SteamKeePassAccountStore.kt"
+        ).readText()
+        val bitwarden = projectFile(
+            "app/src/main/java/takagi/ru/monica/steam/data/SteamBitwardenAccountStore.kt"
+        ).readText()
+
+        assertTrue(keepass.contains("SteamExternalMaFileContract.MARKER_FIELD"))
+        assertTrue(keepass.contains("addAttachmentToEntry("))
+        assertTrue(keepass.contains("memoryProtection = true"))
+        assertTrue(bitwarden.contains("syncForUserVisibleRequest("))
+        assertTrue(bitwarden.contains("addInlineAttachment("))
+        assertTrue(bitwarden.contains("AttachmentSource.BITWARDEN"))
+        assertTrue(bitwarden.contains("bitwardenRepository.isVaultPremium(vaultId)"))
+        assertFalse(bitwarden.contains("bitwardenPremium = true"))
+        assertTrue(keepass.contains("SteamExternalMaFileContract.MAX_MAFILE_BYTES"))
+        val previousAttachmentsBody = keepass
+            .substringAfter("val previousAttachments")
+            .substringBefore("val entryWrite")
+        assertTrue(previousAttachmentsBody.contains("readEntryAttachments(databaseId, resolvedUuid)"))
+        assertTrue(previousAttachmentsBody.contains(".getOrThrow()"))
+        assertTrue(previousAttachmentsBody.contains(".filter { SteamExternalMaFileContract.isMaFile"))
+        assertFalse(keepass.contains(".getOrElse { emptyList() }"))
+    }
+
+    @Test
+    fun steamUiExposesExternalSourcesAndRoutesMutations() {
+        val screen = projectFile(
+            "app/src/main/java/takagi/ru/monica/steam/ui/SteamScreen.kt"
+        ).readText()
+        val viewModel = projectFile(
+            "app/src/main/java/takagi/ru/monica/steam/ui/SteamViewModel.kt"
+        ).readText()
+
+        assertTrue(screen.contains("SteamStorageSource.KeePass(database.id)"))
+        assertTrue(screen.contains("SteamStorageSource.Bitwarden(vault.id)"))
+        assertTrue(viewModel.contains("reloadKeePassAccounts("))
+        assertTrue(viewModel.contains("reloadBitwardenAccounts("))
+        assertTrue(viewModel.contains("keepassAccountStore?.deleteAccount("))
+        assertTrue(viewModel.contains("bitwardenAccountStore?.deleteAccount("))
+    }
+
+    private fun projectFile(relativePath: String): File {
+        var directory = File(requireNotNull(System.getProperty("user.dir"))).canonicalFile
+        while (
+            directory.parentFile != null &&
+            !File(directory, "settings.gradle").exists() &&
+            !File(directory, "settings.gradle.kts").exists()
+        ) {
+            directory = directory.parentFile!!.canonicalFile
+        }
+        return File(directory, relativePath)
+    }
+}

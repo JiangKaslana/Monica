@@ -19,6 +19,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import takagi.ru.monica.R
+import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.repository.MdbxRepository
 import takagi.ru.monica.repository.MdbxRepositoryFactory
@@ -26,7 +28,11 @@ import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.steam.core.SteamTotp
 import takagi.ru.monica.steam.data.SteamAccount
 import takagi.ru.monica.steam.data.SteamAccountRepository
+import takagi.ru.monica.steam.data.SteamBitwardenAccountRecord
+import takagi.ru.monica.steam.data.SteamBitwardenAccountStore
 import takagi.ru.monica.steam.data.SteamDatabase
+import takagi.ru.monica.steam.data.SteamKeePassAccountRecord
+import takagi.ru.monica.steam.data.SteamKeePassAccountStore
 import takagi.ru.monica.steam.data.SteamMaFileTransferAction
 import takagi.ru.monica.steam.data.SteamMdbxAccountRecord
 import takagi.ru.monica.steam.data.SteamMdbxAccountStore
@@ -63,6 +69,7 @@ import takagi.ru.monica.steam.network.SteamPendingLogin
 import takagi.ru.monica.steam.network.SteamQrChallenge
 import takagi.ru.monica.steam.network.SteamSessionRefreshService
 import takagi.ru.monica.steam.service.SteamLoginImportService
+import takagi.ru.monica.utils.KeePassKdbxService
 
 enum class SteamMarketActionType {
     SELL,
@@ -171,6 +178,8 @@ class SteamViewModel(
     private val appContext: Context,
     private val repository: SteamAccountRepository,
     private val mdbxRepository: MdbxRepository? = null,
+    private val keepassAccountStore: SteamKeePassAccountStore? = null,
+    private val bitwardenAccountStore: SteamBitwardenAccountStore? = null,
     private val parser: SteamMaFileParser = SteamMaFileParser(),
     private val confirmationService: SteamConfirmationService = SteamConfirmationService(),
     private val authenticatorService: SteamAuthenticatorService = SteamAuthenticatorService(),
@@ -187,6 +196,8 @@ class SteamViewModel(
     private val mdbxAccountStore = mdbxRepository?.let { SteamMdbxAccountStore(it, parser) }
     private var localAccounts: List<SteamAccount> = emptyList()
     private var mdbxAccountRecords: List<SteamMdbxAccountRecord> = emptyList()
+    private var keepassAccountRecords: List<SteamKeePassAccountRecord> = emptyList()
+    private var bitwardenAccountRecords: List<SteamBitwardenAccountRecord> = emptyList()
     private var pendingLoginDisplayName: String? = null
     private var pendingLoginCredentialEntryId: Long? = null
     private var pendingLoginCompletionAccountId: Long? = null
@@ -225,7 +236,7 @@ class SteamViewModel(
             }
         }
         val initialSource = readSteamStorageSource(appContext)
-        if (initialSource is SteamStorageSource.Mdbx) {
+        if (initialSource !is SteamStorageSource.Local) {
             selectStorageSource(initialSource, persist = false)
         }
     }
@@ -240,6 +251,8 @@ class SteamViewModel(
         when (source) {
             SteamStorageSource.Local -> {
                 mdbxAccountRecords = emptyList()
+                keepassAccountRecords = emptyList()
+                bitwardenAccountRecords = emptyList()
                 updateForAccounts(
                     accounts = localAccounts,
                     nowMillis = System.currentTimeMillis(),
@@ -249,6 +262,8 @@ class SteamViewModel(
             }
             is SteamStorageSource.Mdbx -> {
                 viewModelScope.launch {
+                    keepassAccountRecords = emptyList()
+                    bitwardenAccountRecords = emptyList()
                     val store = mdbxAccountStore
                     if (store == null) {
                         setMessage(R.string.steam_cannot_load_mdbx_accounts)
@@ -283,13 +298,83 @@ class SteamViewModel(
                     setLoading(false)
                 }
             }
+            is SteamStorageSource.KeePass -> {
+                viewModelScope.launch {
+                    mdbxAccountRecords = emptyList()
+                    bitwardenAccountRecords = emptyList()
+                    _uiState.value = _uiState.value.copy(
+                        storageSource = source,
+                        accounts = emptyList(),
+                        selectedAccountId = null,
+                        confirmations = emptyList(),
+                        pendingLogins = emptyList(),
+                        authorizedDevices = emptyList(),
+                        selectedConfirmationIds = emptySet(),
+                        inventoryMarket = SteamInventoryMarketUiState()
+                    )
+                    setLoading(true)
+                    runCatching {
+                        val store = keepassAccountStore
+                            ?: throw IllegalStateException(appContext.getString(R.string.steam_keepass_storage_unavailable))
+                        withContext(Dispatchers.IO) { store.loadAccounts(source.databaseId) }
+                    }.onSuccess { records ->
+                        keepassAccountRecords = records
+                        updateForAccounts(
+                            accounts = records.map { it.account },
+                            nowMillis = System.currentTimeMillis(),
+                            storageSource = source,
+                            clearAccountScopedState = true
+                        )
+                    }.onFailure { error ->
+                        keepassAccountRecords = emptyList()
+                        _uiState.value = _uiState.value.copy(accounts = emptyList())
+                        setMessage(error.message ?: appContext.getString(R.string.steam_cannot_load_keepass_accounts))
+                    }
+                    setLoading(false)
+                }
+            }
+            is SteamStorageSource.Bitwarden -> {
+                viewModelScope.launch {
+                    mdbxAccountRecords = emptyList()
+                    keepassAccountRecords = emptyList()
+                    _uiState.value = _uiState.value.copy(
+                        storageSource = source,
+                        accounts = emptyList(),
+                        selectedAccountId = null,
+                        confirmations = emptyList(),
+                        pendingLogins = emptyList(),
+                        authorizedDevices = emptyList(),
+                        selectedConfirmationIds = emptySet(),
+                        inventoryMarket = SteamInventoryMarketUiState()
+                    )
+                    setLoading(true)
+                    runCatching {
+                        val store = bitwardenAccountStore
+                            ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
+                        withContext(Dispatchers.IO) { store.loadAccounts(source.vaultId) }
+                    }.onSuccess { records ->
+                        bitwardenAccountRecords = records
+                        updateForAccounts(
+                            accounts = records.map { it.account },
+                            nowMillis = System.currentTimeMillis(),
+                            storageSource = source,
+                            clearAccountScopedState = true
+                        )
+                    }.onFailure { error ->
+                        bitwardenAccountRecords = emptyList()
+                        _uiState.value = _uiState.value.copy(accounts = emptyList())
+                        setMessage(error.message ?: appContext.getString(R.string.steam_cannot_load_bitwarden_accounts))
+                    }
+                    setLoading(false)
+                }
+            }
         }
     }
 
     fun selectAccount(id: Long) {
         val selectedId = _uiState.value.accounts.firstOrNull { it.id == id }?.id ?: return
         selectRuntimeAccount(selectedId)
-        if (_uiState.value.storageSource is SteamStorageSource.Mdbx) {
+        if (_uiState.value.storageSource !is SteamStorageSource.Local) {
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -298,7 +383,7 @@ class SteamViewModel(
     }
 
     fun updateSortOrders(items: List<Pair<Long, Int>>) {
-        if (_uiState.value.storageSource is SteamStorageSource.Mdbx) return
+        if (_uiState.value.storageSource !is SteamStorageSource.Local) return
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateSortOrders(items)
         }
@@ -330,6 +415,41 @@ class SteamViewModel(
                             )
                         }
                         reloadMdbxAccounts(source)
+                    }
+                    is SteamStorageSource.KeePass -> {
+                        val store = keepassAccountStore
+                            ?: throw IllegalStateException(appContext.getString(R.string.steam_keepass_storage_unavailable))
+                        val record = keepassAccountRecords.firstOrNull { it.account.id == accountId }
+                            ?: return@launch
+                        withContext(Dispatchers.IO) {
+                            store.upsertAccount(
+                                databaseId = source.databaseId,
+                                entryUuid = record.entryUuid,
+                                groupPath = record.groupPath,
+                                account = storedAccount.copy(
+                                    displayName = normalizedDisplayName,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                        reloadKeePassAccounts(source)
+                    }
+                    is SteamStorageSource.Bitwarden -> {
+                        val store = bitwardenAccountStore
+                            ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
+                        val record = bitwardenAccountRecords.firstOrNull { it.account.id == accountId }
+                            ?: return@launch
+                        withContext(Dispatchers.IO) {
+                            store.upsertAccount(
+                                vaultId = source.vaultId,
+                                existingPasswordEntryId = record.passwordEntryId,
+                                account = storedAccount.copy(
+                                    displayName = normalizedDisplayName,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                        reloadBitwardenAccounts(source)
                     }
                 }
             }.onSuccess {
@@ -697,8 +817,16 @@ class SteamViewModel(
                         deleteAccountsFromStorageSource(source, accounts.map { it.id })
                     }
                 }
-                if (source is SteamStorageSource.Mdbx && action == SteamMaFileTransferAction.MOVE) {
-                    reloadMdbxAccounts(source, clearAccountScopedState = true)
+                if (action == SteamMaFileTransferAction.MOVE) {
+                    when (source) {
+                        SteamStorageSource.Local -> Unit
+                        is SteamStorageSource.Mdbx ->
+                            reloadMdbxAccounts(source, clearAccountScopedState = true)
+                        is SteamStorageSource.KeePass ->
+                            reloadKeePassAccounts(source, clearAccountScopedState = true)
+                        is SteamStorageSource.Bitwarden ->
+                            reloadBitwardenAccounts(source, clearAccountScopedState = true)
+                    }
                 }
             }.onSuccess {
                 setMessage(R.string.steam_transfer_mafile_done)
@@ -1716,6 +1844,35 @@ class SteamViewModel(
                 }
                 reloadMdbxAccounts(source, clearAccountScopedState = true)
             }
+            is SteamStorageSource.KeePass -> {
+                val store = keepassAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_keepass_storage_unavailable))
+                val record = keepassAccountRecords.firstOrNull { it.account.id == account.id }
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_steamid_completion_missing_account))
+                withContext(Dispatchers.IO) {
+                    store.upsertAccount(
+                        databaseId = source.databaseId,
+                        entryUuid = record.entryUuid,
+                        groupPath = record.groupPath,
+                        account = account
+                    )
+                }
+                reloadKeePassAccounts(source, clearAccountScopedState = true)
+            }
+            is SteamStorageSource.Bitwarden -> {
+                val store = bitwardenAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
+                val record = bitwardenAccountRecords.firstOrNull { it.account.id == account.id }
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_steamid_completion_missing_account))
+                withContext(Dispatchers.IO) {
+                    store.upsertAccount(
+                        vaultId = source.vaultId,
+                        existingPasswordEntryId = record.passwordEntryId,
+                        account = account
+                    )
+                }
+                reloadBitwardenAccounts(source, clearAccountScopedState = true)
+            }
         }
     }
 
@@ -1893,6 +2050,12 @@ class SteamViewModel(
         mdbxAccountRecords = mdbxAccountRecords.map { record ->
             record.copy(account = record.account.copy(selected = record.account.id == id))
         }
+        keepassAccountRecords = keepassAccountRecords.map { record ->
+            record.copy(account = record.account.copy(selected = record.account.id == id))
+        }
+        bitwardenAccountRecords = bitwardenAccountRecords.map { record ->
+            record.copy(account = record.account.copy(selected = record.account.id == id))
+        }
         _uiState.value = state.copy(
             accounts = accounts,
             selectedAccountId = accounts.firstOrNull { it.id == id }?.id ?: accounts.firstOrNull()?.id,
@@ -1943,6 +2106,18 @@ class SteamViewModel(
                 }
                 reloadMdbxAccounts(source)
             }
+            is SteamStorageSource.KeePass -> {
+                val store = keepassAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_keepass_storage_unavailable))
+                withContext(Dispatchers.IO) { store.upsertPayload(source.databaseId, payload) }
+                reloadKeePassAccounts(source)
+            }
+            is SteamStorageSource.Bitwarden -> {
+                val store = bitwardenAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
+                withContext(Dispatchers.IO) { store.upsertPayload(source.vaultId, payload) }
+                reloadBitwardenAccounts(source)
+            }
         }
     }
 
@@ -1969,6 +2144,34 @@ class SteamViewModel(
                     )
                 }
             }
+            is SteamStorageSource.KeePass -> {
+                val store = keepassAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_keepass_storage_unavailable))
+                val existingBySteamId = store.loadAccounts(targetSource.databaseId)
+                    .associateBy { it.account.steamId }
+                accounts.forEach { account ->
+                    val existing = existingBySteamId[account.steamId]
+                    store.upsertAccount(
+                        databaseId = targetSource.databaseId,
+                        entryUuid = existing?.entryUuid,
+                        groupPath = existing?.groupPath,
+                        account = account
+                    )
+                }
+            }
+            is SteamStorageSource.Bitwarden -> {
+                val store = bitwardenAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
+                val existingBySteamId = store.loadAccounts(targetSource.vaultId)
+                    .associateBy { it.account.steamId }
+                accounts.forEach { account ->
+                    store.upsertAccount(
+                        vaultId = targetSource.vaultId,
+                        existingPasswordEntryId = existingBySteamId[account.steamId]?.passwordEntryId,
+                        account = account
+                    )
+                }
+            }
         }
     }
 
@@ -1990,6 +2193,26 @@ class SteamViewModel(
                 entryIds.forEach { entryId ->
                     store.deleteAccount(source.databaseId, entryId)
                 }
+            }
+            is SteamStorageSource.KeePass -> {
+                val store = keepassAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_keepass_storage_unavailable))
+                val selectedIds = accountIds.toSet()
+                keepassAccountRecords
+                    .filter { it.account.id in selectedIds }
+                    .forEach { record ->
+                        store.deleteAccount(source.databaseId, record.entryUuid, record.groupPath)
+                    }
+            }
+            is SteamStorageSource.Bitwarden -> {
+                val store = bitwardenAccountStore
+                    ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
+                val selectedIds = accountIds.toSet()
+                bitwardenAccountRecords
+                    .filter { it.account.id in selectedIds }
+                    .forEach { record ->
+                        store.deleteAccount(source.vaultId, record.passwordEntryId)
+                    }
             }
         }
     }
@@ -2026,6 +2249,20 @@ class SteamViewModel(
                 }
                 reloadMdbxAccounts(source, clearAccountScopedState = true)
             }
+            is SteamStorageSource.KeePass -> {
+                val record = keepassAccountRecords.firstOrNull { it.account.id == accountId } ?: return
+                keepassAccountStore?.deleteAccount(
+                    source.databaseId,
+                    record.entryUuid,
+                    record.groupPath
+                ) ?: return
+                reloadKeePassAccounts(source, clearAccountScopedState = true)
+            }
+            is SteamStorageSource.Bitwarden -> {
+                val record = bitwardenAccountRecords.firstOrNull { it.account.id == accountId } ?: return
+                bitwardenAccountStore?.deleteAccount(source.vaultId, record.passwordEntryId) ?: return
+                reloadBitwardenAccounts(source, clearAccountScopedState = true)
+            }
         }
     }
 
@@ -2039,6 +2276,38 @@ class SteamViewModel(
             store.loadAccounts(source.databaseId)
         }
         mdbxAccountRecords = records
+        updateForAccounts(
+            accounts = records.map { it.account },
+            nowMillis = System.currentTimeMillis(),
+            storageSource = source,
+            clearAccountScopedState = clearAccountScopedState
+        )
+    }
+
+    private suspend fun reloadKeePassAccounts(
+        source: SteamStorageSource.KeePass,
+        clearAccountScopedState: Boolean = false
+    ) {
+        val store = keepassAccountStore
+            ?: throw IllegalStateException(appContext.getString(R.string.steam_keepass_storage_unavailable))
+        val records = withContext(Dispatchers.IO) { store.loadAccounts(source.databaseId) }
+        keepassAccountRecords = records
+        updateForAccounts(
+            accounts = records.map { it.account },
+            nowMillis = System.currentTimeMillis(),
+            storageSource = source,
+            clearAccountScopedState = clearAccountScopedState
+        )
+    }
+
+    private suspend fun reloadBitwardenAccounts(
+        source: SteamStorageSource.Bitwarden,
+        clearAccountScopedState: Boolean = false
+    ) {
+        val store = bitwardenAccountStore
+            ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
+        val records = withContext(Dispatchers.IO) { store.loadAccounts(source.vaultId) }
+        bitwardenAccountRecords = records
         updateForAccounts(
             accounts = records.map { it.account },
             nowMillis = System.currentTimeMillis(),
@@ -2073,12 +2342,41 @@ class SteamViewModel(
                     if (existing.entryId == record.entryId) updatedRecord else existing
                 }
             }
+            is SteamStorageSource.KeePass -> {
+                val store = keepassAccountStore ?: return
+                val record = keepassAccountRecords.firstOrNull { it.account.id == originalAccount.id }
+                    ?: return
+                val updatedRecord = store.upsertAccount(
+                    databaseId = source.databaseId,
+                    entryUuid = record.entryUuid,
+                    groupPath = record.groupPath,
+                    account = refreshedAccount
+                )
+                keepassAccountRecords = keepassAccountRecords.map { existing ->
+                    if (existing.entryUuid == record.entryUuid) updatedRecord else existing
+                }
+            }
+            is SteamStorageSource.Bitwarden -> {
+                val store = bitwardenAccountStore ?: return
+                val record = bitwardenAccountRecords.firstOrNull { it.account.id == originalAccount.id }
+                    ?: return
+                val updatedRecord = store.upsertAccount(
+                    vaultId = source.vaultId,
+                    existingPasswordEntryId = record.passwordEntryId,
+                    account = refreshedAccount
+                )
+                bitwardenAccountRecords = bitwardenAccountRecords.map { existing ->
+                    if (existing.passwordEntryId == record.passwordEntryId) updatedRecord else existing
+                }
+            }
         }
     }
 
     private fun accountById(accountId: Long): SteamAccount? {
         return _uiState.value.accounts.firstOrNull { it.id == accountId }
             ?: mdbxAccountRecords.firstOrNull { it.account.id == accountId }?.account
+            ?: keepassAccountRecords.firstOrNull { it.account.id == accountId }?.account
+            ?: bitwardenAccountRecords.firstOrNull { it.account.id == accountId }?.account
     }
 
     private fun selectedAccount(): SteamAccount? {
@@ -2237,10 +2535,22 @@ class SteamViewModel(
                         database = passwordDatabase,
                         securityManager = securityManager
                     )
+                    val keepassService = KeePassKdbxService(
+                        context = appContext,
+                        dao = passwordDatabase.localKeePassDatabaseDao(),
+                        securityManager = securityManager
+                    )
+                    val bitwardenRepository = BitwardenRepository.getInstance(appContext)
                     return SteamViewModel(
                         appContext = appContext,
                         repository = SteamAccountRepository(database.steamAccountDao(), securityManager),
-                        mdbxRepository = mdbxRepository
+                        mdbxRepository = mdbxRepository,
+                        keepassAccountStore = SteamKeePassAccountStore(keepassService),
+                        bitwardenAccountStore = SteamBitwardenAccountStore(
+                            database = passwordDatabase,
+                            bitwardenRepository = bitwardenRepository,
+                            attachmentFacade = AttachmentContainer.facade(appContext)
+                        )
                     ) as T
                 }
             }

@@ -148,10 +148,12 @@ import kotlinx.coroutines.withContext
 import takagi.ru.monica.R
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.ItemType
+import takagi.ru.monica.data.LocalKeePassDatabase
 import takagi.ru.monica.data.LocalMdbxDatabase
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.data.UnifiedProgressBarMode
+import takagi.ru.monica.data.bitwarden.BitwardenVault
 import takagi.ru.monica.data.model.OtpType
 import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.security.SecurityManager
@@ -310,6 +312,16 @@ fun SteamScreen(
         .collectAsState(initial = null)
     val mdbxDatabases = mdbxDatabasesState.orEmpty()
     val mdbxDatabasesLoaded = mdbxDatabasesState != null
+    val keepassDatabasesState by passwordDatabase.localKeePassDatabaseDao()
+        .getAllDatabases()
+        .collectAsState(initial = null)
+    val keepassDatabases = keepassDatabasesState.orEmpty()
+    val keepassDatabasesLoaded = keepassDatabasesState != null
+    val bitwardenVaultsState by passwordDatabase.bitwardenVaultDao()
+        .getAllVaultsFlow()
+        .collectAsState(initial = null)
+    val bitwardenVaults = bitwardenVaultsState.orEmpty()
+    val bitwardenVaultsLoaded = bitwardenVaultsState != null
     val settingsManager = remember { SettingsManager(context.applicationContext) }
     val appSettings by settingsManager.settingsFlow.collectAsState(initial = AppSettings())
     val uiState by viewModel.uiState.collectAsState()
@@ -498,13 +510,26 @@ fun SteamScreen(
         }
     }
 
-    LaunchedEffect(uiState.storageSource, mdbxDatabasesLoaded, mdbxDatabases.map { it.id }) {
+    LaunchedEffect(
+        uiState.storageSource,
+        mdbxDatabasesLoaded,
+        mdbxDatabases.map { it.id },
+        keepassDatabasesLoaded,
+        keepassDatabases.map { it.id },
+        bitwardenVaultsLoaded,
+        bitwardenVaults.map { it.id }
+    ) {
         val source = uiState.storageSource
-        if (
-            mdbxDatabasesLoaded &&
-            source is SteamStorageSource.Mdbx &&
-            mdbxDatabases.none { it.id == source.databaseId }
-        ) {
+        val missing = when (source) {
+            SteamStorageSource.Local -> false
+            is SteamStorageSource.Mdbx ->
+                mdbxDatabasesLoaded && mdbxDatabases.none { it.id == source.databaseId }
+            is SteamStorageSource.KeePass ->
+                keepassDatabasesLoaded && keepassDatabases.none { it.id == source.databaseId }
+            is SteamStorageSource.Bitwarden ->
+                bitwardenVaultsLoaded && bitwardenVaults.none { it.id == source.vaultId }
+        }
+        if (missing) {
             viewModel.selectStorageSource(SteamStorageSource.Local)
         }
     }
@@ -922,6 +947,8 @@ fun SteamScreen(
             selectedCount = request.accounts.size,
             currentSource = uiState.storageSource,
             mdbxDatabases = mdbxDatabases,
+            keepassDatabases = keepassDatabases,
+            bitwardenVaults = bitwardenVaults,
             onDismissRequest = { transferRequest = null },
             onTransfer = { targetSource, action ->
                 viewModel.transferAccounts(
@@ -1250,8 +1277,10 @@ fun SteamScreen(
                 SteamStorageSourceMenu(
                     expanded = showStorageSourceMenu,
                     onDismissRequest = { showStorageSourceMenu = false },
-                    selectedSource = uiState.storageSource,
-                    mdbxDatabases = mdbxDatabases,
+                        selectedSource = uiState.storageSource,
+                        mdbxDatabases = mdbxDatabases,
+                        keepassDatabases = keepassDatabases,
+                        bitwardenVaults = bitwardenVaults,
                     onSelectSource = { source ->
                         showStorageSourceMenu = false
                         clearSteamSearch()
@@ -1967,6 +1996,8 @@ private fun SteamStorageSourceMenu(
     onDismissRequest: () -> Unit,
     selectedSource: SteamStorageSource,
     mdbxDatabases: List<LocalMdbxDatabase>,
+    keepassDatabases: List<LocalKeePassDatabase>,
+    bitwardenVaults: List<BitwardenVault>,
     onSelectSource: (SteamStorageSource) -> Unit
 ) {
     UnifiedCategoryFilterChipMenuDropdown(
@@ -2006,6 +2037,24 @@ private fun SteamStorageSourceMenu(
                         statusDotColor = Color(0xFF22C55E)
                     )
                 }
+                keepassDatabases.forEach { database ->
+                    MonicaExpressiveFilterChip(
+                        selected = selectedSource is SteamStorageSource.KeePass &&
+                            selectedSource.databaseId == database.id,
+                        onClick = { onSelectSource(SteamStorageSource.KeePass(database.id)) },
+                        label = database.name.ifBlank { "KeePass" },
+                        leadingIcon = Icons.Default.Key
+                    )
+                }
+                bitwardenVaults.forEach { vault ->
+                    MonicaExpressiveFilterChip(
+                        selected = selectedSource is SteamStorageSource.Bitwarden &&
+                            selectedSource.vaultId == vault.id,
+                        onClick = { onSelectSource(SteamStorageSource.Bitwarden(vault.id)) },
+                        label = vault.displayName?.takeIf { it.isNotBlank() } ?: vault.email,
+                        leadingIcon = Icons.Default.VerifiedUser
+                    )
+                }
             }
         }
     }
@@ -2017,11 +2066,19 @@ private fun SteamMaFileTransferSheet(
     selectedCount: Int,
     currentSource: SteamStorageSource,
     mdbxDatabases: List<LocalMdbxDatabase>,
+    keepassDatabases: List<LocalKeePassDatabase>,
+    bitwardenVaults: List<BitwardenVault>,
     onDismissRequest: () -> Unit,
     onTransfer: (SteamStorageSource, SteamMaFileTransferAction) -> Unit
 ) {
     val localLabel = stringResource(R.string.category_selection_menu_local_database)
-    val targets = remember(currentSource, mdbxDatabases, localLabel) {
+    val targets = remember(
+        currentSource,
+        mdbxDatabases,
+        keepassDatabases,
+        bitwardenVaults,
+        localLabel
+    ) {
         buildList {
             if (currentSource !is SteamStorageSource.Local) {
                 add(
@@ -2046,12 +2103,42 @@ private fun SteamMaFileTransferSheet(
                         )
                     )
                 }
+            keepassDatabases
+                .filterNot { database ->
+                    currentSource is SteamStorageSource.KeePass &&
+                        currentSource.databaseId == database.id
+                }
+                .forEach { database ->
+                    add(
+                        SteamTransferTarget(
+                            source = SteamStorageSource.KeePass(database.id),
+                            label = database.name.ifBlank { "KeePass" },
+                            icon = Icons.Default.Key
+                        )
+                    )
+                }
+            bitwardenVaults
+                .filterNot { vault ->
+                    currentSource is SteamStorageSource.Bitwarden &&
+                        currentSource.vaultId == vault.id
+                }
+                .forEach { vault ->
+                    add(
+                        SteamTransferTarget(
+                            source = SteamStorageSource.Bitwarden(vault.id),
+                            label = vault.displayName?.takeIf { it.isNotBlank() } ?: vault.email,
+                            icon = Icons.Default.VerifiedUser
+                        )
+                    )
+                }
         }
     }
     var selectedAction by remember { mutableStateOf(SteamMaFileTransferAction.MOVE) }
     var selectedTarget by remember(
         currentSource,
-        mdbxDatabases.map { it.id }
+        mdbxDatabases.map { it.id },
+        keepassDatabases.map { it.id },
+        bitwardenVaults.map { it.id }
     ) { mutableStateOf<SteamStorageSource?>(targets.firstOrNull()?.source) }
 
     LaunchedEffect(targets) {
