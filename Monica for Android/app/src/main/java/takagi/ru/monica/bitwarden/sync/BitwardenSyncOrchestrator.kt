@@ -98,8 +98,8 @@ class BitwardenSyncOrchestrator(
     private val _statusByVault = MutableStateFlow<Map<Long, VaultSyncStatus>>(emptyMap())
     val statusByVault: StateFlow<Map<Long, VaultSyncStatus>> = _statusByVault.asStateFlow()
 
-    fun requestSync(vaultId: Long, reason: SyncTriggerReason, force: Boolean = false) {
-        scope.launch {
+    fun requestSync(vaultId: Long, reason: SyncTriggerReason, force: Boolean = false): Job {
+        return scope.launch {
             processRequest(vaultId = vaultId, reason = reason, force = force)
         }
     }

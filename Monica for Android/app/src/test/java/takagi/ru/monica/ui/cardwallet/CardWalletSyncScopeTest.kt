@@ -129,8 +129,10 @@ class CardWalletSyncScopeTest {
             viewModelSource.contains("fun requestStartupAutoSync(")
         )
         assertTrue(
-            "Multi-vault startup auto sync must stagger extra accounts.",
-            viewModelSource.contains("MULTI_VAULT_AUTO_SYNC_STAGGER_MS")
+            "Startup auto sync must choose one preferred or active vault; multi-vault work belongs to ALL-view sessions.",
+            viewModelSource.contains("BitwardenAutoSyncTargetPlanner.startupTarget(") &&
+                viewModelSource.contains("BitwardenAllVaultAutoSyncScheduler(") &&
+                viewModelSource.contains("fun beginAllViewAutoSync()")
         )
     }
 

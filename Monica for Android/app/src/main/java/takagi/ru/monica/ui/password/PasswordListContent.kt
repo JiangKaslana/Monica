@@ -127,6 +127,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
+import takagi.ru.monica.bitwarden.ui.BitwardenAutoSyncEffect
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.BottomNavContentTab
 import takagi.ru.monica.data.CategorySelectionUiMode
@@ -524,11 +525,11 @@ fun PasswordListContent(
     }
     val bitwardenViewModel: takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel = viewModel()
     val bitwardenSyncStatusByVault by bitwardenViewModel.syncStatusByVault.collectAsState()
-    LaunchedEffect(selectedBitwardenVaultId) {
-        val vaultId = selectedBitwardenVaultId ?: return@LaunchedEffect
-        delay(1_200L)
-        bitwardenViewModel.requestPageEnterAutoSync(vaultId)
-    }
+    BitwardenAutoSyncEffect(
+        viewModel = bitwardenViewModel,
+        selectedVaultId = selectedBitwardenVaultId,
+        isAllView = isAllView
+    )
     val selectedBitwardenFoldersFlow = remember(selectedBitwardenVaultId, viewModel) {
         selectedBitwardenVaultId?.let(viewModel::getBitwardenFolders)
             ?: kotlinx.coroutines.flow.flowOf(emptyList())

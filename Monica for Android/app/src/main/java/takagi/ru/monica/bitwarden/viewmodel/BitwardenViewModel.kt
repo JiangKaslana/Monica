@@ -26,6 +26,8 @@ import takagi.ru.monica.bitwarden.cache.BitwardenOfflineSecretCache
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.bitwarden.service.LoginResult
 import takagi.ru.monica.bitwarden.sync.BitwardenCoordinatedSyncResult
+import takagi.ru.monica.bitwarden.sync.BitwardenAllVaultAutoSyncScheduler
+import takagi.ru.monica.bitwarden.sync.BitwardenAutoSyncTargetPlanner
 import takagi.ru.monica.bitwarden.sync.BitwardenMutationSyncBridge
 import takagi.ru.monica.bitwarden.sync.BitwardenSyncOrchestrator
 import takagi.ru.monica.bitwarden.sync.BitwardenSyncNotificationHelper
@@ -176,6 +178,16 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
         isVaultUnlocked = { vaultId -> repository.isVaultUnlocked(vaultId) },
         executeSync = { vaultId, silent -> runSync(vaultId = vaultId, silent = silent) }
     )
+    private val allVaultAutoSyncScheduler = BitwardenAllVaultAutoSyncScheduler(
+        scope = viewModelScope,
+        delayBetweenVaultsMs = MULTI_VAULT_AUTO_SYNC_STAGGER_MS,
+        requestSync = { vaultId ->
+            syncOrchestrator.requestSync(
+                vaultId = vaultId,
+                reason = SyncTriggerReason.PERIODIC
+            )
+        }
+    )
     val syncStatusByVault: StateFlow<Map<Long, VaultSyncStatus>> = combine(
         syncOrchestrator.statusByVault,
         SyncTaskRunner.statuses
@@ -207,6 +219,7 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     override fun onCleared() {
+        allVaultAutoSyncScheduler.cancelPending()
         BitwardenMutationSyncBridge.unregister(this)
         super.onCleared()
     }
@@ -250,13 +263,13 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
 
-                if (triggerStartupAutoSync) {
+                if (triggerStartupAutoSync && active != null && activeUnlockState == UnlockState.Unlocked) {
                     val reason = if (restoredVaultIds.isNotEmpty()) {
                         SyncTriggerReason.APP_RESUME
                     } else {
                         SyncTriggerReason.PAGE_ENTER
                     }
-                    requestAutoSyncForUnlockedVaults(vaultList, reason)
+                    requestAutoSyncWithStartupGrace(active.id, reason)
                 } else if (triggerActiveVaultAutoSync && active != null && activeUnlockState == UnlockState.Unlocked) {
                     val trigger = if (active.id in restoredVaultIds) {
                         "loadVaults:restoredUnlock"
@@ -636,8 +649,35 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
      * 页面进入时触发自动同步（节流+门控由 Orchestrator 负责）。
      */
     fun requestPageEnterAutoSync(vaultId: Long? = null) {
+        allVaultAutoSyncScheduler.cancelPending()
         val targetVaultId = vaultId ?: _activeVault.value?.id ?: return
         requestAutoSyncWithStartupGrace(targetVaultId, SyncTriggerReason.PAGE_ENTER)
+    }
+
+    /**
+     * ALL 视图持有的后台同步会话。
+     *
+     * 调用方必须在离开对应 ALL 视图时使用返回的 sessionId 调用
+     * [endAllViewAutoSync]。旧页面的 sessionId 无法取消新页面建立的会话。
+     */
+    fun beginAllViewAutoSync(): Long {
+        val elapsed = System.currentTimeMillis() - processStartMs
+        val coldStartRemaining = (COLD_START_AUTO_SYNC_GRACE_MS - elapsed).coerceAtLeast(0L)
+        val initialDelayMs = maxOf(1_200L, coldStartRemaining)
+        return allVaultAutoSyncScheduler.begin(initialDelayMs = initialDelayMs) {
+            if (!_isAutoSyncEnabled.value) {
+                emptyList()
+            } else {
+                BitwardenAutoSyncTargetPlanner.allViewTargets(
+                    unlockedVaultIds = awaitUnlockedVaultIds(),
+                    activeVaultId = _activeVault.value?.id
+                )
+            }
+        }
+    }
+
+    fun endAllViewAutoSync(sessionId: Long) {
+        allVaultAutoSyncScheduler.end(sessionId)
     }
 
     /**
@@ -646,8 +686,8 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
      * 不在 ViewModel init 中调用：非 Bitwarden 页面也会创建本 ViewModel，
      * init 自动同步会造成无关页面误触发。
      *
-     * 多账号时优先同步 preferred/active vault，其余已解锁 vault 错开排队，
-     * 再由 Orchestrator 串行执行被动同步，避免启动卡顿。
+     * 启动阶段只同步 preferred/active vault。全部账号的自动同步由明确的
+     * ALL 视图会话负责，避免普通页面启动时排队拉取所有账号。
      */
     fun requestStartupAutoSync(preferredVaultId: Long? = null) {
         if (!_isAutoSyncEnabled.value) {
@@ -657,53 +697,23 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             // init loadVaults() is async; give never-lock restore a brief chance
             // to republish unlocked vaults before deciding there is nothing to sync.
-            var unlockedVaultIds = collectUnlockedVaultIds()
-            if (unlockedVaultIds.isEmpty()) {
-                delay(STARTUP_AUTO_SYNC_UNLOCK_WAIT_MS)
-                if (_vaults.value.isEmpty()) {
-                    runCatching {
-                        val vaultList = repository.getAllVaults()
-                        _vaults.value = vaultList
-                        replaceUnlockStates(vaultList)
-                    }
-                } else {
-                    replaceUnlockStates(_vaults.value)
-                }
-                unlockedVaultIds = collectUnlockedVaultIds()
-            }
+            val unlockedVaultIds = awaitUnlockedVaultIds()
             if (unlockedVaultIds.isEmpty()) {
                 Log.d(TAG, "Startup auto sync skipped: no unlocked vaults")
                 return@launch
             }
 
-            val preferred = preferredVaultId
-                ?.takeIf { it in unlockedVaultIds }
-                ?: _activeVault.value?.id?.takeIf { it in unlockedVaultIds }
-                ?: unlockedVaultIds.first()
+            val targetVaultId = BitwardenAutoSyncTargetPlanner.startupTarget(
+                unlockedVaultIds = unlockedVaultIds,
+                preferredVaultId = preferredVaultId,
+                activeVaultId = _activeVault.value?.id
+            ) ?: return@launch
 
-            val orderedVaultIds = buildList {
-                add(preferred)
-                unlockedVaultIds.forEach { vaultId ->
-                    if (vaultId != preferred) add(vaultId)
-                }
-            }
-
-            Log.d(
-                TAG,
-                "Startup auto sync scheduled for ${orderedVaultIds.size} unlocked vault(s), preferred=$preferred"
+            Log.d(TAG, "Startup auto sync scheduled for vault=$targetVaultId")
+            requestSyncWithStartupGrace(
+                vaultId = targetVaultId,
+                reason = SyncTriggerReason.APP_RESUME
             )
-            orderedVaultIds.forEachIndexed { index, vaultId ->
-                val reason = if (index == 0) {
-                    SyncTriggerReason.APP_RESUME
-                } else {
-                    SyncTriggerReason.PERIODIC
-                }
-                requestSyncWithStartupGrace(
-                    vaultId = vaultId,
-                    reason = reason,
-                    extraDelayMs = index * MULTI_VAULT_AUTO_SYNC_STAGGER_MS
-                )
-            }
         }
     }
 
@@ -1219,6 +1229,24 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
             .toList()
     }
 
+    private suspend fun awaitUnlockedVaultIds(): List<Long> {
+        var unlockedVaultIds = collectUnlockedVaultIds()
+        if (unlockedVaultIds.isNotEmpty()) return unlockedVaultIds
+
+        delay(STARTUP_AUTO_SYNC_UNLOCK_WAIT_MS)
+        runCatching {
+            if (_vaults.value.isEmpty()) {
+                refreshVaultListSnapshot()
+            } else {
+                replaceUnlockStates(_vaults.value)
+            }
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to refresh unlocked vaults for auto sync", error)
+        }
+        unlockedVaultIds = collectUnlockedVaultIds()
+        return unlockedVaultIds
+    }
+
     private fun observeVaultSnapshots() {
         viewModelScope.launch {
             repository.getAllVaultsFlow().collect { vaultList ->
@@ -1404,26 +1432,6 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
         }
         Log.d(TAG, "Trigger auto sync: vault=${vault.id}, reason=$trigger")
         requestAutoSyncWithStartupGrace(vault.id, reason)
-    }
-
-    private fun requestAutoSyncForUnlockedVaults(vaults: List<BitwardenVault>, reason: SyncTriggerReason) {
-        val unlockedVaultIds = collectUnlockedVaultIds(vaults)
-        if (unlockedVaultIds.isEmpty()) return
-        val preferred = _activeVault.value?.id?.takeIf { it in unlockedVaultIds }
-            ?: unlockedVaultIds.first()
-        val orderedVaultIds = buildList {
-            add(preferred)
-            unlockedVaultIds.forEach { vaultId ->
-                if (vaultId != preferred) add(vaultId)
-            }
-        }
-        orderedVaultIds.forEachIndexed { index, vaultId ->
-            requestSyncWithStartupGrace(
-                vaultId = vaultId,
-                reason = reason,
-                extraDelayMs = index * MULTI_VAULT_AUTO_SYNC_STAGGER_MS
-            )
-        }
     }
 
     private fun requestAutoSyncWithStartupGrace(vaultId: Long, reason: SyncTriggerReason) {

@@ -573,6 +573,9 @@ class BiometricUnlockRegressionGuardTest {
         val bitwardenViewModelSource = projectFile(
             "app/src/main/java/takagi/ru/monica/bitwarden/viewmodel/BitwardenViewModel.kt"
         ).readText()
+        val bitwardenAutoSyncEffectSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/bitwarden/ui/BitwardenAutoSyncEffect.kt"
+        ).readText()
         val cardWalletScreenSource = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/screens/CardWalletScreen.kt"
         ).readText()
@@ -668,24 +671,25 @@ class BiometricUnlockRegressionGuardTest {
         )
         assertTrue(
             "Page-visible auto sync triggers should wait for a short stable visibility window so fast bottom-tab switches cancel them.",
-                cardWalletScreenSource.contains("delay(1_200L)") &&
+                bitwardenAutoSyncEffectSource.contains("PAGE_ENTER_AUTO_SYNC_DELAY_MS = 1_200L") &&
+                bitwardenAutoSyncEffectSource.contains("targetViewModel.requestPageEnterAutoSync(targetVaultId)") &&
+                cardWalletScreenSource.contains("BitwardenAutoSyncEffect(") &&
                 cardWalletScreenSource.contains("SyncTaskRunner.request(") &&
-                cardWalletScreenSource.contains("bitwardenViewModel?.requestPageEnterAutoSync(vaultId)") &&
                 passkeyListScreenSource.contains("delay(1_200L)") &&
                 passkeyListScreenSource.contains("viewModel.refreshKeePassPasskeys(trigger = \"PASSKEY_PAGE_ENTER\")") &&
+                passkeyListScreenSource.contains("BitwardenAutoSyncEffect(") &&
                 sendScreenSource.contains("delay(1_200L)") &&
                 sendScreenSource.contains("bitwardenViewModel.requestPageEnterAutoSync()") &&
-                passwordListContentSource.contains("delay(1_200L)") &&
-                passwordListContentSource.contains("bitwardenViewModel.requestPageEnterAutoSync(vaultId)") &&
-                vaultV2PaneSource.contains("delay(1_200L)") &&
-                vaultV2PaneSource.contains("bitwardenViewModel.requestPageEnterAutoSync(selectedBitwardenVaultId)") &&
-                totpListContentForSyncSource.contains("delay(1_200L)") &&
-                totpListContentForSyncSource.contains("bitwardenViewModel.requestPageEnterAutoSync(vaultId)")
+                passwordListContentSource.contains("BitwardenAutoSyncEffect(") &&
+                vaultV2PaneSource.contains("BitwardenAutoSyncEffect(") &&
+                totpListContentForSyncSource.contains("BitwardenAutoSyncEffect(")
         )
         assertTrue(
             "Multi-account passive Bitwarden auto sync must be serialized to avoid startup jank.",
             bitwardenOrchestratorSource.contains("passiveAutoSyncMutex") &&
                 bitwardenViewModelSource.contains("fun requestStartupAutoSync(") &&
+                bitwardenViewModelSource.contains("BitwardenAutoSyncTargetPlanner.startupTarget(") &&
+                bitwardenViewModelSource.contains("BitwardenAllVaultAutoSyncScheduler(") &&
                 bitwardenViewModelSource.contains("MULTI_VAULT_AUTO_SYNC_STAGGER_MS") &&
                 mainActivitySource.contains("bitwardenViewModel.requestStartupAutoSync()")
         )

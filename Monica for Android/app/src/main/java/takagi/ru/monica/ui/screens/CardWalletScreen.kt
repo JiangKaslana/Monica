@@ -88,6 +88,7 @@ import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.bitwarden.sync.VaultSyncStatus
 import takagi.ru.monica.bitwarden.sync.syncForUserVisibleRequest
+import takagi.ru.monica.bitwarden.ui.BitwardenAutoSyncEffect
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.Category
 import takagi.ru.monica.data.ItemType
@@ -342,13 +343,15 @@ fun CardWalletScreen(
         )
     }
 
-    LaunchedEffect(selectedBitwardenVaultId, bitwardenViewModel) {
+    LaunchedEffect(selectedBitwardenVaultId) {
         onBitwardenScopeChanged(selectedBitwardenVaultId)
-        selectedBitwardenVaultId?.let { vaultId ->
-            delay(1_200L)
-            bitwardenViewModel?.requestPageEnterAutoSync(vaultId)
-        }
     }
+    BitwardenAutoSyncEffect(
+        viewModel = bitwardenViewModel,
+        selectedVaultId = selectedBitwardenVaultId,
+        isAllView = selectedCategoryFilter is UnifiedCategoryFilterSelection.All,
+        enabled = hasRestoredCategoryFilter
+    )
     DisposableEffect(Unit) {
         onDispose {
             onBitwardenScopeChanged(null)
