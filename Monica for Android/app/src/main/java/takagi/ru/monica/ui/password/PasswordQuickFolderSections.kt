@@ -451,7 +451,7 @@ private fun buildQuickStatusSourceLabel(
 }
 
 @Composable
-private fun PasswordQuickFolderBreadcrumbPath(
+internal fun PasswordQuickFolderBreadcrumbPath(
     breadcrumbs: List<PasswordQuickFolderBreadcrumb>,
     currentFilter: CategoryFilter,
     onNavigate: (CategoryFilter) -> Unit,

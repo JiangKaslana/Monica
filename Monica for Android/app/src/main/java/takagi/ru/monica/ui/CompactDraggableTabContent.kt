@@ -223,6 +223,8 @@ internal fun CompactDraggableTabContent(
                     onOpenStandaloneSettings = onOpenStandaloneSettings,
                     showStandaloneSettingsEntry = showStandaloneSettingsEntry,
                     appSettings = appSettings,
+                    securityManager = securityManager,
+                    biometricEnabled = appSettings.biometricEnabled,
                     modifier = Modifier.fillMaxSize()
                 )
             }
