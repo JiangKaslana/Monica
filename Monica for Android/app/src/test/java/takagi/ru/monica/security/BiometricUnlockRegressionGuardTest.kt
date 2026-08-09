@@ -582,6 +582,15 @@ class BiometricUnlockRegressionGuardTest {
         val sendScreenSource = projectFile(
             "app/src/main/java/takagi/ru/monica/ui/screens/SendScreen.kt"
         ).readText()
+        val passwordListContentSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/password/PasswordListContent.kt"
+        ).readText()
+        val vaultV2PaneSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/vaultv2/VaultV2Pane.kt"
+        ).readText()
+        val totpListContentForSyncSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/totp/TotpListContent.kt"
+        ).readText()
         val securityManagerSource = projectFile(
             "app/src/main/java/takagi/ru/monica/security/SecurityManager.kt"
         ).readText()
@@ -665,8 +674,22 @@ class BiometricUnlockRegressionGuardTest {
                 passkeyListScreenSource.contains("delay(1_200L)") &&
                 passkeyListScreenSource.contains("viewModel.refreshKeePassPasskeys(trigger = \"PASSKEY_PAGE_ENTER\")") &&
                 sendScreenSource.contains("delay(1_200L)") &&
-                sendScreenSource.contains("bitwardenViewModel.requestPageEnterAutoSync()")
+                sendScreenSource.contains("bitwardenViewModel.requestPageEnterAutoSync()") &&
+                passwordListContentSource.contains("delay(1_200L)") &&
+                passwordListContentSource.contains("bitwardenViewModel.requestPageEnterAutoSync(vaultId)") &&
+                vaultV2PaneSource.contains("delay(1_200L)") &&
+                vaultV2PaneSource.contains("bitwardenViewModel.requestPageEnterAutoSync(selectedBitwardenVaultId)") &&
+                totpListContentForSyncSource.contains("delay(1_200L)") &&
+                totpListContentForSyncSource.contains("bitwardenViewModel.requestPageEnterAutoSync(vaultId)")
         )
+        assertTrue(
+            "Multi-account passive Bitwarden auto sync must be serialized to avoid startup jank.",
+            bitwardenOrchestratorSource.contains("passiveAutoSyncMutex") &&
+                bitwardenViewModelSource.contains("fun requestStartupAutoSync(") &&
+                bitwardenViewModelSource.contains("MULTI_VAULT_AUTO_SYNC_STAGGER_MS") &&
+                mainActivitySource.contains("bitwardenViewModel.requestStartupAutoSync()")
+        )
+
         assertTrue(
             "Routine SecurityManager access checks must stay out of logcat hot paths; warning diagnostics remain separate.",
             securityManagerSource.contains("private fun logRoutineDebug(message: String)") &&

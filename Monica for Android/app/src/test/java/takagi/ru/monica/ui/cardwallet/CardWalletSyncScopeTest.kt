@@ -124,6 +124,28 @@ class CardWalletSyncScopeTest {
             "Creating BitwardenViewModel from non-Bitwarden pages must not enqueue Bitwarden auto sync.",
             initBody.contains("triggerStartupAutoSync = true")
         )
+        assertTrue(
+            "Startup auto sync must be an explicit API so MainActivity can trigger it after auth.",
+            viewModelSource.contains("fun requestStartupAutoSync(")
+        )
+        assertTrue(
+            "Multi-vault startup auto sync must stagger extra accounts.",
+            viewModelSource.contains("MULTI_VAULT_AUTO_SYNC_STAGGER_MS")
+        )
+    }
+
+    @Test
+    fun mainActivityTriggersStartupAutoSyncAfterAuthentication() {
+        val mainActivitySource = projectFile("src/main/java/takagi/ru/monica/MainActivity.kt").readText()
+        assertTrue(
+            "Authenticated main entry must request Bitwarden startup auto sync.",
+            mainActivitySource.contains("bitwardenViewModel.requestStartupAutoSync()")
+        )
+        assertTrue(
+            "Startup auto sync should wait for a short stable authenticated window.",
+            mainActivitySource.contains("delay(1_200L)") &&
+                mainActivitySource.contains("requestStartupAutoSync()")
+        )
     }
 
     private fun projectFile(relativePath: String): File {

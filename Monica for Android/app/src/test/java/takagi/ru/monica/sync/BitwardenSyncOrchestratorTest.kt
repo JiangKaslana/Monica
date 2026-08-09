@@ -134,4 +134,68 @@ class BitwardenSyncOrchestratorTest {
             job.cancel()
         }
     }
+
+    @Test
+    fun passiveAutoSyncRunsSeriallyAcrossVaults() = runBlocking {
+        val job = Job()
+        val running = AtomicInteger(0)
+        val maxConcurrent = AtomicInteger(0)
+        val startedSecond = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val finished = AtomicInteger(0)
+
+        val orchestrator = BitwardenSyncOrchestrator(
+            scope = CoroutineScope(coroutineContext + job),
+            config = SyncManagerConfig(
+                pageEnterThrottleMs = 1L,
+                appResumeThrottleMs = 1L
+            ),
+            isAutoSyncEnabled = { true },
+            checkNetwork = { NetworkGateResult.ALLOWED },
+            isVaultUnlocked = { true },
+            executeSync = { vaultId, _ ->
+                val current = running.incrementAndGet()
+                maxConcurrent.accumulateAndGet(current) { a, b -> maxOf(a, b) }
+                if (vaultId == 1L) {
+                    releaseFirst.await()
+                } else {
+                    startedSecond.complete(Unit)
+                }
+                running.decrementAndGet()
+                finished.incrementAndGet()
+                SyncExecutionOutcome.Success(
+                    appliedChangeCount = 0,
+                    availableOfflineCount = 0,
+                    conflictCount = 0,
+                    uploadFailedCount = 0,
+                    skippedDueToLocalDirtyCount = 0
+                )
+            }
+        )
+
+        try {
+            orchestrator.requestSync(vaultId = 1L, reason = SyncTriggerReason.APP_RESUME)
+            delay(30L)
+            orchestrator.requestSync(vaultId = 2L, reason = SyncTriggerReason.PERIODIC)
+            delay(30L)
+            assertEquals(
+                "Second vault passive auto-sync must wait while another vault is syncing.",
+                false,
+                startedSecond.isCompleted
+            )
+            releaseFirst.complete(Unit)
+            withTimeout(1_000L) { startedSecond.await() }
+            repeat(10) { yield() }
+            delay(50L)
+
+            assertEquals(
+                "Passive auto-sync across multiple Bitwarden vaults must never run in parallel.",
+                1,
+                maxConcurrent.get()
+            )
+            assertEquals(2, finished.get())
+        } finally {
+            job.cancel()
+        }
+    }
 }

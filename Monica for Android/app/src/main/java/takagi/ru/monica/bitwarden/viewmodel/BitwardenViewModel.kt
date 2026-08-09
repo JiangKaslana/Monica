@@ -70,6 +70,8 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
     companion object {
         private const val TAG = "BitwardenViewModel"
         private const val COLD_START_AUTO_SYNC_GRACE_MS = 8_000L
+        private const val MULTI_VAULT_AUTO_SYNC_STAGGER_MS = 5_000L
+        private const val STARTUP_AUTO_SYNC_UNLOCK_WAIT_MS = 800L
         private const val SILENT_SYNC_UI_REFRESH_DELAY_MS = 1_500L
         private const val SILENT_SYNC_CACHE_WARM_DELAY_MS = 12_000L
     }
@@ -636,6 +638,73 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
     fun requestPageEnterAutoSync(vaultId: Long? = null) {
         val targetVaultId = vaultId ?: _activeVault.value?.id ?: return
         requestAutoSyncWithStartupGrace(targetVaultId, SyncTriggerReason.PAGE_ENTER)
+    }
+
+    /**
+     * App 启动/主界面认证通过后触发自动同步。
+     *
+     * 不在 ViewModel init 中调用：非 Bitwarden 页面也会创建本 ViewModel，
+     * init 自动同步会造成无关页面误触发。
+     *
+     * 多账号时优先同步 preferred/active vault，其余已解锁 vault 错开排队，
+     * 再由 Orchestrator 串行执行被动同步，避免启动卡顿。
+     */
+    fun requestStartupAutoSync(preferredVaultId: Long? = null) {
+        if (!_isAutoSyncEnabled.value) {
+            Log.d(TAG, "Startup auto sync skipped: auto sync disabled")
+            return
+        }
+        viewModelScope.launch {
+            // init loadVaults() is async; give never-lock restore a brief chance
+            // to republish unlocked vaults before deciding there is nothing to sync.
+            var unlockedVaultIds = collectUnlockedVaultIds()
+            if (unlockedVaultIds.isEmpty()) {
+                delay(STARTUP_AUTO_SYNC_UNLOCK_WAIT_MS)
+                if (_vaults.value.isEmpty()) {
+                    runCatching {
+                        val vaultList = repository.getAllVaults()
+                        _vaults.value = vaultList
+                        replaceUnlockStates(vaultList)
+                    }
+                } else {
+                    replaceUnlockStates(_vaults.value)
+                }
+                unlockedVaultIds = collectUnlockedVaultIds()
+            }
+            if (unlockedVaultIds.isEmpty()) {
+                Log.d(TAG, "Startup auto sync skipped: no unlocked vaults")
+                return@launch
+            }
+
+            val preferred = preferredVaultId
+                ?.takeIf { it in unlockedVaultIds }
+                ?: _activeVault.value?.id?.takeIf { it in unlockedVaultIds }
+                ?: unlockedVaultIds.first()
+
+            val orderedVaultIds = buildList {
+                add(preferred)
+                unlockedVaultIds.forEach { vaultId ->
+                    if (vaultId != preferred) add(vaultId)
+                }
+            }
+
+            Log.d(
+                TAG,
+                "Startup auto sync scheduled for ${orderedVaultIds.size} unlocked vault(s), preferred=$preferred"
+            )
+            orderedVaultIds.forEachIndexed { index, vaultId ->
+                val reason = if (index == 0) {
+                    SyncTriggerReason.APP_RESUME
+                } else {
+                    SyncTriggerReason.PERIODIC
+                }
+                requestSyncWithStartupGrace(
+                    vaultId = vaultId,
+                    reason = reason,
+                    extraDelayMs = index * MULTI_VAULT_AUTO_SYNC_STAGGER_MS
+                )
+            }
+        }
     }
 
     /**
@@ -1338,8 +1407,22 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun requestAutoSyncForUnlockedVaults(vaults: List<BitwardenVault>, reason: SyncTriggerReason) {
-        collectUnlockedVaultIds(vaults).forEach { vaultId ->
-            requestSyncWithStartupGrace(vaultId, reason)
+        val unlockedVaultIds = collectUnlockedVaultIds(vaults)
+        if (unlockedVaultIds.isEmpty()) return
+        val preferred = _activeVault.value?.id?.takeIf { it in unlockedVaultIds }
+            ?: unlockedVaultIds.first()
+        val orderedVaultIds = buildList {
+            add(preferred)
+            unlockedVaultIds.forEach { vaultId ->
+                if (vaultId != preferred) add(vaultId)
+            }
+        }
+        orderedVaultIds.forEachIndexed { index, vaultId ->
+            requestSyncWithStartupGrace(
+                vaultId = vaultId,
+                reason = reason,
+                extraDelayMs = index * MULTI_VAULT_AUTO_SYNC_STAGGER_MS
+            )
         }
     }
 
@@ -1350,22 +1433,24 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
     private fun requestSyncWithStartupGrace(
         vaultId: Long,
         reason: SyncTriggerReason,
-        force: Boolean = false
+        force: Boolean = false,
+        extraDelayMs: Long = 0L
     ) {
         if (force || reason == SyncTriggerReason.MANUAL) {
             syncOrchestrator.requestSync(vaultId, reason, force = true)
             return
         }
         val elapsed = System.currentTimeMillis() - processStartMs
-        val remaining = COLD_START_AUTO_SYNC_GRACE_MS - elapsed
-        if (remaining <= 0L) {
+        val coldStartRemaining = (COLD_START_AUTO_SYNC_GRACE_MS - elapsed).coerceAtLeast(0L)
+        val delayMs = coldStartRemaining + extraDelayMs.coerceAtLeast(0L)
+        if (delayMs <= 0L) {
             syncOrchestrator.requestSync(vaultId, reason, force = force)
             return
         }
         syncOrchestrator.requestSyncWithDelay(
             vaultId = vaultId,
             reason = reason,
-            delayMs = remaining,
+            delayMs = delayMs,
             force = force
         )
     }
@@ -1612,8 +1697,10 @@ class BitwardenViewModel(application: Application) : AndroidViewModel(applicatio
         return repository.syncViaCoordinator(
             vaultId = vaultId,
             requestIdPrefix = "bw-vm-vault",
-            trigger = if (silent) SyncTrigger.PAGE_VISIBLE else SyncTrigger.MANUAL,
-            priority = if (silent) SyncPriority.PAGE_VISIBLE else SyncPriority.MANUAL,
+            // Silent/auto sync stays background-priority so multi-vault startup
+            // does not compete with interactive UI work at PAGE_VISIBLE rank.
+            trigger = if (silent) SyncTrigger.APP_START else SyncTrigger.MANUAL,
+            priority = if (silent) SyncPriority.BACKGROUND else SyncPriority.MANUAL,
             mode = if (silent) SyncMode.SILENT else SyncMode.FOREGROUND,
             networkPolicy = if (_isSyncOnWifiOnly.value) {
                 SyncNetworkPolicy.WIFI_ONLY

@@ -1536,7 +1536,10 @@ fun VaultV2Pane(
 			isTopActionsMenuExpanded = false
 			showBitwardenUnlockDialog = false
 			showClearBitwardenCacheDialog = false
+			return@LaunchedEffect
 		}
+		delay(1_200L)
+		bitwardenViewModel.requestPageEnterAutoSync(selectedBitwardenVaultId)
 	}
 	DisposableEffect(Unit) {
 		onDispose {

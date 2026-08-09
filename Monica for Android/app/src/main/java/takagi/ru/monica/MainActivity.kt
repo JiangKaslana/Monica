@@ -924,6 +924,10 @@ fun MonicaContent(
                     popUpTo(Screen.Login.route) { inclusive = true }
                 }
             }
+            launch {
+                delay(1_200L)
+                bitwardenViewModel.requestStartupAutoSync()
+            }
             withContext(Dispatchers.IO) {
                 runCatching {
                     delay(15_000)

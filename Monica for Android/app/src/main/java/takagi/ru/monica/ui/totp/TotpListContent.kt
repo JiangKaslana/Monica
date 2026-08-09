@@ -100,6 +100,7 @@ import androidx.fragment.app.FragmentActivity
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
@@ -350,6 +351,11 @@ fun TotpListContent(
     }
     val bitwardenViewModel: takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel = viewModel()
     val bitwardenSyncStatusByVault by bitwardenViewModel.syncStatusByVault.collectAsState()
+    LaunchedEffect(selectedBitwardenVaultId) {
+        val vaultId = selectedBitwardenVaultId ?: return@LaunchedEffect
+        delay(1_200L)
+        bitwardenViewModel.requestPageEnterAutoSync(vaultId)
+    }
     val isTopBarSyncing = selectedBitwardenVaultId?.let { vaultId ->
         bitwardenSyncStatusByVault[vaultId].isUserVisibleSyncInProgress()
     } == true

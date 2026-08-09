@@ -524,6 +524,11 @@ fun PasswordListContent(
     }
     val bitwardenViewModel: takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel = viewModel()
     val bitwardenSyncStatusByVault by bitwardenViewModel.syncStatusByVault.collectAsState()
+    LaunchedEffect(selectedBitwardenVaultId) {
+        val vaultId = selectedBitwardenVaultId ?: return@LaunchedEffect
+        delay(1_200L)
+        bitwardenViewModel.requestPageEnterAutoSync(vaultId)
+    }
     val selectedBitwardenFoldersFlow = remember(selectedBitwardenVaultId, viewModel) {
         selectedBitwardenVaultId?.let(viewModel::getBitwardenFolders)
             ?: kotlinx.coroutines.flow.flowOf(emptyList())
