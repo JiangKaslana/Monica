@@ -63,6 +63,7 @@ import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.bitwarden.sync.syncForUserVisibleRequest
+import takagi.ru.monica.bitwarden.ui.BitwardenAutoSyncEffect
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.Category
 import takagi.ru.monica.data.isKeePassOwned
@@ -432,6 +433,12 @@ fun PasskeyListScreen(
     }
     val bitwardenViewModel: takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel = viewModel()
     val bitwardenSyncStatusByVault by bitwardenViewModel.syncStatusByVault.collectAsState()
+    BitwardenAutoSyncEffect(
+        viewModel = bitwardenViewModel,
+        selectedVaultId = selectedBitwardenVaultId,
+        isAllView = selectedCategoryFilter is UnifiedCategoryFilterSelection.All,
+        enabled = hasRestoredCategoryFilter
+    )
     val isTopBarSyncing = selectedBitwardenVaultId?.let { vaultId ->
         bitwardenSyncStatusByVault[vaultId].isUserVisibleSyncInProgress()
     } == true

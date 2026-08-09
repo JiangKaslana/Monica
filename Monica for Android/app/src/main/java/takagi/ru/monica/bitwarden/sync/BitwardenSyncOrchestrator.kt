@@ -93,12 +93,13 @@ class BitwardenSyncOrchestrator(
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
     private val mutex = Mutex()
+    private val passiveAutoSyncMutex = Mutex()
     private val runtimes = mutableMapOf<Long, VaultRuntime>()
     private val _statusByVault = MutableStateFlow<Map<Long, VaultSyncStatus>>(emptyMap())
     val statusByVault: StateFlow<Map<Long, VaultSyncStatus>> = _statusByVault.asStateFlow()
 
-    fun requestSync(vaultId: Long, reason: SyncTriggerReason, force: Boolean = false) {
-        scope.launch {
+    fun requestSync(vaultId: Long, reason: SyncTriggerReason, force: Boolean = false): Job {
+        return scope.launch {
             processRequest(vaultId = vaultId, reason = reason, force = force)
         }
     }
@@ -241,8 +242,18 @@ class BitwardenSyncOrchestrator(
         if (!runNow) return
 
         val outcome = try {
-            withContext(Dispatchers.IO) {
-                executeSync(vaultId, silent)
+            // Passive auto reasons share one global lock across vaults.
+            // Manual / mutation / forced retries stay free to run immediately.
+            if (!force && isPassiveAutoReason(reason)) {
+                passiveAutoSyncMutex.withLock {
+                    withContext(Dispatchers.IO) {
+                        executeSync(vaultId, silent)
+                    }
+                }
+            } else {
+                withContext(Dispatchers.IO) {
+                    executeSync(vaultId, silent)
+                }
             }
         } catch (error: CancellationException) {
             SyncExecutionOutcome.RetryableError(error.message ?: "同步被取消")
@@ -446,12 +457,15 @@ class BitwardenSyncOrchestrator(
     }
 
     private fun isPassiveAutoReason(reason: SyncTriggerReason): Boolean {
-        return reason == SyncTriggerReason.PAGE_ENTER || reason == SyncTriggerReason.APP_RESUME
+        return reason == SyncTriggerReason.PAGE_ENTER ||
+            reason == SyncTriggerReason.APP_RESUME ||
+            reason == SyncTriggerReason.PERIODIC
     }
 
     private fun passiveAutoQuietWindowMs(reason: SyncTriggerReason): Long {
         return when (reason) {
             SyncTriggerReason.APP_RESUME -> config.appResumeThrottleMs
+            SyncTriggerReason.PERIODIC -> config.appResumeThrottleMs
             else -> config.pageEnterThrottleMs
         }
     }

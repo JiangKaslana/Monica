@@ -106,6 +106,7 @@ import kotlinx.serialization.json.Json
 import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
+import takagi.ru.monica.bitwarden.ui.BitwardenAutoSyncEffect
 import takagi.ru.monica.bitwarden.ui.UnlockVaultDialog
 import takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel
 import takagi.ru.monica.data.AppSettings
@@ -1538,6 +1539,12 @@ fun VaultV2Pane(
 			showClearBitwardenCacheDialog = false
 		}
 	}
+	BitwardenAutoSyncEffect(
+		viewModel = bitwardenViewModel,
+		selectedVaultId = selectedBitwardenVaultId,
+		isAllView = storageSelection is UnifiedCategoryFilterSelection.All,
+		enabled = state.hasInitializedStorageFilter,
+	)
 	DisposableEffect(Unit) {
 		onDispose {
 			isTopActionsMenuExpanded = false

@@ -79,6 +79,7 @@ import takagi.ru.monica.data.isLocalOnlyItem
 import takagi.ru.monica.data.resolveOwnership
 import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
+import takagi.ru.monica.bitwarden.ui.BitwardenAutoSyncEffect
 import takagi.ru.monica.data.KeePassStorageLocation
 import takagi.ru.monica.data.bitwarden.BitwardenVault
 import takagi.ru.monica.repository.KeePassCompatibilityBridge
@@ -332,6 +333,12 @@ fun NoteListScreen(
     }
     val bitwardenViewModel: takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel = viewModel()
     val bitwardenSyncStatusByVault by bitwardenViewModel.syncStatusByVault.collectAsState()
+    BitwardenAutoSyncEffect(
+        viewModel = bitwardenViewModel,
+        selectedVaultId = selectedBitwardenVaultId,
+        isAllView = selectedCategoryFilter is NoteCategoryFilter.All,
+        enabled = hasRestoredCategoryFilter
+    )
     val isTopBarSyncing = selectedBitwardenVaultId?.let { vaultId ->
         bitwardenSyncStatusByVault[vaultId].isUserVisibleSyncInProgress()
     } == true
