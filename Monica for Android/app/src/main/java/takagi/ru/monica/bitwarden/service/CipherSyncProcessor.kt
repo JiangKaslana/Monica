@@ -19,6 +19,7 @@ import takagi.ru.monica.data.model.NoteData
 import takagi.ru.monica.data.model.SecureCustomField
 import takagi.ru.monica.data.model.SecureCustomFieldType
 import takagi.ru.monica.data.model.LOGIN_TYPE_SSH_KEY
+import takagi.ru.monica.data.model.LOGIN_TYPE_STEAM_MAFILE
 import takagi.ru.monica.data.model.SshKeyData
 import takagi.ru.monica.data.model.SshKeyDataCodec
 import takagi.ru.monica.data.model.TotpData
@@ -28,6 +29,7 @@ import takagi.ru.monica.passkey.PasskeyCredentialIdCodec
 import takagi.ru.monica.passkey.PasskeyPrivateKeyStore
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.util.TotpDataResolver
+import takagi.ru.monica.steam.data.SteamExternalMaFileContract
 import java.time.Instant
 import java.util.Date
 
@@ -327,6 +329,9 @@ class CipherSyncProcessor(
         val totp = decryptString(login.totp, symmetricKey) ?: ""
         val parsedUris = parseLoginUris(login.uris, symmetricKey)
         val customFields = decryptedFields.associate { it.name to it.value }
+        val isSteamMaFileEntry = SteamExternalMaFileContract.isMarked(
+            decryptedFields.map { it.name to it.value }
+        )
         // 调试：对有自定义字段的 cipher 记录 ID
         if (customFields.isNotEmpty()) {
             android.util.Log.i(TAG, "syncPasswordCipher has ${customFields.size} custom fields")
@@ -355,9 +360,13 @@ class CipherSyncProcessor(
         val remoteCountry = customFields["monica_country"] ?: customFields["country"] ?: ""
         val remotePasskeyBindings = customFields["monica_passkey_bindings"].orEmpty()
         val remoteSshKeyData = buildSshKeyDataFromCustomFields(customFields)
-        val remoteLoginType = if (remoteSshKeyData.isNotBlank()) LOGIN_TYPE_SSH_KEY
-            else customFields["monica_login_type"]?.takeIf { it.equals(LOGIN_TYPE_SSH_KEY, ignoreCase = true) }
-                ?: "PASSWORD"
+        val remoteLoginType = when {
+            isSteamMaFileEntry -> LOGIN_TYPE_STEAM_MAFILE
+            remoteSshKeyData.isNotBlank() -> LOGIN_TYPE_SSH_KEY
+            customFields["monica_login_type"]?.equals(LOGIN_TYPE_SSH_KEY, ignoreCase = true) == true ->
+                LOGIN_TYPE_SSH_KEY
+            else -> "PASSWORD"
+        }
         // 调试：记录 SSH 识别结果
         if (customFields.isNotEmpty()) {
             android.util.Log.i(TAG, "syncPasswordCipher cipherId=${cipher.id} loginType=$remoteLoginType sshDataBlank=${remoteSshKeyData.isBlank()}")
@@ -425,7 +434,10 @@ class CipherSyncProcessor(
                         country = remoteCountry.ifBlank { existing.country },
                         passkeyBindings = remotePasskeyBindings.ifBlank { existing.passkeyBindings },
                         sshKeyData = remoteSshKeyData.ifBlank { existing.sshKeyData },
-                        loginType = if (remoteSshKeyData.isNotBlank()) LOGIN_TYPE_SSH_KEY else existing.loginType,
+                        loginType = resolveRemoteLoginType(
+                            existing = existing,
+                            remoteLoginType = remoteLoginType
+                        ),
                         isFavorite = cipher.favorite == true,
                         isDeleted = true,
                         deletedAt = serverDeletedAt,
@@ -484,7 +496,10 @@ class CipherSyncProcessor(
                 country = remoteCountry.ifBlank { existing.country },
                 passkeyBindings = remotePasskeyBindings.ifBlank { existing.passkeyBindings },
                 sshKeyData = remoteSshKeyData.ifBlank { existing.sshKeyData },
-                loginType = if (remoteSshKeyData.isNotBlank()) LOGIN_TYPE_SSH_KEY else existing.loginType,
+                loginType = resolveRemoteLoginType(
+                    existing = existing,
+                    remoteLoginType = remoteLoginType
+                ),
                 isFavorite = cipher.favorite == true,
                 isDeleted = false,
                 deletedAt = null,
@@ -1768,6 +1783,19 @@ class CipherSyncProcessor(
                 linkedId = field.linkedId
             )
         }
+    }
+
+    private fun resolveRemoteLoginType(
+        existing: PasswordEntry,
+        remoteLoginType: String
+    ): String = when {
+        remoteLoginType.equals(LOGIN_TYPE_STEAM_MAFILE, ignoreCase = true) ->
+            LOGIN_TYPE_STEAM_MAFILE
+        remoteLoginType.equals(LOGIN_TYPE_SSH_KEY, ignoreCase = true) ->
+            LOGIN_TYPE_SSH_KEY
+        existing.loginType.equals(LOGIN_TYPE_STEAM_MAFILE, ignoreCase = true) ->
+            "PASSWORD"
+        else -> existing.loginType
     }
 
     private fun decryptCustomFieldMap(

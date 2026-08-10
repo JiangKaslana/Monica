@@ -18,6 +18,7 @@ import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.OperationLogItemType
 import takagi.ru.monica.data.model.LOGIN_TYPE_SSH_KEY
+import takagi.ru.monica.data.model.LOGIN_TYPE_STEAM_MAFILE
 import takagi.ru.monica.data.model.SshKeyData
 import takagi.ru.monica.data.model.SshKeyDataCodec
 import takagi.ru.monica.data.bitwarden.*
@@ -26,6 +27,7 @@ import takagi.ru.monica.utils.PasswordWebsiteCodec
 import takagi.ru.monica.utils.FieldChange
 import takagi.ru.monica.utils.OperationLogger
 import takagi.ru.monica.util.TotpDataResolver
+import takagi.ru.monica.steam.data.SteamExternalMaFileContract
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Date
@@ -370,10 +372,17 @@ class BitwardenSyncService(
                                     cipherId = cipherApi.id
                                 )?.let { AttachmentOwner.secureItem(it.id) }
                             if (owner != null) {
-                                attachmentReconciler.reconcile(
-                                    owner = owner,
-                                    remoteAttachments = cipherApi.attachments
-                                )
+                                BitwardenCipherKeyResolver.withCipherKey(
+                                    cipher = cipherApi,
+                                    vaultKey = symmetricKey,
+                                    logTag = TAG
+                                ) { effectiveKey ->
+                                    attachmentReconciler.reconcile(
+                                        owner = owner,
+                                        remoteAttachments = BitwardenAttachmentMetadataDecoder
+                                            .decodeForStorage(cipherApi.attachments.orEmpty(), effectiveKey)
+                                    )
+                                }
                             }
                         }.onFailure { err ->
                             android.util.Log.w(TAG, "Attachment reconcile failed for ${cipherApi.id}: ${err.message}")
@@ -574,6 +583,9 @@ class BitwardenSyncService(
             val totp = decryptString(login.totp, symmetricKey) ?: ""
             val parsedUris = parseLoginUris(login.uris, symmetricKey)
             val customFields = parsePasswordCustomFieldMap(cipher.fields, symmetricKey)
+            val isSteamMaFileEntry = SteamExternalMaFileContract.isMarked(
+                customFields.entries.map { it.key to it.value }
+            )
             val encryptedPassword = encryptBitwardenPasswordForOfflineDisplay(password, cipher.id)
             val sshKeyData = buildSshKeyDataFromCustomFields(customFields)
             
@@ -608,7 +620,11 @@ class BitwardenSyncService(
                 country = customFields["monica_country"] ?: customFields["country"] ?: "",
                 passkeyBindings = customFields["monica_passkey_bindings"].orEmpty(),
                 sshKeyData = sshKeyData,
-                loginType = if (sshKeyData.isNotBlank()) LOGIN_TYPE_SSH_KEY else "PASSWORD",
+                loginType = when {
+                    isSteamMaFileEntry -> LOGIN_TYPE_STEAM_MAFILE
+                    sshKeyData.isNotBlank() -> LOGIN_TYPE_SSH_KEY
+                    else -> "PASSWORD"
+                },
                 isFavorite = cipher.favorite,
                 createdAt = Date(),
                 updatedAt = Date(),
@@ -649,6 +665,9 @@ class BitwardenSyncService(
             val storedTotp = remoteTotp?.let(::encodeBitwardenTotpForLocalStorage) ?: entry.authenticatorKey
             val parsedUris = parseLoginUris(login.uris, symmetricKey)
             val customFields = parsePasswordCustomFieldMap(cipher.fields, symmetricKey)
+            val isSteamMaFileEntry = SteamExternalMaFileContract.isMarked(
+                customFields.entries.map { it.key to it.value }
+            )
             val remoteAppPackage = customFields["monica_app_package"]
                 ?: customFields["appPackageName"]
                 ?: parsedUris.appPackageName
@@ -692,7 +711,12 @@ class BitwardenSyncService(
                 country = remoteCountry.ifBlank { entry.country },
                 passkeyBindings = remotePasskeyBindings.ifBlank { entry.passkeyBindings },
                 sshKeyData = remoteSshKeyData.ifBlank { entry.sshKeyData },
-                loginType = if (remoteSshKeyData.isNotBlank()) LOGIN_TYPE_SSH_KEY else entry.loginType,
+                loginType = when {
+                    isSteamMaFileEntry -> LOGIN_TYPE_STEAM_MAFILE
+                    remoteSshKeyData.isNotBlank() -> LOGIN_TYPE_SSH_KEY
+                    entry.loginType.equals(LOGIN_TYPE_STEAM_MAFILE, ignoreCase = true) -> "PASSWORD"
+                    else -> entry.loginType
+                },
                 isFavorite = cipher.favorite,
                 updatedAt = Date(),
                 bitwardenVaultId = vaultId,

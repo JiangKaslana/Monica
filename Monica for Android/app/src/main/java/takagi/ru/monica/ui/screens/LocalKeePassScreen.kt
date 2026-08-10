@@ -46,8 +46,11 @@ import takagi.ru.monica.data.toCreationOptions
 import takagi.ru.monica.viewmodel.LocalKeePassViewModel
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import takagi.ru.monica.ui.components.OutlinedTextField
+import takagi.ru.monica.utils.KeePassFileNameResolver
 
 private const val GOOGLE_DRIVE_ENTRY_ENABLED = false
 
@@ -1618,27 +1621,46 @@ private fun ImportExternalDatabaseDialog(
     onDismiss: () -> Unit,
     onImport: (name: String, password: String, keyFileUri: Uri?) -> Unit
 ) {
-    var name by remember { 
+    val context = LocalContext.current
+    val providerDisplayName by produceState<String?>(initialValue = null, uri) {
+        value = withContext(Dispatchers.IO) {
+            KeePassFileNameResolver.queryDisplayName(context.contentResolver, uri)
+        }
+    }
+    var name by remember(uri) {
         mutableStateOf(
-            // 从 URI 获取文件名作为默认名称
-            uri.lastPathSegment
-                ?.substringAfterLast("/")
-                ?.removeSuffix(".kdbx")
-                ?.removeSuffix(".kdb")
-                ?: "KeePass Database"
+            KeePassFileNameResolver.databaseNameFromCandidates(
+                displayName = null,
+                uriLastPathSegment = uri.lastPathSegment
+            ) ?: KeePassFileNameResolver.DEFAULT_DATABASE_NAME
         )
     }
+    var nameEdited by remember(uri) { mutableStateOf(false) }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var keyFileUri by remember { mutableStateOf<Uri?>(null) }
     var keyFileName by remember { mutableStateOf("") }
+
+    // URI 的末段可能只是 document:数字；拿到 DISPLAY_NAME 后再补上真实文件名，
+    // 但不能覆盖用户已经手动修改过的名称。
+    LaunchedEffect(providerDisplayName, nameEdited) {
+        if (!nameEdited) {
+            KeePassFileNameResolver.databaseNameFromCandidates(
+                displayName = providerDisplayName,
+                uriLastPathSegment = uri.lastPathSegment
+            )?.let { resolvedName -> name = resolvedName }
+        }
+    }
     
     val keyFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { selectedUri: Uri? ->
         selectedUri?.let {
             keyFileUri = it
-            keyFileName = it.lastPathSegment?.substringAfterLast("/") ?: "keyfile"
+            keyFileName = KeePassFileNameResolver.displayFileNameFromCandidates(
+                displayName = KeePassFileNameResolver.queryDisplayName(context.contentResolver, it),
+                uriLastPathSegment = it.lastPathSegment
+            )
         }
     }
     
@@ -1675,7 +1697,10 @@ private fun ImportExternalDatabaseDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            uri.lastPathSegment ?: uri.toString(),
+                            KeePassFileNameResolver.displayFileNameFromCandidates(
+                                displayName = providerDisplayName,
+                                uriLastPathSegment = uri.lastPathSegment
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
                             maxLines = 2,
@@ -1687,7 +1712,10 @@ private fun ImportExternalDatabaseDialog(
                 // 数据库显示名称
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = {
+                        nameEdited = true
+                        name = it
+                    },
                     label = { Text(stringResource(R.string.database_name)) },
                     placeholder = { Text(stringResource(R.string.database_name_placeholder)) },
                     singleLine = true,

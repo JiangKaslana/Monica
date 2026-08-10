@@ -38,6 +38,22 @@ class SteamExternalMaFileContractTest {
     }
 
     @Test
+    fun markedEntryCanInspectASingleLegacyAttachmentWithEncryptedName() {
+        assertEquals(
+            listOf("2.encrypted-name"),
+            SteamExternalMaFileContract.candidateFileNames(
+                listOf("2.encrypted-name")
+            )
+        )
+        assertEquals(
+            listOf("account.maFile", "2.encrypted-name"),
+            SteamExternalMaFileContract.candidateFileNames(
+                listOf("2.encrypted-name", "account.maFile")
+            )
+        )
+    }
+
+    @Test
     fun generatedAttachmentNameIsSafeAndKeepsMaFileExtension() {
         val account = SteamAccount(
             id = 1,

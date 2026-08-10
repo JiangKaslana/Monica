@@ -66,6 +66,7 @@ import takagi.ru.monica.utils.KeePassCodecSupport
 import takagi.ru.monica.utils.KeePassOperationException
 import takagi.ru.monica.utils.KeePassGroupInfo
 import takagi.ru.monica.utils.KeePassKdbxService
+import takagi.ru.monica.utils.KeePassFileNameResolver
 import takagi.ru.monica.utils.OneDriveKeePassFileSource
 import takagi.ru.monica.utils.OneDriveKeePassSupport
 import takagi.ru.monica.utils.OperationLogger
@@ -152,6 +153,36 @@ class LocalKeePassViewModel(
     init {
         AttachmentContainer.registerKeePassService(kdbxService)
         autoResolveWebDavConflictDatabases()
+        repairOpaqueExternalDatabaseNames()
+    }
+
+    /**
+     * Older imports used Uri.lastPathSegment as the display name. Some
+     * DocumentsProviders expose an opaque value such as document:1000097490;
+     * repair those records once the provider's real DISPLAY_NAME is available.
+     */
+    private fun repairOpaqueExternalDatabaseNames() {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.getAllDatabasesSync()
+                .asSequence()
+                .filter { database ->
+                    database.sourceType == KeePassDatabaseSourceType.LOCAL_DOCUMENT_URI &&
+                        KeePassFileNameResolver.isProviderIdentifier(database.name)
+                }
+                .forEach { database ->
+                    val uri = runCatching { Uri.parse(database.filePath) }.getOrNull() ?: return@forEach
+                    val resolvedName = KeePassFileNameResolver.databaseNameFromCandidates(
+                        displayName = KeePassFileNameResolver.queryDisplayName(
+                            context.contentResolver,
+                            uri
+                        ),
+                        uriLastPathSegment = uri.lastPathSegment
+                    ) ?: return@forEach
+                    if (resolvedName != database.name) {
+                        dao.updateDatabase(database.copy(name = resolvedName))
+                    }
+                }
+        }
     }
 
     data class WebDavDirectoryListing(
@@ -683,7 +714,18 @@ class LocalKeePassViewModel(
                 var importLogDatabaseId = 0L
                 var importLogDatabaseName = name
                 var importLogChanges: List<FieldChange> = emptyList()
+                var importedDatabaseName = name
                 withContext(Dispatchers.IO) {
+                    importedDatabaseName = KeePassFileNameResolver.chooseImportedDatabaseName(
+                        requestedName = name,
+                        displayName = KeePassFileNameResolver.queryDisplayName(
+                            context.contentResolver,
+                            uri
+                        ),
+                        uriLastPathSegment = uri.lastPathSegment
+                    )
+                    importLogDatabaseName = importedDatabaseName
+
                     // 验证文件是否可访问
                     context.contentResolver.openInputStream(uri)?.close()
                         ?: throw Exception("无法访问文件")
@@ -726,7 +768,7 @@ class LocalKeePassViewModel(
                     val existing = dao.getAllDatabasesSync().firstOrNull { it.filePath == uriPath }
                     if (existing != null) {
                         val updated = existing.copy(
-                            name = name,
+                            name = importedDatabaseName,
                             keyFileUri = keyFileUri?.toString() ?: existing.keyFileUri,
                             storageLocation = KeePassStorageLocation.EXTERNAL,
                             encryptedPassword = encryptedPassword,
@@ -768,7 +810,7 @@ class LocalKeePassViewModel(
                         }
                     } else {
                         val database = LocalKeePassDatabase(
-                            name = name,
+                            name = importedDatabaseName,
                             filePath = uriPath,
                             keyFileUri = keyFileUri?.toString(),
                             storageLocation = KeePassStorageLocation.EXTERNAL,

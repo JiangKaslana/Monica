@@ -1,6 +1,7 @@
 package takagi.ru.monica.repository
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import takagi.ru.monica.data.Category
 import takagi.ru.monica.data.CategoryDao
 import takagi.ru.monica.data.PasskeyDao
@@ -17,6 +18,7 @@ import takagi.ru.monica.data.bitwarden.BitwardenFolder
 import takagi.ru.monica.data.bitwarden.BitwardenFolderDao
 import takagi.ru.monica.data.bitwarden.BitwardenSyncRawEntryRecord
 import takagi.ru.monica.data.bitwarden.BitwardenSyncRawEntryRecordDao
+import takagi.ru.monica.data.model.isExternalSteamMaFileEntry
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -35,38 +37,50 @@ class PasswordRepository(
     private val bitwardenSyncRawEntryRecordDao: BitwardenSyncRawEntryRecordDao? = null,
     private val mdbxRepository: MdbxRepository? = null
 ) {
+
+    private fun Flow<List<PasswordEntry>>.withoutExternalSteamMaFileEntries(): Flow<List<PasswordEntry>> =
+        map { entries -> entries.withoutExternalSteamMaFileEntries() }
+
+    private fun Iterable<PasswordEntry>.withoutExternalSteamMaFileEntries(): List<PasswordEntry> =
+        filterNot { it.isExternalSteamMaFileEntry() }
     
     fun getAllPasswordEntries(): Flow<List<PasswordEntry>> {
         // Keep semantic behavior the same but avoid the legacy generated callable index path.
-        return passwordEntryDao.getActiveEntries()
+        return passwordEntryDao.getActiveEntries().withoutExternalSteamMaFileEntries()
     }
 
     suspend fun getAllLocalPasswordEntries(): List<PasswordEntry> {
-        return passwordEntryDao.getAllLocalEntries()
+        return passwordEntryDao.getAllLocalEntries().withoutExternalSteamMaFileEntries()
     }
     
     fun getPasswordEntriesByCategory(categoryId: Long): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getPasswordEntriesByCategory(categoryId)
+            .withoutExternalSteamMaFileEntries()
     }
 
     fun getUncategorizedPasswordEntries(): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getUncategorizedPasswordEntries()
+            .withoutExternalSteamMaFileEntries()
     }
 
     fun getPasswordEntriesByKeePassDatabase(databaseId: Long): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getPasswordEntriesByKeePassDatabase(databaseId)
+            .withoutExternalSteamMaFileEntries()
     }
 
     fun getPasswordEntriesByKeePassGroup(databaseId: Long, groupPath: String): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getPasswordEntriesByKeePassGroup(databaseId, groupPath)
+            .withoutExternalSteamMaFileEntries()
     }
     
     fun getPasswordEntriesByBitwardenVault(vaultId: Long): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getByBitwardenVaultIdFlow(vaultId)
+            .withoutExternalSteamMaFileEntries()
     }
 
     fun getPasswordEntriesByBitwardenFolder(vaultId: Long, folderId: String): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getByBitwardenFolderIdFlow(vaultId, folderId)
+            .withoutExternalSteamMaFileEntries()
     }
     
     fun getBitwardenFoldersByVaultId(vaultId: Long): Flow<List<BitwardenFolder>> {
@@ -75,10 +89,12 @@ class PasswordRepository(
 
     fun getFavoritePasswordEntries(): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getFavoritePasswordEntries()
+            .withoutExternalSteamMaFileEntries()
     }
 
     fun getArchivedEntries(): Flow<List<PasswordEntry>> {
         return passwordEntryDao.getArchivedEntries()
+            .withoutExternalSteamMaFileEntries()
     }
 
     // Category operations
@@ -205,6 +221,7 @@ class PasswordRepository(
     
     fun searchPasswordEntries(query: String): Flow<List<PasswordEntry>> {
         return passwordEntryDao.searchPasswordEntries(query)
+            .withoutExternalSteamMaFileEntries()
     }
     
     suspend fun getPasswordEntryById(id: Long): PasswordEntry? {
@@ -221,6 +238,7 @@ class PasswordRepository(
 
     suspend fun getActivePasswordsByIds(ids: List<Long>): List<PasswordEntry> {
         return passwordEntryDao.getActivePasswordsByIds(ids)
+            .withoutExternalSteamMaFileEntries()
     }
     
     suspend fun insertPasswordEntry(entry: PasswordEntry): Long {
@@ -575,6 +593,7 @@ class PasswordRepository(
      */
     suspend fun findByPackageAndUsername(packageName: String, username: String): PasswordEntry? {
         return passwordEntryDao.findByPackageAndUsername(packageName, username)
+            ?.takeUnless { it.isExternalSteamMaFileEntry() }
     }
     
     /**
@@ -582,6 +601,7 @@ class PasswordRepository(
      */
     suspend fun findByDomainAndUsername(domain: String, username: String): PasswordEntry? {
         return passwordEntryDao.findByDomainAndUsername(domain, username)
+            ?.takeUnless { it.isExternalSteamMaFileEntry() }
     }
     
     /**
@@ -589,6 +609,7 @@ class PasswordRepository(
      */
     suspend fun findByPackageName(packageName: String): List<PasswordEntry> {
         return passwordEntryDao.findByPackageName(packageName)
+            .withoutExternalSteamMaFileEntries()
     }
     
     /**
@@ -596,6 +617,7 @@ class PasswordRepository(
      */
     suspend fun findByDomain(domain: String): List<PasswordEntry> {
         return passwordEntryDao.findByDomain(domain)
+            .withoutExternalSteamMaFileEntries()
     }
     
     /**
@@ -603,6 +625,7 @@ class PasswordRepository(
      */
     suspend fun findExactMatch(packageName: String, username: String, encryptedPassword: String): PasswordEntry? {
         return passwordEntryDao.findExactMatch(packageName, username, encryptedPassword)
+            ?.takeUnless { it.isExternalSteamMaFileEntry() }
     }
 
     suspend fun updateAppAssociationByWebsite(website: String, packageName: String, appName: String) {

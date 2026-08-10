@@ -11,6 +11,9 @@ import takagi.ru.monica.bitwarden.sync.syncForUserVisibleRequest
 import takagi.ru.monica.data.CustomField
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.PasswordEntry
+import takagi.ru.monica.data.bitwarden.BitwardenVault
+import takagi.ru.monica.data.model.LOGIN_TYPE_STEAM_MAFILE
+import takagi.ru.monica.data.model.isExternalSteamMaFileEntry
 import takagi.ru.monica.steam.importer.SteamMaFileBackupCodec
 import takagi.ru.monica.steam.importer.SteamMaFileParser
 import takagi.ru.monica.steam.importer.SteamMaFilePayload
@@ -36,43 +39,68 @@ class SteamBitwardenAccountStore(
         check(bitwardenRepository.isVaultUnlocked(vaultId)) { "Bitwarden vault is locked" }
         return passwordDao.getByBitwardenVaultId(vaultId)
             .filterNot { it.isDeleted || it.isArchived }
-            .mapNotNull { entry ->
-                val cipherId = entry.bitwardenCipherId?.takeIf(String::isNotBlank)
-                    ?: return@mapNotNull null
-                val fields = customFieldDao.getFieldsByEntryIdSync(entry.id)
-                if (!SteamExternalMaFileContract.isMarked(fields.map { it.title to it.value })) {
-                    return@mapNotNull null
-                }
-                val attachments = attachmentFacade.listByPassword(entry.id)
-                    .filter { it.sourceEnum == AttachmentSource.BITWARDEN }
-                val selectedName = SteamExternalMaFileContract.selectMaFile(
-                    attachments.map { it.fileName }
-                ) ?: return@mapNotNull null
-                val attachment = attachments.singleOrNull { it.fileName == selectedName }
-                    ?: return@mapNotNull null
-                val context = bitwardenRepository.getAttachmentBitwardenContext(vault, cipherId)
-                    ?: return@mapNotNull null
-                val bytes = runCatching {
-                    attachmentFacade.readAttachmentBytes(
-                        attachmentId = attachment.id,
-                        maxBytes = SteamExternalMaFileContract.MAX_MAFILE_BYTES,
-                        bitwardenContext = context
-                    )
-                }.getOrNull() ?: return@mapNotNull null
-                val payload = try {
-                    parser.parse(
-                        maFileContent = bytes.toString(Charsets.UTF_8),
-                        fileName = attachment.fileName
-                    )
-                } catch (_: Throwable) {
-                    return@mapNotNull null
-                } finally {
-                    bytes.fill(0)
-                }
+            .mapNotNull { entry -> loadEntry(vault, entry) }
+            .mapIndexed { index, record ->
+                record.copy(
+                    account = record.account.copy(selected = index == 0, sortOrder = index)
+                )
+            }
+    }
+
+    private suspend fun loadEntry(
+        vault: BitwardenVault,
+        entry: PasswordEntry
+    ): SteamBitwardenAccountRecord? {
+        val vaultId = vault.id
+        val cipherId = entry.bitwardenCipherId?.takeIf(String::isNotBlank) ?: return null
+        val fields = customFieldDao.getFieldsByEntryIdSync(entry.id)
+        if (!SteamExternalMaFileContract.isMarked(fields.map { it.title to it.value })) return null
+
+        // Migrate entries created before the internal type was persisted. This update is local
+        // metadata only; the marker remains the source of truth for the external Steam store.
+        if (!entry.isExternalSteamMaFileEntry()) {
+            passwordDao.updatePasswordEntry(entry.copy(loginType = LOGIN_TYPE_STEAM_MAFILE))
+        }
+
+        val attachments = attachmentFacade.listByPassword(entry.id)
+            .filter { it.sourceEnum == AttachmentSource.BITWARDEN }
+        val candidateNames = SteamExternalMaFileContract.candidateFileNames(
+            attachments.map { it.fileName }
+        )
+        val candidates = candidateNames
+            .flatMap { name -> attachments.filter { it.fileName == name } }
+            .distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<takagi.ru.monica.attachments.model.Attachment> {
+                    SteamExternalMaFileContract.isMaFile(it.fileName)
+                }.thenByDescending { it.updatedAt }
+            )
+        val context = bitwardenRepository.getAttachmentBitwardenContext(vault, cipherId) ?: return null
+
+        for (attachment in candidates) {
+            if (attachment.sizeBytes > SteamExternalMaFileContract.MAX_MAFILE_BYTES) continue
+            val bytes = runCatching {
+                attachmentFacade.readAttachmentBytes(
+                    attachmentId = attachment.id,
+                    maxBytes = SteamExternalMaFileContract.MAX_MAFILE_BYTES,
+                    bitwardenContext = context
+                )
+            }.getOrNull() ?: continue
+            val payload = try {
+                parser.parse(
+                    maFileContent = bytes.toString(Charsets.UTF_8),
+                    fileName = attachment.fileName
+                )
+            } catch (_: Throwable) {
+                null
+            } finally {
+                bytes.fill(0)
+            }
+            if (payload != null) {
                 val displayName = entry.title.trim().takeIf { title ->
                     title.isNotBlank() && title != payload.accountName && title != payload.steamId
                 } ?: payload.displayName
-                SteamBitwardenAccountRecord(
+                return SteamBitwardenAccountRecord(
                     account = payload.copy(displayName = displayName).toSteamAccount(
                         id = runtimeAccountId(vaultId, entry.id)
                     ),
@@ -80,11 +108,8 @@ class SteamBitwardenAccountStore(
                     cipherId = cipherId
                 )
             }
-            .mapIndexed { index, record ->
-                record.copy(
-                    account = record.account.copy(selected = index == 0, sortOrder = index)
-                )
-            }
+        }
+        return null
     }
 
     suspend fun upsertPayload(
@@ -137,6 +162,7 @@ class SteamBitwardenAccountStore(
             deletedAt = null,
             isArchived = false,
             archivedAt = null,
+            loginType = LOGIN_TYPE_STEAM_MAFILE,
             bitwardenLocalModified = true
         )
         val entryId = database.withTransaction {
@@ -185,9 +211,13 @@ class SteamBitwardenAccountStore(
         val context = bitwardenRepository.getAttachmentBitwardenContext(vault, cipherId)
             ?: throw IllegalStateException("Bitwarden attachment context is unavailable")
         val oldAttachments = attachmentFacade.listByPassword(syncedEntry.id)
-            .filter {
-                it.sourceEnum == AttachmentSource.BITWARDEN &&
+            .filter { it.sourceEnum == AttachmentSource.BITWARDEN }
+            .let { attachments ->
+                val namedMaFiles = attachments.filter {
                     SteamExternalMaFileContract.isMaFile(it.fileName)
+                }
+                if (namedMaFiles.isNotEmpty()) namedMaFiles
+                else attachments.singleOrNull()?.let(::listOf).orEmpty()
             }
         val bytes = SteamMaFileBackupCodec.encode(account).toByteArray(Charsets.UTF_8)
         val newAttachment = try {

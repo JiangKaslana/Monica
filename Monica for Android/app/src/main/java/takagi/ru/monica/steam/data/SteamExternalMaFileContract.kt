@@ -26,6 +26,17 @@ object SteamExternalMaFileContract {
         return fileNames.filter(::isMaFile).distinct().singleOrNull()
     }
 
+    /**
+     * Returns every attachment that is safe to inspect for an explicitly marked Steam entry.
+     * Real maFile names are tried first; legacy Bitwarden ciphertext names remain as a
+     * content-validated fallback for entries created before filename decryption was fixed.
+     */
+    fun candidateFileNames(fileNames: Iterable<String>): List<String> {
+        val distinctNames = fileNames.distinct()
+        val namedMaFiles = distinctNames.filter(::isMaFile)
+        return namedMaFiles + distinctNames.filterNot(::isMaFile)
+    }
+
     fun attachmentFileName(account: SteamAccount): String {
         val base = account.accountName
             .ifBlank { account.visibleSteamId }

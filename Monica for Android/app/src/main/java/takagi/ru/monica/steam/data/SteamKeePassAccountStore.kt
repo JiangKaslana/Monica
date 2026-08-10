@@ -5,6 +5,7 @@ import java.util.Date
 import java.util.UUID
 import takagi.ru.monica.attachments.executor.KeePassAttachmentRef
 import takagi.ru.monica.data.PasswordEntry
+import takagi.ru.monica.data.model.LOGIN_TYPE_STEAM_MAFILE
 import takagi.ru.monica.steam.importer.SteamMaFileBackupCodec
 import takagi.ru.monica.steam.importer.SteamMaFileParser
 import takagi.ru.monica.steam.importer.SteamMaFilePayload
@@ -80,6 +81,7 @@ class SteamKeePassAccountStore(
             website = "https://steamcommunity.com",
             username = account.accountName,
             password = "",
+            loginType = LOGIN_TYPE_STEAM_MAFILE,
             notes = "",
             createdAt = Date(account.createdAt.takeIf { it > 0L } ?: System.currentTimeMillis()),
             updatedAt = Date(),
@@ -218,39 +220,47 @@ class SteamKeePassAccountStore(
     ): SteamKeePassAccountRecord? {
         val entryUuid = entry.entryUuid?.takeIf(String::isNotBlank) ?: return null
         val attachments = service.readEntryAttachments(databaseId, entryUuid).getOrNull() ?: return null
-        val selectedName = SteamExternalMaFileContract.selectMaFile(attachments.map { it.fileName })
-            ?: return null
-        val selected = attachments.singleOrNull { it.fileName == selectedName } ?: return null
-        if (selected.sizeBytes !in 1..SteamExternalMaFileContract.MAX_MAFILE_BYTES.toLong()) return null
-        val bytes = service.readAttachmentBytes(
-            databaseId = databaseId,
-            entryUuid = entryUuid,
-            hashHex = KeePassAttachmentRef.from(selected.hashHex, selected.fileName).encode()
-        ).getOrNull() ?: return null
-        if (bytes.isEmpty() || bytes.size > SteamExternalMaFileContract.MAX_MAFILE_BYTES) {
-            bytes.fill(0)
-            return null
-        }
-        val payload = try {
-            parser.parse(
-                maFileContent = bytes.toString(Charsets.UTF_8),
-                fileName = selected.fileName
-            )
-        } catch (_: Throwable) {
-            return null
-        } finally {
-            bytes.fill(0)
-        }
-        val displayName = entry.title.trim().takeIf { title ->
-            title.isNotBlank() && title != payload.accountName && title != payload.steamId
-        } ?: payload.displayName
-        return SteamKeePassAccountRecord(
-            account = payload.copy(displayName = displayName).toSteamAccount(
-                id = runtimeAccountId(databaseId, entryUuid)
-            ),
-            entryUuid = entryUuid,
-            groupPath = entry.groupPath
+        val candidateNames = SteamExternalMaFileContract.candidateFileNames(
+            attachments.map { it.fileName }
         )
+        val candidates = candidateNames
+            .flatMap { name -> attachments.filter { it.fileName == name } }
+            .distinctBy { it.hashHex to it.fileName }
+        for (candidate in candidates) {
+            if (candidate.sizeBytes > SteamExternalMaFileContract.MAX_MAFILE_BYTES) continue
+            val bytes = service.readAttachmentBytes(
+                databaseId = databaseId,
+                entryUuid = entryUuid,
+                hashHex = KeePassAttachmentRef.from(candidate.hashHex, candidate.fileName).encode()
+            ).getOrNull() ?: continue
+            if (bytes.isEmpty() || bytes.size > SteamExternalMaFileContract.MAX_MAFILE_BYTES) {
+                bytes.fill(0)
+                continue
+            }
+            val parsed = try {
+                parser.parse(
+                    maFileContent = bytes.toString(Charsets.UTF_8),
+                    fileName = candidate.fileName
+                )
+            } catch (_: Throwable) {
+                null
+            } finally {
+                bytes.fill(0)
+            }
+            if (parsed != null) {
+                val displayName = entry.title.trim().takeIf { title ->
+                    title.isNotBlank() && title != parsed.accountName && title != parsed.steamId
+                } ?: parsed.displayName
+                return SteamKeePassAccountRecord(
+                    account = parsed.copy(displayName = displayName).toSteamAccount(
+                        id = runtimeAccountId(databaseId, entryUuid)
+                    ),
+                    entryUuid = entryUuid,
+                    groupPath = entry.groupPath
+                )
+            }
+        }
+        return null
     }
 
     private fun SteamMaFilePayload.toSteamAccount(id: Long): SteamAccount {

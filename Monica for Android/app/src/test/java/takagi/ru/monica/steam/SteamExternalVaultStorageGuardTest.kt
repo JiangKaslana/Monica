@@ -36,6 +36,8 @@ class SteamExternalVaultStorageGuardTest {
         assertTrue(bitwarden.contains("syncForUserVisibleRequest("))
         assertTrue(bitwarden.contains("addInlineAttachment("))
         assertTrue(bitwarden.contains("AttachmentSource.BITWARDEN"))
+        assertTrue(bitwarden.contains("SteamExternalMaFileContract.candidateFileNames"))
+        assertTrue(bitwarden.contains("LOGIN_TYPE_STEAM_MAFILE"))
         assertTrue(bitwarden.contains("bitwardenRepository.isVaultPremium(vaultId)"))
         assertFalse(bitwarden.contains("bitwardenPremium = true"))
         assertTrue(keepass.contains("SteamExternalMaFileContract.MAX_MAFILE_BYTES"))
@@ -46,6 +48,21 @@ class SteamExternalVaultStorageGuardTest {
         assertTrue(previousAttachmentsBody.contains(".getOrThrow()"))
         assertTrue(previousAttachmentsBody.contains(".filter { SteamExternalMaFileContract.isMaFile"))
         assertFalse(keepass.contains(".getOrElse { emptyList() }"))
+        assertTrue(keepass.contains("SteamExternalMaFileContract.candidateFileNames"))
+
+        val passwordRepository = projectFile(
+            "app/src/main/java/takagi/ru/monica/repository/PasswordRepository.kt"
+        ).readText()
+        val cipherSync = projectFile(
+            "app/src/main/java/takagi/ru/monica/bitwarden/service/CipherSyncProcessor.kt"
+        ).readText()
+        val passwordViewModel = projectFile(
+            "app/src/main/java/takagi/ru/monica/viewmodel/PasswordViewModel.kt"
+        ).readText()
+
+        assertTrue(passwordRepository.contains("withoutExternalSteamMaFileEntries"))
+        assertTrue(cipherSync.contains("SteamExternalMaFileContract.isMarked"))
+        assertTrue(passwordViewModel.contains("SteamExternalMaFileContract.isMarked"))
     }
 
     @Test

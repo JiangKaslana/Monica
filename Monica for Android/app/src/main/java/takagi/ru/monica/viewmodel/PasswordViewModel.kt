@@ -42,6 +42,7 @@ import takagi.ru.monica.repository.CustomFieldRepository
 import takagi.ru.monica.repository.MdbxStoredFolderEntry
 import takagi.ru.monica.repository.PasswordRepository
 import takagi.ru.monica.repository.SecureItemRepository
+import takagi.ru.monica.steam.data.SteamExternalMaFileContract
 import takagi.ru.monica.repository.asMdbxBatchCopy
 import takagi.ru.monica.repository.asMdbxBatchMove
 import takagi.ru.monica.repository.findMdbxReplicaTargetConflictIds
@@ -1751,6 +1752,11 @@ class PasswordViewModel(
     }
 
     private fun shouldImportKeePassPasswordEntry(item: KeePassEntryData): Boolean {
+        if (SteamExternalMaFileContract.isMarked(item.customFields.map { it.title to it.value })) {
+            // Steam maFile entries are owned by the Steam page and remain in the KDBX file.
+            // Keeping a Room mirror would expose the same authenticator as a normal password.
+            return false
+        }
         // KeePass 纯模板条目已在解析层过滤。
         // 这里保留“只有标题”的真实条目，避免误伤用户手工维护的极简记录。
         return item.title.isNotBlank() ||
