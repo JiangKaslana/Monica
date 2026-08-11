@@ -2631,6 +2631,9 @@
     <string name="backup_content_timeline">Lịch sử hoạt động</string>
     <string name="backup_content_trash">Thùng rác</string>
     <string name="backup_content_passkeys">Passkey</string>
+    <string name="passkey_backup_encryption_required">Bản sao lưu chứa %1$d khóa riêng của passkey. Hãy bật mã hóa bản sao lưu trước khi tiếp tục.</string>
+    <string name="passkey_backup_private_key_missing">Khóa riêng không khả dụng nên không thể sao lưu passkey này.</string>
+    <string name="passkey_restore_private_keys_missing">Có %1$d passkey bị thiếu khóa riêng. Chỉ siêu dữ liệu được khôi phục; cần đăng ký lại trước khi sử dụng.</string>
     <string name="backup_content_trash_and_history">Thùng rác &amp; Lịch sử</string>
     <string name="backup_content_trash_and_history_hint">Bao gồm thùng rác, lịch sử tạo mật khẩu và lịch sử hoạt động</string>
     <string name="backup_content_local_keepass">Cơ sở dữ liệu KeePass cục bộ</string>

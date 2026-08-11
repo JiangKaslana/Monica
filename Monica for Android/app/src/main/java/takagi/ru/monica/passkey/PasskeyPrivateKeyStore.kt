@@ -50,11 +50,15 @@ object PasskeyPrivateKeyStore {
     }
 
     fun resolve(context: Context, keyReferenceOrMaterial: String?): String? {
+        return resolve(SecurityManager(context.applicationContext), keyReferenceOrMaterial)
+    }
+
+    fun resolve(securityManager: SecurityManager, keyReferenceOrMaterial: String?): String? {
         val value = keyReferenceOrMaterial?.trim().orEmpty()
         if (value.isBlank()) return null
         if (!isProtectedReference(value)) return value
         val storageKey = value.removePrefix(REF_PREFIX)
-        return SecurityManager(context.applicationContext).getProtectedString(storageKey)
+        return securityManager.getProtectedString(storageKey)
     }
 
     fun normalizeForBitwardenUpload(context: Context, keyReferenceOrMaterial: String?): String? {
@@ -67,6 +71,23 @@ object PasskeyPrivateKeyStore {
         return PasskeyPrivateKeySupport.hasBitwardenCompatiblePrivateKey(
             resolve(context, keyReferenceOrMaterial)
         )
+    }
+
+    fun hasUsablePrivateKey(context: Context, keyReferenceOrMaterial: String?): Boolean {
+        val resolved = runCatching {
+            resolve(SecurityManager(context.applicationContext), keyReferenceOrMaterial)
+        }.getOrNull()
+        return PasskeyPrivateKeySupport.hasUsablePrivateKey(resolved)
+    }
+
+    fun hasUsablePrivateKey(
+        securityManager: SecurityManager,
+        keyReferenceOrMaterial: String?,
+    ): Boolean {
+        val resolved = runCatching {
+            resolve(securityManager, keyReferenceOrMaterial)
+        }.getOrNull()
+        return PasskeyPrivateKeySupport.hasUsablePrivateKey(resolved)
     }
 
     fun exportPem(context: Context, keyReferenceOrMaterial: String?): String? {

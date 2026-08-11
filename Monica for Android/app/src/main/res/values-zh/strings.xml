@@ -934,6 +934,15 @@
     <string name="steam_empty_message">添加一个本地 Steam 账号后再查看令牌和交易确认。</string>
     <string name="steam_seconds_remaining">%1$d 秒</string>
     <string name="steam_id_label">Steam ID</string>
+    <string name="steam_identity_title">Steam 身份标识</string>
+    <string name="steam_identity_subtitle">根据 SteamID64 在本地换算，不使用第三方服务。</string>
+    <string name="steam_identity_friend_code">好友码</string>
+    <string name="steam_identity_tap_for_details">点击查看并复制全部 Steam ID</string>
+    <string name="steam_identity_steamid64">SteamID64</string>
+    <string name="steam_identity_steamid3">SteamID3</string>
+    <string name="steam_identity_steamid2">SteamID2</string>
+    <string name="steam_identity_open_profile">打开 Steam 个人资料</string>
+    <string name="steam_identity_open_failed">当前没有可打开 Steam 个人资料的应用。</string>
     <string name="steam_account_label">账号</string>
     <string name="steam_device_label">设备</string>
     <string name="steam_revocation_code_label">恢复码</string>
@@ -2325,6 +2334,9 @@
     <string name="backup_content_timeline">操作历史</string>
     <string name="backup_content_trash">回收站</string>
     <string name="backup_content_passkeys">通行密钥</string>
+    <string name="passkey_backup_encryption_required">通行密钥备份包含 %1$d 个私钥，请先启用备份加密。</string>
+    <string name="passkey_backup_private_key_missing">私钥不可用，无法备份此通行密钥。</string>
+    <string name="passkey_restore_private_keys_missing">有 %1$d 个通行密钥缺少私钥，仅恢复了元数据，使用前需要重新注册。</string>
     <string name="backup_content_trash_and_history">回收站与历史</string>
     <string name="backup_content_trash_and_history_hint">包含回收站、密码生成历史和操作历史</string>
     <string name="backup_content_local_keepass">本地 KeePass 数据库</string>

@@ -7,6 +7,7 @@ import takagi.ru.monica.data.PasskeyDao
 import takagi.ru.monica.data.PasskeyEntry
 import takagi.ru.monica.passkey.PasskeyCredentialIdCodec
 import takagi.ru.monica.passkey.PasskeyPrivateKeyStore
+import takagi.ru.monica.security.SecurityManager
 import java.security.KeyStore
 
 /**
@@ -201,16 +202,25 @@ class PasskeyRepository(
 
     suspend fun protectPlaintextPrivateKeys(): Int {
         val appContext = context?.applicationContext ?: return 0
+        val securityManager = SecurityManager(appContext)
         var migrated = 0
         passkeyDao.getAllPasskeysSync().forEach { passkey ->
             val protected = PasskeyPrivateKeyStore.protectPasskey(appContext, passkey)
-            if (protected.privateKeyAlias != passkey.privateKeyAlias) {
-                passkeyDao.update(protected)
+            val normalized = if (
+                protected.syncStatus != "REFERENCE" &&
+                !PasskeyPrivateKeyStore.hasUsablePrivateKey(securityManager, protected.privateKeyAlias)
+            ) {
+                protected.copy(syncStatus = "REFERENCE")
+            } else {
+                protected
+            }
+            if (normalized != passkey) {
+                passkeyDao.update(normalized)
                 migrated++
             }
         }
         if (migrated > 0) {
-            Log.i(TAG, "Protected plaintext passkey private keys: count=$migrated")
+            Log.i(TAG, "Protected or quarantined passkey private keys: count=$migrated")
         }
         return migrated
     }

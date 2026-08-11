@@ -1957,6 +1957,9 @@
     <string name="backup_content_timeline">История операций</string>
     <string name="backup_content_trash">Корзина</string>
     <string name="backup_content_passkeys">Passkey</string>
+    <string name="passkey_backup_encryption_required">Резервная копия содержит закрытые ключи Passkey: %1$d. Перед продолжением включите шифрование резервной копии.</string>
+    <string name="passkey_backup_private_key_missing">Закрытый ключ недоступен, поэтому этот Passkey нельзя сохранить в резервной копии.</string>
+    <string name="passkey_restore_private_keys_missing">Для %1$d записей Passkey отсутствуют закрытые ключи. Восстановлены только метаданные; перед использованием требуется повторная регистрация.</string>
     <string name="backup_content_trash_and_history">Корзина и история</string>
     <string name="backup_content_trash_and_history_hint">Включить корзину, историю генератора и историю операций</string>
     <string name="backup_content_local_keepass">Локальные базы KeePass</string>

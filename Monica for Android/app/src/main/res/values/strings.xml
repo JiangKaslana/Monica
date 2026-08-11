@@ -759,6 +759,9 @@
     <string name="language_vietnamese">Tiếng Việt</string>
     <string name="language_japanese">日本語</string>
     <string name="language_russian">Русский</string>
+    <string name="language_korean">한국어</string>
+    <string name="language_german">Deutsch</string>
+    <string name="language_spanish">Español</string>
 
     <!-- Theme Options -->
     <string name="theme_system">System Default</string>
@@ -924,6 +927,15 @@
     <string name="steam_empty_message">Add a local Steam account to view codes and confirmations.</string>
     <string name="steam_seconds_remaining">%1$d s</string>
     <string name="steam_id_label">Steam ID</string>
+    <string name="steam_identity_title">Steam identity</string>
+    <string name="steam_identity_subtitle">Converted locally from SteamID64 without a third-party service.</string>
+    <string name="steam_identity_friend_code">Friend code</string>
+    <string name="steam_identity_tap_for_details">Tap to view and copy all Steam IDs</string>
+    <string name="steam_identity_steamid64">SteamID64</string>
+    <string name="steam_identity_steamid3">SteamID3</string>
+    <string name="steam_identity_steamid2">SteamID2</string>
+    <string name="steam_identity_open_profile">Open Steam profile</string>
+    <string name="steam_identity_open_failed">No app can open this Steam profile.</string>
     <string name="steam_account_label">Account</string>
     <string name="steam_device_label">Device</string>
     <string name="steam_revocation_code_label">Recovery code</string>
@@ -2462,6 +2474,9 @@
     <string name="backup_content_timeline">Operation History</string>
     <string name="backup_content_trash">Recycle Bin</string>
     <string name="backup_content_passkeys">Passkeys</string>
+    <string name="passkey_backup_encryption_required">Passkey backup contains %1$d private keys. Enable backup encryption before continuing.</string>
+    <string name="passkey_backup_private_key_missing">The private key is unavailable, so this passkey cannot be backed up.</string>
+    <string name="passkey_restore_private_keys_missing">%1$d passkeys were restored as metadata only because their private keys were missing. Register them again before use.</string>
     <string name="backup_content_trash_and_history">Recycle Bin &amp; History</string>
     <string name="backup_content_trash_and_history_hint">Include recycle bin, password generator history, and operation history</string>
     <string name="backup_content_local_keepass">Local KeePass Databases</string>
@@ -4025,6 +4040,9 @@
     <string name="qs_lang_vietnamese">Tiếng Việt</string>
     <string name="qs_lang_japanese">日本語</string>
     <string name="qs_lang_russian">Русский</string>
+    <string name="qs_lang_korean">한국어</string>
+    <string name="qs_lang_german">Deutsch</string>
+    <string name="qs_lang_spanish">Español</string>
     <string name="qs_master_password">Master password</string>
     <string name="qs_master_password_set">Already set, can be used to unlock and protect data</string>
     <string name="qs_master_password_unset">Recommended to set a master password first</string>

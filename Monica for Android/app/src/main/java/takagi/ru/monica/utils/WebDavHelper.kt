@@ -34,6 +34,9 @@ import takagi.ru.monica.data.model.OtpType
 import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.data.model.CardWalletDataCodec
 import takagi.ru.monica.data.model.isEmpty
+import takagi.ru.monica.passkey.PasskeyBackupPortabilityPolicy
+import takagi.ru.monica.passkey.PasskeyPrivateKeyStore
+import takagi.ru.monica.passkey.PasskeyPrivateKeySupport
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.steam.data.SteamAccountRepository
 import takagi.ru.monica.steam.data.SteamDatabase
@@ -66,6 +69,9 @@ import java.util.zip.ZipOutputStream
 import java.io.BufferedWriter
 import java.io.OutputStreamWriter
 import java.util.concurrent.TimeUnit
+
+private class PasskeyBackupEncryptionRequiredException(message: String) :
+    IllegalStateException(message)
 
 /**
  * 自定义字段备份数据结构
@@ -1118,6 +1124,8 @@ class WebDavHelper(
             var successNoteCount = 0
             var successImageCount = 0
             var successSteamMaFileCount = 0
+            var totalPasskeyCount = 0
+            var successPasskeyCount = 0
             var mdbxFallbackItemCount = 0
             val securityManager = SecurityManager(context)
             val steamMaFileBackups = if (preferences.includeAuthenticators) {
@@ -1234,6 +1242,32 @@ class WebDavHelper(
                 val customFieldDao = database.customFieldDao()
                 val passwordHistoryDao = database.passwordHistoryDao()
                 val passkeyDao = database.passkeyDao()
+                val passkeyCandidates = if (preferences.includePasskeys) {
+                    passkeyDao.getAllPasskeysSync()
+                } else {
+                    emptyList()
+                }
+                val passkeysForBackup = passkeyCandidates
+                    .filter { BackupContentPolicy.shouldIncludePasskey(it, contentScope) }
+                totalPasskeyCount = passkeysForBackup.size
+                mdbxFallbackItemCount += passkeysForBackup.count { it.isMdbxOwned() }
+                val skippedExternalPasskeyCount = passkeyCandidates.size - passkeysForBackup.size
+                if (skippedExternalPasskeyCount > 0) {
+                    warnings.add("已跳过 $skippedExternalPasskeyCount 条非 Monica 本地通行密钥")
+                }
+                android.util.Log.d(
+                    "WebDavHelper",
+                    "Backup passkey selection: scope=$contentScope, candidates=${passkeyCandidates.size}, " +
+                        "included=${passkeysForBackup.size}, skipped=$skippedExternalPasskeyCount"
+                )
+                if (passkeysForBackup.isNotEmpty() && !shouldEncryptBackup) {
+                    throw PasskeyBackupEncryptionRequiredException(
+                        context.getString(
+                            R.string.passkey_backup_encryption_required,
+                            passkeysForBackup.size,
+                        )
+                    )
+                }
                 val allCategories = try { categoryDao.getAllCategories().first() } catch (e: Exception) { emptyList() }
                 val categoryMap = allCategories.associateBy { it.id }
                 val passwordCategoryById = filteredPasswords.associate { it.id to it.categoryId }
@@ -1531,24 +1565,44 @@ class WebDavHelper(
 
                 // 7. 创建 ZIP
                 // 6.8 导出 Passkeys
-                if (preferences.includePasskeys) {
+                if (passkeysForBackup.isNotEmpty()) {
                     try {
-                        val passkeyCandidates = passkeyDao.getAllPasskeysSync()
-                        val passkeys = passkeyCandidates
-                            .filter { BackupContentPolicy.shouldIncludePasskey(it, contentScope) }
-                        mdbxFallbackItemCount += passkeys.count { it.isMdbxOwned() }
-                        val skippedExternalPasskeyCount = passkeyCandidates.size - passkeys.size
-                        if (skippedExternalPasskeyCount > 0) {
-                            warnings.add("已跳过 $skippedExternalPasskeyCount 条非 Monica 本地通行密钥")
-                        }
-                        android.util.Log.d(
-                            "WebDavHelper",
-                            "Backup passkey selection: scope=$contentScope, candidates=${passkeyCandidates.size}, " +
-                                "included=${passkeys.size}, skipped=$skippedExternalPasskeyCount"
-                        )
-                        if (passkeys.isNotEmpty()) {
-                            val json = Json { prettyPrint = false }
-                            passkeys.forEach { passkey ->
+                        val json = Json { prettyPrint = false }
+                        passkeysForBackup.forEach { passkey ->
+                                val keyDecision = PasskeyBackupPortabilityPolicy.prepareExport(
+                                    encryptedBackup = shouldEncryptBackup,
+                                    storedPrivateKey = passkey.privateKeyAlias,
+                                    resolvePrivateKey = { stored ->
+                                        PasskeyPrivateKeyStore.resolve(securityManager, stored)
+                                    },
+                                    normalizePrivateKey = PasskeyPrivateKeySupport::exportPkcs8Base64,
+                                )
+                                val portablePrivateKey = when (keyDecision) {
+                                    is PasskeyBackupPortabilityPolicy.ExportDecision.Ready -> {
+                                        keyDecision.privateKeyMaterial
+                                    }
+                                    PasskeyBackupPortabilityPolicy.ExportDecision.EncryptionRequired -> {
+                                        throw PasskeyBackupEncryptionRequiredException(
+                                            context.getString(
+                                                R.string.passkey_backup_encryption_required,
+                                                passkeysForBackup.size,
+                                            )
+                                        )
+                                    }
+                                    PasskeyBackupPortabilityPolicy.ExportDecision.PrivateKeyMissing -> {
+                                        failedItems.add(
+                                            FailedItem(
+                                                id = passkey.id,
+                                                type = context.getString(R.string.backup_content_passkeys),
+                                                title = passkey.displayTitle(),
+                                                reason = context.getString(
+                                                    R.string.passkey_backup_private_key_missing
+                                                ),
+                                            )
+                                        )
+                                        return@forEach
+                                    }
+                                }
                                 val derivedCategoryId = passkey.categoryId
                                     ?: passkey.boundPasswordId?.let { passwordCategoryById[it] }
                                 val categoryName = derivedCategoryId?.let { id -> categoryMap[id]?.name }
@@ -1561,7 +1615,7 @@ class WebDavHelper(
                                     userDisplayName = passkey.userDisplayName,
                                     publicKeyAlgorithm = passkey.publicKeyAlgorithm,
                                     publicKey = passkey.publicKey,
-                                    privateKeyAlias = passkey.privateKeyAlias,
+                                    privateKeyAlias = portablePrivateKey,
                                     createdAt = passkey.createdAt,
                                     lastUsedAt = passkey.lastUsedAt,
                                     useCount = passkey.useCount,
@@ -1583,11 +1637,13 @@ class WebDavHelper(
                                 val fileName = "passkey_${safeId}.json"
                                 val target = File(targetDir, fileName)
                                 target.writeText(json.encodeToString(PasskeyBackupEntry.serializer(), backup), Charsets.UTF_8)
-                            }
+                                successPasskeyCount++
                         }
+                    } catch (e: PasskeyBackupEncryptionRequiredException) {
+                        throw e
                     } catch (e: Exception) {
                         android.util.Log.w("WebDavHelper", "Failed to backup passkeys: ${e.message}")
-                        warnings.add("通行密钥备份失败: ${e.message}")
+                        throw e
                     }
                 }
 
@@ -2352,6 +2408,7 @@ class WebDavHelper(
                     documents = cardWalletItems.count { it.itemType == ItemType.DOCUMENT },
                     billingAddresses = cardWalletItems.count { it.itemType == ItemType.BILLING_ADDRESS },
                     paymentAccounts = cardWalletItems.count { it.itemType == ItemType.PAYMENT_ACCOUNT },
+                    passkeys = totalPasskeyCount,
                     steamMaFiles = steamMaFileBackups.size,
                     images = totalImageCount
                 )
@@ -2363,6 +2420,7 @@ class WebDavHelper(
                     documents = cardWalletItems.count { it.itemType == ItemType.DOCUMENT },
                     billingAddresses = cardWalletItems.count { it.itemType == ItemType.BILLING_ADDRESS },
                     paymentAccounts = cardWalletItems.count { it.itemType == ItemType.PAYMENT_ACCOUNT },
+                    passkeys = successPasskeyCount,
                     steamMaFiles = successSteamMaFileCount,
                     images = successImageCount
                 )
@@ -2750,6 +2808,7 @@ class WebDavHelper(
             var restoredPaymentAccountCount = 0
             var restoredImageCount = 0
             var restoredPasskeyCount = 0
+            var missingPasskeyPrivateKeyCount = 0
             var restoredSteamMaFileCount = 0
             var detectedMonicaConfigEntries = emptyList<String>()
 
@@ -3005,7 +3064,11 @@ class WebDavHelper(
                                     val passkey = restorePasskeyFromJson(tempFile)
                                     if (passkey != null) {
                                         passkeysWithMetadata.add(passkey)
-                                        restoredPasskeyCount++
+                                        if (passkey.first.syncStatus == "REFERENCE") {
+                                            missingPasskeyPrivateKeyCount++
+                                        } else {
+                                            restoredPasskeyCount++
+                                        }
                                     } else {
                                         failedItems.add(FailedItem(
                                             id = 0,
@@ -4073,6 +4136,7 @@ class WebDavHelper(
                     documents = if (backupDocCount > 0) backupDocCount else docItems,
                     billingAddresses = if (backupBillingAddressCount > 0) backupBillingAddressCount else billingAddressItems,
                     paymentAccounts = if (backupPaymentAccountCount > 0) backupPaymentAccountCount else paymentAccountItems,
+                    passkeys = backupPasskeyCount,
                     steamMaFiles = backupSteamMaFileCount,
                     images = backupImageCount
                 )
@@ -4085,6 +4149,7 @@ class WebDavHelper(
                     documents = if (restoredDocCount > 0) restoredDocCount else docItems,
                     billingAddresses = if (restoredBillingAddressCount > 0) restoredBillingAddressCount else billingAddressItems,
                     paymentAccounts = if (restoredPaymentAccountCount > 0) restoredPaymentAccountCount else paymentAccountItems,
+                    passkeys = restoredPasskeyCount,
                     steamMaFiles = restoredSteamMaFileCount,
                     images = restoredImageCount
                 )
@@ -4092,11 +4157,19 @@ class WebDavHelper(
                 if (backupPasskeyCount > 0) {
                     warnings.add("通行密钥恢复: $restoredPasskeyCount/$backupPasskeyCount")
                 }
+                if (missingPasskeyPrivateKeyCount > 0) {
+                    warnings.add(
+                        context.getString(
+                            R.string.passkey_restore_private_keys_missing,
+                            missingPasskeyPrivateKeyCount,
+                        )
+                    )
+                }
 
                 val hasRestorableCoreData =
                     passwords.isNotEmpty() ||
                         normalizedSecureItems.isNotEmpty() ||
-                        passkeys.isNotEmpty() ||
+                        passkeys.any { it.syncStatus != "REFERENCE" } ||
                         steamMaFiles.isNotEmpty()
 
                 if (overwrite) {
@@ -4652,6 +4725,11 @@ class WebDavHelper(
             fun booleanField(name: String, defaultValue: Boolean = false): Boolean {
                 return backup[name]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: defaultValue
             }
+            val restoredPrivateKey = PasskeyBackupPortabilityPolicy.prepareRestore(
+                storedPrivateKey = stringField("privateKeyAlias"),
+                resolvePrivateKey = { stored -> PasskeyPrivateKeyStore.resolve(securityManager, stored) },
+                normalizePrivateKey = PasskeyPrivateKeySupport::exportPkcs8Base64,
+            )
             Pair(
                 PasskeyEntry(
                     id = 0,
@@ -4663,7 +4741,7 @@ class WebDavHelper(
                     userDisplayName = stringField("userDisplayName"),
                     publicKeyAlgorithm = intField("publicKeyAlgorithm", -7),
                     publicKey = stringField("publicKey"),
-                    privateKeyAlias = stringField("privateKeyAlias"),
+                    privateKeyAlias = restoredPrivateKey.privateKeyMaterial,
                     createdAt = longField("createdAt", System.currentTimeMillis()),
                     lastUsedAt = longField("lastUsedAt", System.currentTimeMillis()),
                     useCount = intField("useCount"),
@@ -4676,6 +4754,7 @@ class WebDavHelper(
                     isBackedUp = true,
                     notes = stringField("notes"),
                     boundPasswordId = backup["boundPasswordId"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+                    syncStatus = restoredPrivateKey.syncStatus,
                     passkeyMode = normalizePasskeyMode(nullableStringField("passkeyMode"))
                 ),
                 nullableStringField("categoryName")

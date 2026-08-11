@@ -5,9 +5,12 @@ import takagi.ru.monica.data.PasskeyEntry
 object PasskeyCredentialDiscoveryPolicy {
     private const val SYNC_STATUS_REFERENCE = "REFERENCE"
 
-    fun isUsable(passkey: PasskeyEntry): Boolean {
+    fun isUsable(
+        passkey: PasskeyEntry,
+        privateKeyAvailable: Boolean = true,
+    ): Boolean {
         if (passkey.syncStatus == SYNC_STATUS_REFERENCE) return false
-        return passkey.privateKeyAlias.isNotBlank()
+        return passkey.privateKeyAlias.isNotBlank() && privateKeyAvailable
     }
 
     fun filterUsable(passkeys: List<PasskeyEntry>): List<PasskeyEntry> {

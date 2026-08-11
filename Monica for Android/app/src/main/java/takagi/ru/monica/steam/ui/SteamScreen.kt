@@ -168,6 +168,7 @@ import takagi.ru.monica.steam.market.SteamWalletInfo
 import takagi.ru.monica.steam.network.SteamAuthorizedDevice
 import takagi.ru.monica.steam.network.SteamConfirmation
 import takagi.ru.monica.steam.network.SteamPendingLogin
+import takagi.ru.monica.steam.token.identity.ui.SteamIdentityInfoCard
 import takagi.ru.monica.ui.common.selection.SelectionActionBar
 import takagi.ru.monica.ui.common.state.rememberSaveableLazyListState
 import takagi.ru.monica.ui.common.pull.PullToSearchStateHandle
@@ -2673,6 +2674,9 @@ private fun SteamAccountDetailContent(
                 )
             }
             item {
+                SteamIdentityInfoCard(steamId64 = account.steamId)
+            }
+            item {
                 SteamLoginApprovalSection(
                     account = account,
                     pendingLogins = pendingLogins,
@@ -2804,12 +2808,6 @@ private fun SteamAccountCredentialCard(
             SteamDetailInfoRow(
                 label = stringResource(R.string.steam_account_label),
                 value = account.accountName.ifBlank { account.visibleSteamId }.ifBlank { "Steam" },
-                context = context,
-                clipboard = clipboard
-            )
-            SteamDetailInfoRow(
-                label = stringResource(R.string.steam_id_label),
-                value = account.visibleSteamId.ifBlank { stringResource(R.string.steam_status_code_only) },
                 context = context,
                 clipboard = clipboard
             )

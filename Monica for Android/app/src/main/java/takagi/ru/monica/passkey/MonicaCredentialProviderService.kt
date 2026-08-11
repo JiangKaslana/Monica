@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import takagi.ru.monica.security.SecurityManager
 
 /**
  * Monica Credential Provider Service
@@ -67,6 +68,10 @@ class MonicaCredentialProviderService : CredentialProviderService() {
     
     private val database: PasswordDatabase by lazy {
         PasswordDatabase.getDatabase(applicationContext)
+    }
+
+    private val securityManager: SecurityManager by lazy {
+        SecurityManager(applicationContext)
     }
     
     override fun onDestroy() {
@@ -328,7 +333,13 @@ class MonicaCredentialProviderService : CredentialProviderService() {
     }
 
     private fun isUsablePasskey(passkey: takagi.ru.monica.data.PasskeyEntry): Boolean {
-        return PasskeyCredentialDiscoveryPolicy.isUsable(passkey)
+        return PasskeyCredentialDiscoveryPolicy.isUsable(
+            passkey = passkey,
+            privateKeyAvailable = PasskeyPrivateKeyStore.hasUsablePrivateKey(
+                securityManager,
+                passkey.privateKeyAlias,
+            ),
+        )
     }
 
     private suspend fun resolvePasskeys(

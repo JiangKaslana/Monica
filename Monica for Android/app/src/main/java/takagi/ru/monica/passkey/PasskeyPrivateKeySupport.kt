@@ -39,7 +39,7 @@ object PasskeyPrivateKeySupport {
 
     fun exportPkcs8Base64(keyMaterial: String?): String? {
         val decoded = decodeFlexiblePrivateKey(keyMaterial) ?: return null
-        return Base64.encodeToString(decoded.pkcs8Bytes, Base64.NO_WRAP)
+        return java.util.Base64.getEncoder().encodeToString(decoded.pkcs8Bytes)
     }
 
     fun hasBitwardenCompatiblePrivateKey(keyMaterial: String?): Boolean {
@@ -53,6 +53,18 @@ object PasskeyPrivateKeySupport {
             val entry = keyStore.getEntry(normalized, null) as? KeyStore.PrivateKeyEntry
             val encoded = entry?.privateKey?.encoded
             encoded != null && encoded.isNotEmpty()
+        }.getOrDefault(false)
+    }
+
+    fun hasUsablePrivateKey(keyMaterialOrAlias: String?): Boolean {
+        val normalized = keyMaterialOrAlias?.trim().orEmpty()
+        if (normalized.isBlank()) return false
+        if (decodeFlexiblePrivateKey(normalized) != null) return true
+
+        return runCatching {
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER)
+            keyStore.load(null)
+            keyStore.containsAlias(normalized) && keyStore.isKeyEntry(normalized)
         }.getOrDefault(false)
     }
 
@@ -219,7 +231,7 @@ object PasskeyPrivateKeySupport {
     }
 
     private fun pkcs8ToPem(pkcs8Bytes: ByteArray): String {
-        val body = Base64.encodeToString(pkcs8Bytes, Base64.NO_WRAP)
+        val body = java.util.Base64.getEncoder().encodeToString(pkcs8Bytes)
             .chunked(64)
             .joinToString(separator = "\n")
         return buildString {

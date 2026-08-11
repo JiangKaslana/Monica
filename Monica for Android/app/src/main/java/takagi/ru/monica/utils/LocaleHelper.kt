@@ -16,6 +16,9 @@ object LocaleHelper {
             Language.VIETNAMESE -> Locale("vi", "VN")  // 越南语
             Language.JAPANESE -> Locale.JAPAN  // 日本語
             Language.RUSSIAN -> Locale("ru", "RU")  // Русский
+            Language.KOREAN -> Locale.KOREA
+            Language.GERMAN -> Locale.GERMANY
+            Language.SPANISH -> Locale("es", "ES")
         }
         
         return updateResources(context, locale)
@@ -60,6 +63,9 @@ object LocaleHelper {
             "vi" -> Language.VIETNAMESE
             "ja" -> Language.JAPANESE
             "ru" -> Language.RUSSIAN
+            "ko" -> Language.KOREAN
+            "de" -> Language.GERMAN
+            "es" -> Language.SPANISH
             else -> Language.SYSTEM
         }
     }

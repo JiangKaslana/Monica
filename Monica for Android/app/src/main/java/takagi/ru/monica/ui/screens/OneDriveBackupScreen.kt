@@ -662,6 +662,13 @@ fun OneDriveBackupScreen(
                                         contentScope = BackupContentScope.MONICA_LOCAL_ONLY
                                     ).getOrThrow()
 
+                                    if (!report.success || report.failedItems.isNotEmpty()) {
+                                        file.delete()
+                                        throw IllegalStateException(
+                                            context.getString(R.string.webdav_create_backup_failed)
+                                        )
+                                    }
+
                                     Log.i(
                                         ONEDRIVE_BACKUP_LOG_TAG,
                                         "OneDrive backup zip ready: sizeBytes=${file.length()}, " +

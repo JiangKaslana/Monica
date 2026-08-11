@@ -1156,9 +1156,8 @@ class DataExportImportViewModel(
                     val (zipFile, report) = pair
                     try {
                         if (!report.success) {
-                            // 如果有失败项，但还是生成了文件，可能需要警告用户
-                            // 这里我们记录警告但继续导出
                             android.util.Log.w("DataExport", "Backup report has failures: ${report.failedItems.size}")
+                            throw IllegalStateException(report.getSummary())
                         }
 
                         validatePreparedBackupFile(zipFile)

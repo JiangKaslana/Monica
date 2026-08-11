@@ -35,6 +35,7 @@ data class BackupReport(
             appendLine("  证件: ${successItems.documents}/${totalItems.documents}")
             appendLine("  账单地址: ${successItems.billingAddresses}/${totalItems.billingAddresses}")
             appendLine("  支付方式: ${successItems.paymentAccounts}/${totalItems.paymentAccounts}")
+            appendLine("  通行密钥: ${successItems.passkeys}/${totalItems.passkeys}")
             appendLine("  Steam maFile: ${successItems.steamMaFiles}/${totalItems.steamMaFiles}")
             appendLine("  图片: ${successItems.images}/${totalItems.images}")
             
@@ -92,6 +93,7 @@ data class RestoreReport(
             appendLine("  证件: ${restoredSuccessfully.documents}/${backupContains.documents}")
             appendLine("  账单地址: ${restoredSuccessfully.billingAddresses}/${backupContains.billingAddresses}")
             appendLine("  支付方式: ${restoredSuccessfully.paymentAccounts}/${backupContains.paymentAccounts}")
+            appendLine("  通行密钥: ${restoredSuccessfully.passkeys}/${backupContains.passkeys}")
             appendLine("  Steam maFile: ${restoredSuccessfully.steamMaFiles}/${backupContains.steamMaFiles}")
             appendLine("  图片: ${restoredSuccessfully.images}/${backupContains.images}")
             
@@ -125,12 +127,14 @@ data class ItemCounts(
     val documents: Int = 0,
     val billingAddresses: Int = 0,
     val paymentAccounts: Int = 0,
+    val passkeys: Int = 0,
     val images: Int = 0,
     val generatorHistory: Int = 0,
     val steamMaFiles: Int = 0
 ) {
     fun getTotalCount(): Int {
-        return passwords + notes + totp + bankCards + documents + billingAddresses + paymentAccounts + steamMaFiles
+        return passwords + notes + totp + bankCards + documents + billingAddresses +
+            paymentAccounts + passkeys + steamMaFiles
     }
 }
 

@@ -29,7 +29,15 @@ enum class ColorScheme {
 }
 
 enum class Language {
-    SYSTEM, ENGLISH, CHINESE, VIETNAMESE, JAPANESE, RUSSIAN
+    SYSTEM,
+    ENGLISH,
+    CHINESE,
+    VIETNAMESE,
+    JAPANESE,
+    RUSSIAN,
+    KOREAN,
+    GERMAN,
+    SPANISH
 }
 
 enum class ProgressBarStyle {

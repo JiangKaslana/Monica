@@ -2618,6 +2618,9 @@
     <string name="backup_content_timeline">運用履歴</string>
     <string name="backup_content_trash">ごみ箱</string>
     <string name="backup_content_passkeys">パスキー</string>
+    <string name="passkey_backup_encryption_required">パスキーのバックアップには %1$d 個の秘密鍵が含まれます。続行する前にバックアップ暗号化を有効にしてください。</string>
+    <string name="passkey_backup_private_key_missing">秘密鍵を利用できないため、このパスキーをバックアップできません。</string>
+    <string name="passkey_restore_private_keys_missing">%1$d 個のパスキーは秘密鍵がないためメタデータのみ復元されました。使用前に再登録してください。</string>
     <string name="backup_content_trash_and_history">ごみ箱と履歴</string>
     <string name="backup_content_trash_and_history_hint">ごみ箱、パスワード生成履歴、操作履歴を含む</string>
     <string name="backup_content_local_keepass">ローカル KeePass データベース</string>

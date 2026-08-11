@@ -63,6 +63,16 @@ class PasskeyCredentialDiscoveryPolicyTest {
         assertFalse(PasskeyCredentialDiscoveryPolicy.isUsable(passkey(privateKeyAlias = "")))
     }
 
+    @Test
+    fun `usable policy rejects records whose referenced private key is unavailable`() {
+        assertFalse(
+            PasskeyCredentialDiscoveryPolicy.isUsable(
+                passkey = passkey(privateKeyAlias = "monica-passkey-key-ref-v1:missing"),
+                privateKeyAvailable = false,
+            )
+        )
+    }
+
     private fun passkey(
         credentialId: String = "credential-id",
         isDiscoverable: Boolean = true,
