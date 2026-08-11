@@ -29,13 +29,27 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.util.UUID
 
+internal fun resolveBitwardenAttachmentDownloadUrl(
+    freshUrl: String?,
+    cachedUrl: String?
+): String? = freshUrl?.takeIf { it.isNotBlank() }
+    ?: cachedUrl?.takeIf { it.isNotBlank() }
+
+internal fun resolveBitwardenAttachmentKey(
+    freshKey: String?,
+    remoteKey: String?,
+    storedKey: String?
+): String? = freshKey?.takeIf { it.isNotBlank() }
+    ?: remoteKey?.takeIf { it.isNotBlank() }
+    ?: storedKey?.takeIf { it.isNotBlank() }
+
 /**
  * Bitwarden 附件读写执行器。
  *
  * 该 executor 是"薄"的：自身不查 Room，不决定 URL，只负责三件事：
  *
  * 1. `upload`：对给定 [InputStream] 按 Bitwarden 附件格式加密并上传到服务端
- *    （fileUploadType 0 → Azure PUT；fileUploadType 1 → Direct Multipart），
+ *    （fileUploadType 0 → Direct Multipart；fileUploadType 1 → Azure PUT），
  *    返回可直接落库的 [Attachment]（包含本地缓存密文的 wrappedCek）。
  * 2. `download`：把远端附件密文流式拉到本地，用 Bitwarden 附件密钥解码后，
  *    再用 Monica 的 [AttachmentStorage] 格式重新加密存入 Local_Encrypted_Store。
@@ -244,30 +258,32 @@ class BitwardenAttachmentExecutor(
         cipherId: String,
         wrappingKey: SymmetricCryptoKey
     ): Attachment = withContext(Dispatchers.IO) {
-        val fileKeyEnc = remote.key ?: existing.bitwardenFileKeyEnc
-            ?: throw AttachmentError.CryptoError
-        val attachmentKey = BitwardenAttachmentCrypto.unwrapAttachmentKey(fileKeyEnc, wrappingKey)
-
-        val downloadUrl = remote.url ?: run {
-            val info = try {
-                vaultApi.getAttachmentDownload(
-                    authorization = bearer(accessToken),
-                    cipherId = cipherId,
-                    attachmentId = remote.id
-                )
-            } catch (e: IOException) {
-                attachmentKey.clear()
-                throw AttachmentError.NetworkError(null)
-            }
-            if (!info.isSuccessful) {
-                attachmentKey.clear()
-                throw AttachmentError.NetworkError(info.code())
-            }
-            info.body()?.url ?: run {
-                attachmentKey.clear()
-                throw AttachmentError.NetworkError(info.code())
-            }
+        // Bitwarden attachment URLs are short-lived. Always ask the cipher endpoint for fresh
+        // download metadata first; the URL cached from /sync is only a compatibility fallback.
+        val freshInfoResponse = try {
+            vaultApi.getAttachmentDownload(
+                authorization = bearer(accessToken),
+                cipherId = cipherId,
+                attachmentId = remote.id
+            )
+        } catch (_: IOException) {
+            null
         }
+        val freshInfo = freshInfoResponse
+            ?.takeIf { it.isSuccessful }
+            ?.body()
+        val fileKeyEnc = resolveBitwardenAttachmentKey(
+            freshKey = freshInfo?.key,
+            remoteKey = remote.key,
+            storedKey = existing.bitwardenFileKeyEnc
+        )
+            ?: throw AttachmentError.CryptoError
+        val downloadUrl = resolveBitwardenAttachmentDownloadUrl(
+            freshUrl = freshInfo?.url,
+            cachedUrl = remote.url
+        )
+            ?: throw AttachmentError.NetworkError(freshInfoResponse?.code())
+        val attachmentKey = BitwardenAttachmentCrypto.unwrapAttachmentKey(fileKeyEnc, wrappingKey)
 
         val ciphertextTmp = File.createTempFile("bw_dl_", ".bin", context.applicationContext.cacheDir)
         try {

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import takagi.ru.monica.attachments.executor.BitwardenAttachmentExecutor
+import takagi.ru.monica.attachments.executor.BitwardenAttachmentReconciler
 import takagi.ru.monica.attachments.executor.KeePassAttachmentExecutor
 import takagi.ru.monica.attachments.executor.LocalAttachmentExecutor
 import takagi.ru.monica.attachments.model.Attachment
@@ -60,6 +61,16 @@ class AttachmentFacade(
     /** 用于 `openForPreview` 发出的 FileProvider authority，需与 manifest 中注册的 authority 一致。 */
     private val fileProviderAuthority: String
 ) {
+
+    suspend fun reconcileBitwardenAttachments(
+        owner: AttachmentOwner,
+        remoteAttachments: List<CipherAttachmentApiData>?
+    ): BitwardenAttachmentReconciler.Report = withContext(Dispatchers.IO) {
+        BitwardenAttachmentReconciler(
+            repository = repository,
+            storage = storage
+        ).reconcile(owner, remoteAttachments)
+    }
 
     /**
      * 业务侧发起上传时的最小上下文。

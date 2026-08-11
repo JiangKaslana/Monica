@@ -237,8 +237,8 @@ interface BitwardenVaultApi {
      * 创建附件上传凭据（v2 端点）。
      *
      * 返回值根据 `fileUploadType` 字段指示后续如何上传密文：
-     * - 0 = Azure：需要 PUT 到 `url`，请求头带 `x-ms-blob-type: BlockBlob`；
-     * - 1 = Direct：需要走 [uploadAttachmentDirect] 以 Multipart 发送。
+     * - 0 = Direct：需要走 [uploadAttachmentDirect] 以 Multipart 发送；
+     * - 1 = Azure：需要 PUT 到 `url`，请求头带 `x-ms-blob-type: BlockBlob`。
      *
      * 对应 Bitwarden 官方 `/ciphers/{id}/attachment/v2`。
      */
@@ -250,7 +250,7 @@ interface BitwardenVaultApi {
     ): Response<AttachmentUploadResponse>
 
     /**
-     * Direct 模式上传附件密文（fileUploadType = 1）。
+     * Direct 模式上传附件密文（fileUploadType = 0）。
      *
      * Multipart 需要两个 part：
      * - `key`：附件独立密钥（EncString）；
@@ -1031,7 +1031,7 @@ data class AttachmentUploadRequest(
  */
 @Serializable
 data class AttachmentUploadResponse(
-    /** 0 = Azure Blob PUT，1 = Direct Multipart。 */
+    /** 0 = Direct Multipart，1 = Azure Blob PUT。 */
     @JsonNames("fileUploadType")
     @SerialName("fileUploadType")
     val fileUploadType: Int = 0,

@@ -9,6 +9,16 @@ internal sealed interface PasswordPageListItemUi {
     val key: String
 }
 
+internal fun PasswordPageListItemUi.contentTypeKey(): Any = when (this) {
+    is PasswordGroupListItemUi -> if (passwords.size > 1) {
+        "password_stack"
+    } else {
+        "password_single"
+    }
+    is PasswordManualStackGroupListItemUi -> "password_manual_stack"
+    is PasswordSupplementaryListItemUi -> item.type
+}
+
 internal data class PasswordPageCardItemUi(
     val key: String,
     val entry: PasswordEntry,

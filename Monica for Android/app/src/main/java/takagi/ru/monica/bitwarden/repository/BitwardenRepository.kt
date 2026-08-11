@@ -37,6 +37,7 @@ import takagi.ru.monica.bitwarden.BitwardenVaultPremiumStore
 import takagi.ru.monica.bitwarden.api.BitwardenApiFactory
 import takagi.ru.monica.bitwarden.api.BitwardenApiManager
 import takagi.ru.monica.bitwarden.api.BitwardenTlsConfig
+import takagi.ru.monica.bitwarden.api.CipherAttachmentApiData
 import takagi.ru.monica.bitwarden.api.FolderCreateRequest
 import takagi.ru.monica.bitwarden.api.FolderUpdateRequest
 import takagi.ru.monica.bitwarden.BitwardenRestoreQueueOutcome
@@ -49,6 +50,8 @@ import takagi.ru.monica.bitwarden.service.BitwardenAuthService
 import takagi.ru.monica.bitwarden.service.BitwardenDiagLogger
 import takagi.ru.monica.bitwarden.service.BitwardenHistoricalTotpRepairResult
 import takagi.ru.monica.bitwarden.service.BitwardenHistoricalTotpRepairService
+import takagi.ru.monica.bitwarden.service.BitwardenAttachmentMetadataDecoder
+import takagi.ru.monica.bitwarden.service.BitwardenCipherKeyResolver
 import takagi.ru.monica.bitwarden.service.BitwardenSyncService
 import takagi.ru.monica.bitwarden.service.LoginResult
 import takagi.ru.monica.bitwarden.service.SyncResult as ServiceSyncResult
@@ -67,6 +70,11 @@ import takagi.ru.monica.data.bitwarden.*
  * 4. 管理加密密钥的安全存储
  */
 class BitwardenRepository(private val context: Context) {
+
+    data class AttachmentCipherSnapshot(
+        val context: takagi.ru.monica.attachments.facade.AttachmentFacade.BitwardenContext,
+        val attachments: List<CipherAttachmentApiData>
+    )
     
     companion object {
         private const val TAG = "BitwardenRepository"
@@ -293,6 +301,55 @@ class BitwardenRepository(private val context: Context) {
             ),
             isOnline = isOnline
         )
+    }
+
+    /**
+     * Fetches the current cipher before recovering an attachment on another device.
+     * Modern Bitwarden ciphers may use a per-item key, so the vault key alone is not
+     * sufficient for decrypting attachment metadata or the wrapped attachment key.
+     */
+    suspend fun fetchAttachmentCipherSnapshot(
+        vault: BitwardenVault,
+        cipherId: String
+    ): AttachmentCipherSnapshot? = withContext(Dispatchers.IO) {
+        if (cipherId.isBlank() || !isNetworkAvailable()) return@withContext null
+        val accessToken = accessTokenCache[vault.id] ?: return@withContext null
+        val vaultKey = symmetricKeyCache[vault.id] ?: return@withContext null
+        val vaultApi = apiManager.getVaultApi(vault)
+        val response = runCatching {
+            vaultApi.getCipher(
+                authorization = "Bearer $accessToken",
+                cipherId = cipherId
+            )
+        }.getOrNull() ?: return@withContext null
+        if (!response.isSuccessful) return@withContext null
+        val cipher = response.body() ?: return@withContext null
+        val effectiveKey = BitwardenCipherKeyResolver.resolveCipherKey(
+            cipher = cipher,
+            vaultKey = vaultKey,
+            logTag = TAG
+        )
+        try {
+            AttachmentCipherSnapshot(
+                context = takagi.ru.monica.attachments.facade.AttachmentFacade.BitwardenContext(
+                    vaultApi = vaultApi,
+                    httpClient = apiManager.getOkHttpClient(vault),
+                    accessToken = accessToken,
+                    cipherId = cipherId,
+                    wrappingKey = SymmetricCryptoKey(
+                        encKey = effectiveKey.encKey.copyOf(),
+                        macKey = effectiveKey.macKey.copyOf()
+                    ),
+                    isOnline = true
+                ),
+                attachments = BitwardenAttachmentMetadataDecoder.decodeForStorage(
+                    attachments = cipher.attachments.orEmpty(),
+                    effectiveKey = effectiveKey
+                )
+            )
+        } finally {
+            BitwardenCipherKeyResolver.clearIfDerived(effectiveKey, vaultKey)
+        }
     }
 
     private fun isNetworkAvailable(): Boolean {

@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
@@ -27,7 +28,6 @@ import takagi.ru.monica.ui.haptic.rememberHapticFeedback
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun StackedPasswordGroup(
-    @Suppress("UNUSED_PARAMETER") website: String,
     passwords: List<takagi.ru.monica.data.PasswordEntry>,
     isExpanded: Boolean,
     stackCardMode: StackCardMode,
@@ -37,7 +37,6 @@ fun StackedPasswordGroup(
     onSwipeRight: (takagi.ru.monica.data.PasswordEntry) -> Unit,
     onGroupSwipeRight: (List<takagi.ru.monica.data.PasswordEntry>) -> Unit,
     onToggleFavorite: (takagi.ru.monica.data.PasswordEntry) -> Unit,
-    onToggleGroupFavorite: () -> Unit,
     onToggleGroupCover: (takagi.ru.monica.data.PasswordEntry) -> Unit,
     isSelectionMode: Boolean,
     selectedPasswords: Set<Long>,
@@ -59,10 +58,8 @@ fun StackedPasswordGroup(
 ) {
     val leadPassword = passwords.firstOrNull() ?: return
     val collapsedTitle = displayTitle?.takeIf { it.isNotBlank() } ?: leadPassword.title
-
-    // 检查是否为多密码合并卡片(除密码外信息完全相同)
-    val isMergedPasswordCard = passwords.size > 1 && 
-        passwords.map { getPasswordInfoKey(it) }.distinct().size == 1
+    val summary = remember(passwords) { summarizePasswordStack(passwords) }
+    val isMergedPasswordCard = summary.isMergedPasswordCard
     
     // 如果选择“始终展开”，则直接平铺展示，不使用堆叠容器
     if (stackCardMode == StackCardMode.ALWAYS_EXPANDED) {
@@ -211,27 +208,23 @@ fun StackedPasswordGroup(
     }
     
     // 否则使用原有的堆叠逻辑
-    val isGroupFavorited = passwords.all { it.isFavorite }
-    val hasGroupCover = passwords.any { it.isGroupCover }
+    val isGroupFavorited = summary.isGroupFavorited
+    val hasGroupCover = summary.hasGroupCover
     
-    // 🎨 动画状态
-    val effectiveExpanded = when (stackCardMode) {
-        StackCardMode.AUTO -> isExpanded
-        StackCardMode.ALWAYS_EXPANDED -> true
+    // ALWAYS_EXPANDED has returned above, so the stack transition only follows
+    // the actual expanded state. One transition clock keeps all properties in sync.
+    val effectiveExpanded = isExpanded
+    val stackTransition = updateTransition(
+        targetState = effectiveExpanded,
+        label = "password_stack_transition"
+    )
+    val stackAlpha = stackTransition.animateFloat(
+        transitionSpec = { tween(200) },
+        label = "stack_alpha"
+    ) { expanded ->
+        if (expanded) 0f else 1f
     }
 
-    val expandProgress by animateFloatAsState(
-        targetValue = if (effectiveExpanded && passwords.size > 1) 1f else 0f,
-        animationSpec = tween(200),
-        label = "expand_animation"
-    )
-    
-    val containerAlpha by animateFloatAsState(
-        targetValue = if (effectiveExpanded && passwords.size > 1) 1f else 0f,
-        animationSpec = tween(200),
-        label = "container_alpha"
-    )
-    
     // 🎯 下滑手势状态
     var swipeOffset by remember { mutableFloatStateOf(0f) }
     val haptic = rememberHapticFeedback()
@@ -240,114 +233,90 @@ fun StackedPasswordGroup(
         modifier = Modifier
             .fillMaxWidth()
     ) {
-        // 📚 堆叠背后的层级卡片 (仅在堆叠状态下可见，或动画过程中可见)
-        val stackAlpha by animateFloatAsState(
-            targetValue = if (effectiveExpanded) 0f else 1f,
-            animationSpec = tween(200),
-            label = "stack_alpha"
-        )
-        
-        Box(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            // 背景堆叠层 (当 stackAlpha > 0 时显示)
-            if (passwords.size > 1) {
-                val stackCount = passwords.size.coerceAtMost(3)
-                for (i in (stackCount - 1) downTo 1) {
-                    val offsetDp = (i * 4).dp
-                    val scaleFactor = 1f - (i * 0.02f)
-                    val layerAlpha = (0.7f - (i * 0.2f)) * stackAlpha
-                    
-                    if (layerAlpha > 0.01f) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = offsetDp) // Padding top creates the vertical offset effect
-                                .graphicsLayer {
-                                    scaleX = scaleFactor
-                                    scaleY = scaleFactor
-                                    alpha = layerAlpha
-                                    translationY = (i * 4).dp.toPx() * (1f - stackAlpha) // Optional: slide up when disappearing?
-                                },
-                            elevation = CardDefaults.cardElevation(defaultElevation = (i * 1.5).dp),
-                            colors = CardDefaults.cardColors(), // Use default colors to match single cards
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Box(modifier = Modifier.height(76.dp))
-                        }
-                    }
-                }
-            }
+        // Background layers remain structurally stable during the transition.
+        // ModulateAlpha avoids an offscreen buffer for every visible stack.
+        val stackCount = passwords.size.coerceAtMost(3)
+        for (i in (stackCount - 1) downTo 1) {
+            val offsetDp = (i * 4).dp
+            val scaleFactor = 1f - (i * 0.02f)
+            val baseLayerAlpha = 0.7f - (i * 0.2f)
 
-            // 🎯 主卡片 (持续存在，内容和属性变化)
-            val cardElevation by animateDpAsState(
-                targetValue = if (effectiveExpanded) 4.dp else 6.dp,
-                animationSpec = tween(200),
-                label = "elevation"
-            )
-            val cardShape by animateDpAsState(
-                targetValue = if (effectiveExpanded) 16.dp else 14.dp,
-                animationSpec = tween(200),
-                label = "shape"
-            )
-            
-            val isSelected = selectedPasswords.contains(leadPassword.id)
-            val cardColors = if (isSelected) {
-                CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-            } else {
-                CardDefaults.cardColors()
-            }
-            
-            takagi.ru.monica.ui.gestures.SwipeActions(
-                onSwipeLeft = { 
-                    if (!effectiveExpanded) onSwipeLeft(leadPassword) 
-                    // Expanded state swipe logic handled inside? Or disable swipe on container when expanded?
-                },
-                onSwipeRight = { 
-                    if (!effectiveExpanded) onGroupSwipeRight(passwords)
-                },
-                isSwiped = leadPassword.id == swipedItemId,
-                enabled = !effectiveExpanded // Disable swipe actions on the container when expanded
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = offsetDp)
+                    .graphicsLayer {
+                        val currentStackAlpha = stackAlpha.value
+                        scaleX = scaleFactor
+                        scaleY = scaleFactor
+                        alpha = baseLayerAlpha * currentStackAlpha
+                        translationY = (i * 4).dp.toPx() * (1f - currentStackAlpha)
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                    },
+                elevation = CardDefaults.cardElevation(defaultElevation = (i * 1.5).dp),
+                colors = CardDefaults.cardColors(),
+                shape = RoundedCornerShape(14.dp)
             ) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            // 展开时的下滑手势
-                            if (effectiveExpanded && passwords.size > 1) {
-                                Modifier.pointerInput(Unit) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = { haptic.performLongPress() },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            if (dragAmount.y > 0) {
-                                                swipeOffset = (swipeOffset + dragAmount.y).coerceAtMost(150f)
-                                            }
-                                        },
-                                        onDragEnd = {
-                                            if (swipeOffset > 80f) {
-                                                haptic.performSuccess()
-                                                onToggleExpand()
-                                            }
-                                            swipeOffset = 0f
-                                        },
-                                        onDragCancel = { swipeOffset = 0f }
-                                    )
-                                }
-                            } else Modifier
-                        )
-                        .graphicsLayer {
-                            // 下滑时的位移效果
-                            if (effectiveExpanded) {
-                                translationY = swipeOffset * 0.5f
+                Box(modifier = Modifier.height(76.dp))
+            }
+        }
+
+        // 🎯 主卡片 (持续存在，内容和属性变化)
+        val isSelected = selectedPasswords.contains(leadPassword.id)
+        val cardColors = if (isSelected) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        }
+
+        takagi.ru.monica.ui.gestures.SwipeActions(
+            onSwipeLeft = {
+                if (!effectiveExpanded) onSwipeLeft(leadPassword)
+            },
+            onSwipeRight = {
+                if (!effectiveExpanded) onGroupSwipeRight(passwords)
+            },
+            isSwiped = leadPassword.id == swipedItemId,
+            enabled = !effectiveExpanded
+        ) {
+            AnimatedStackCard(
+                transition = stackTransition,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        // 展开时的下滑手势
+                        if (effectiveExpanded && passwords.size > 1) {
+                            Modifier.pointerInput(Unit) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { haptic.performLongPress() },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        if (dragAmount.y > 0) {
+                                            swipeOffset = (swipeOffset + dragAmount.y).coerceAtMost(150f)
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        if (swipeOffset > 80f) {
+                                            haptic.performSuccess()
+                                            onToggleExpand()
+                                        }
+                                        swipeOffset = 0f
+                                    },
+                                    onDragCancel = { swipeOffset = 0f }
+                                )
                             }
-                        },
-                    shape = RoundedCornerShape(cardShape),
-                    elevation = CardDefaults.cardElevation(defaultElevation = cardElevation),
-                    colors = cardColors
-                ) {
-                    // 内容切换：收起态(Header) vs 展开态(Column)
-                    AnimatedContent(
+                        } else Modifier
+                    )
+                    .graphicsLayer {
+                        // 下滑时的位移效果
+                        if (effectiveExpanded) {
+                            translationY = swipeOffset * 0.5f
+                        }
+                    },
+                colors = cardColors
+            ) {
+                // 内容切换：收起态(Header) vs 展开态(Column)
+                AnimatedContent(
                         targetState = effectiveExpanded,
                         transitionSpec = {
                             (fadeIn(animationSpec = tween(180)) togetherWith
@@ -696,8 +665,73 @@ fun StackedPasswordGroup(
                     }
                 }
             }
-        }
     }
 }
 
+internal data class PasswordStackSummary(
+    val isMergedPasswordCard: Boolean,
+    val isGroupFavorited: Boolean,
+    val hasGroupCover: Boolean
+)
 
+@Composable
+private fun AnimatedStackCard(
+    transition: Transition<Boolean>,
+    modifier: Modifier,
+    colors: CardColors,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val cardElevation by transition.animateDp(
+        transitionSpec = { tween(200) },
+        label = "elevation"
+    ) { expanded ->
+        if (expanded) 4.dp else 6.dp
+    }
+    val cardShape by transition.animateDp(
+        transitionSpec = { tween(200) },
+        label = "shape"
+    ) { expanded ->
+        if (expanded) 16.dp else 14.dp
+    }
+
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(cardShape),
+        elevation = CardDefaults.cardElevation(defaultElevation = cardElevation),
+        colors = colors,
+        content = content
+    )
+}
+
+internal fun summarizePasswordStack(
+    passwords: List<takagi.ru.monica.data.PasswordEntry>
+): PasswordStackSummary {
+    val leadPassword = passwords.firstOrNull()
+        ?: return PasswordStackSummary(
+            isMergedPasswordCard = false,
+            isGroupFavorited = false,
+            hasGroupCover = false
+        )
+    val leadInfoKey = if (passwords.size > 1) getPasswordInfoKey(leadPassword) else null
+    var isMergedPasswordCard = passwords.size > 1
+    var isGroupFavorited = true
+    var hasGroupCover = false
+
+    passwords.forEachIndexed { index, password ->
+        isGroupFavorited = isGroupFavorited && password.isFavorite
+        hasGroupCover = hasGroupCover || password.isGroupCover
+        if (
+            index > 0 &&
+            isMergedPasswordCard &&
+            getPasswordInfoKey(password) != leadInfoKey
+        ) {
+            isMergedPasswordCard = false
+        }
+    }
+
+    return PasswordStackSummary(
+        isMergedPasswordCard = isMergedPasswordCard,
+        isGroupFavorited = isGroupFavorited,
+        hasGroupCover = hasGroupCover
+    )
+}

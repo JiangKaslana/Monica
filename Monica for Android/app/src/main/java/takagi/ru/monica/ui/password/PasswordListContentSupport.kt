@@ -22,6 +22,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import takagi.ru.monica.R
@@ -73,14 +74,37 @@ private const val PASSWORD_SCROLL_LOG_TAG = "PasswordScrollDebug"
 private const val MANUAL_STACK_GROUP_KEY_PREFIX = "manual_stack:"
 private const val NO_STACK_GROUP_KEY_PREFIX = "no_stack:"
 
-private data class PasswordListScrollSnapshot(
+internal data class PasswordListScrollSnapshot(
     val allowPersistence: Boolean,
     val pendingRestore: Boolean,
     val totalItems: Int,
     val index: Int,
     val offset: Int,
-    val anchorKey: String?
+    val anchorKey: String?,
+    val isScrollInProgress: Boolean
 )
+
+internal data class PasswordListScrollPersistenceKey(
+    val allowPersistence: Boolean,
+    val pendingRestore: Boolean,
+    val totalItems: Int,
+    val index: Int,
+    val offsetWhenIdle: Int?,
+    val anchorKey: String?,
+    val isScrollInProgress: Boolean
+)
+
+internal fun PasswordListScrollSnapshot.persistenceKey(): PasswordListScrollPersistenceKey {
+    return PasswordListScrollPersistenceKey(
+        allowPersistence = allowPersistence,
+        pendingRestore = pendingRestore,
+        totalItems = totalItems,
+        index = index,
+        offsetWhenIdle = offset.takeUnless { isScrollInProgress },
+        anchorKey = anchorKey,
+        isScrollInProgress = isScrollInProgress
+    )
+}
 
 internal data class PasswordListAggregateUiState(
     val visibleContentTypes: List<PasswordPageContentType>,
@@ -787,6 +811,8 @@ internal fun rememberPasswordListLazyListState(
         currentListItemKeys.toSet()
     }
     val backToTopVisibilityCallback by rememberUpdatedState(onBackToTopVisibilityChange)
+    val latestAllowScrollPositionPersistence by rememberUpdatedState(allowScrollPositionPersistence)
+    val latestListItemKeySet by rememberUpdatedState(currentListItemKeySet)
     var shouldShowBackToTop by remember { mutableStateOf(false) }
     var lastHandledScrollToTopRequestKey by rememberSaveable {
         mutableStateOf(scrollToTopRequestKey)
@@ -831,9 +857,24 @@ internal fun rememberPasswordListLazyListState(
         backToTopVisibilityCallback(shouldShowBackToTop)
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(listState, viewModel) {
         onDispose {
             backToTopVisibilityCallback(false)
+            if (
+                latestAllowScrollPositionPersistence &&
+                listState.layoutInfo.totalItemsCount > 0
+            ) {
+                val topVisibleKey = listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { item -> item.key.toString() in latestListItemKeySet }
+                    ?.key
+                    ?.toString()
+                viewModel.updatePasswordListScrollPosition(
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset,
+                    topVisibleKey,
+                    source = "v1_dispose_persist"
+                )
+            }
         }
     }
 
@@ -1004,10 +1045,11 @@ internal fun rememberPasswordListLazyListState(
                 totalItems = listState.layoutInfo.totalItemsCount,
                 index = listState.firstVisibleItemIndex,
                 offset = listState.firstVisibleItemScrollOffset,
-                anchorKey = topVisibleKey
+                anchorKey = topVisibleKey,
+                isScrollInProgress = listState.isScrollInProgress
             )
         }
-            .distinctUntilChanged()
+            .distinctUntilChangedBy { snapshot -> snapshot.persistenceKey() }
             .collect { snapshot ->
                 if (!snapshot.allowPersistence || snapshot.pendingRestore || snapshot.totalItems <= 0) {
                     return@collect

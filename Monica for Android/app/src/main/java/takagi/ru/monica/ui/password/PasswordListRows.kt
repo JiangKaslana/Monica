@@ -1,7 +1,6 @@
 package takagi.ru.monica.ui
 
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -31,6 +30,7 @@ import takagi.ru.monica.ui.password.PasswordListSingleCardItem
 import takagi.ru.monica.ui.password.PasswordSupplementaryListItemUi
 import takagi.ru.monica.ui.password.StackCardMode
 import takagi.ru.monica.ui.password.StackedPasswordGroup
+import takagi.ru.monica.ui.password.contentTypeKey
 import takagi.ru.monica.ui.password.passwordSelectionKey
 import takagi.ru.monica.ui.password.selectionKeysForPasswords
 import takagi.ru.monica.ui.password.toPasswordPageCardItemUi
@@ -252,7 +252,11 @@ internal fun LazyListScope.passwordPageListRows(
         }
     }
 
-    items(passwordPageListItems, key = { item -> item.key }) { listItem ->
+    items(
+        items = passwordPageListItems,
+        key = { item -> item.key },
+        contentType = { item -> item.contentTypeKey() }
+    ) { listItem ->
         when (listItem) {
             is PasswordGroupListItemUi -> {
                 val groupKey = listItem.groupKey
@@ -263,7 +267,6 @@ internal fun LazyListScope.passwordPageListRows(
                 }
 
                 StackedPasswordGroup(
-                    website = groupKey,
                     passwords = passwords,
                     displayTitle = listItem.displayTitle,
                     isExpanded = isExpanded,
@@ -308,25 +311,6 @@ internal fun LazyListScope.passwordPageListRows(
 
                     onToggleFavorite = { password ->
                         viewModel.toggleFavorite(password.id, !password.isFavorite)
-                    },
-                    onToggleGroupFavorite = {
-                        coroutineScope.launch {
-                            val allFavorited = passwords.all { it.isFavorite }
-                            val newState = !allFavorited
-                            passwords.forEach { password ->
-                                viewModel.toggleFavorite(password.id, newState)
-                            }
-                            val message = if (newState) {
-                                context.getString(R.string.group_favorited, passwords.size)
-                            } else {
-                                context.getString(R.string.group_unfavorited, passwords.size)
-                            }
-                            Toast.makeText(
-                                context,
-                                message,
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
                     },
                     onToggleGroupCover = { password ->
                         coroutineScope.launch {

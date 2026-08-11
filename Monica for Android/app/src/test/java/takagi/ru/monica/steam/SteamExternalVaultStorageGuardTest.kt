@@ -34,10 +34,26 @@ class SteamExternalVaultStorageGuardTest {
         assertTrue(keepass.contains("addAttachmentToEntry("))
         assertTrue(keepass.contains("memoryProtection = true"))
         assertTrue(bitwarden.contains("syncForUserVisibleRequest("))
+        assertTrue(bitwarden.contains("refreshRemote: Boolean = false"))
         assertTrue(bitwarden.contains("addInlineAttachment("))
         assertTrue(bitwarden.contains("AttachmentSource.BITWARDEN"))
         assertTrue(bitwarden.contains("SteamExternalMaFileContract.candidateFileNames"))
         assertTrue(bitwarden.contains("LOGIN_TYPE_STEAM_MAFILE"))
+        assertTrue(bitwarden.contains("if (!hasMarker && !entry.isExternalSteamMaFileEntry()) return null"))
+        assertTrue(bitwarden.contains("fetchAttachmentCipherSnapshot("))
+        assertTrue(bitwarden.contains("reconcileBitwardenAttachments("))
+        val repository = projectFile(
+            "app/src/main/java/takagi/ru/monica/bitwarden/repository/BitwardenRepository.kt"
+        ).readText()
+        assertTrue(repository.contains("BitwardenCipherKeyResolver.resolveCipherKey("))
+        assertTrue(repository.contains("BitwardenAttachmentMetadataDecoder.decodeForStorage("))
+        val attachmentExecutor = projectFile(
+            "app/src/main/java/takagi/ru/monica/attachments/executor/BitwardenAttachmentExecutor.kt"
+        ).readText()
+        val downloadBody = attachmentExecutor
+            .substringAfter("suspend fun download(")
+            .substringBefore("suspend fun remove(")
+        assertTrue(downloadBody.indexOf("getAttachmentDownload(") < downloadBody.indexOf("remote.url"))
         assertTrue(bitwarden.contains("bitwardenRepository.isVaultPremium(vaultId)"))
         assertFalse(bitwarden.contains("bitwardenPremium = true"))
         assertTrue(keepass.contains("SteamExternalMaFileContract.MAX_MAFILE_BYTES"))
@@ -78,6 +94,7 @@ class SteamExternalVaultStorageGuardTest {
         assertTrue(screen.contains("SteamStorageSource.Bitwarden(vault.id)"))
         assertTrue(viewModel.contains("reloadKeePassAccounts("))
         assertTrue(viewModel.contains("reloadBitwardenAccounts("))
+        assertTrue(viewModel.contains("loadAccounts(source.vaultId, refreshRemote = true)"))
         assertTrue(viewModel.contains("keepassAccountStore?.deleteAccount("))
         assertTrue(viewModel.contains("bitwardenAccountStore?.deleteAccount("))
     }

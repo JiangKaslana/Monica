@@ -351,7 +351,9 @@ class SteamViewModel(
                     runCatching {
                         val store = bitwardenAccountStore
                             ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
-                        withContext(Dispatchers.IO) { store.loadAccounts(source.vaultId) }
+                        withContext(Dispatchers.IO) {
+                            store.loadAccounts(source.vaultId, refreshRemote = true)
+                        }
                     }.onSuccess { records ->
                         bitwardenAccountRecords = records
                         updateForAccounts(
@@ -2306,7 +2308,9 @@ class SteamViewModel(
     ) {
         val store = bitwardenAccountStore
             ?: throw IllegalStateException(appContext.getString(R.string.steam_bitwarden_storage_unavailable))
-        val records = withContext(Dispatchers.IO) { store.loadAccounts(source.vaultId) }
+        val records = withContext(Dispatchers.IO) {
+            store.loadAccounts(source.vaultId, refreshRemote = true)
+        }
         bitwardenAccountRecords = records
         updateForAccounts(
             accounts = records.map { it.account },

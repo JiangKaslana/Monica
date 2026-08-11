@@ -6,6 +6,7 @@ import java.util.Date
 import takagi.ru.monica.attachments.facade.AttachmentFacade
 import takagi.ru.monica.attachments.model.AttachmentOwner
 import takagi.ru.monica.attachments.model.AttachmentSource
+import takagi.ru.monica.attachments.facade.AttachmentFacade.BitwardenContext
 import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.bitwarden.sync.syncForUserVisibleRequest
 import takagi.ru.monica.data.CustomField
@@ -34,10 +35,27 @@ class SteamBitwardenAccountStore(
     private val customFieldDao = database.customFieldDao()
     private val vaultDao = database.bitwardenVaultDao()
 
-    suspend fun loadAccounts(vaultId: Long): List<SteamBitwardenAccountRecord> {
+    suspend fun loadAccounts(
+        vaultId: Long,
+        refreshRemote: Boolean = false
+    ): List<SteamBitwardenAccountRecord> {
         val vault = vaultDao.getVaultById(vaultId) ?: return emptyList()
         check(bitwardenRepository.isVaultUnlocked(vaultId)) { "Bitwarden vault is locked" }
-        return passwordDao.getByBitwardenVaultId(vaultId)
+        val syncError = if (refreshRemote) {
+            when (
+                val result = bitwardenRepository.syncForUserVisibleRequest(
+                    vaultId = vaultId,
+                    requestIdPrefix = "steam-mafile-load"
+                )
+            ) {
+                is BitwardenRepository.SyncResult.Error -> result.message
+                is BitwardenRepository.SyncResult.EmptyVaultBlocked -> result.reason
+                is BitwardenRepository.SyncResult.Success -> null
+            }
+        } else {
+            null
+        }
+        val records = passwordDao.getByBitwardenVaultId(vaultId)
             .filterNot { it.isDeleted || it.isArchived }
             .mapNotNull { entry -> loadEntry(vault, entry) }
             .mapIndexed { index, record ->
@@ -45,6 +63,10 @@ class SteamBitwardenAccountStore(
                     account = record.account.copy(selected = index == 0, sortOrder = index)
                 )
             }
+        if (records.isEmpty() && syncError != null) {
+            throw IllegalStateException(syncError)
+        }
+        return records
     }
 
     private suspend fun loadEntry(
@@ -54,14 +76,38 @@ class SteamBitwardenAccountStore(
         val vaultId = vault.id
         val cipherId = entry.bitwardenCipherId?.takeIf(String::isNotBlank) ?: return null
         val fields = customFieldDao.getFieldsByEntryIdSync(entry.id)
-        if (!SteamExternalMaFileContract.isMarked(fields.map { it.title to it.value })) return null
+        val hasMarker = SteamExternalMaFileContract.isMarked(fields.map { it.title to it.value })
+        if (!hasMarker && !entry.isExternalSteamMaFileEntry()) return null
 
         // Migrate entries created before the internal type was persisted. This update is local
         // metadata only; the marker remains the source of truth for the external Steam store.
-        if (!entry.isExternalSteamMaFileEntry()) {
+        if (hasMarker && !entry.isExternalSteamMaFileEntry()) {
             passwordDao.updatePasswordEntry(entry.copy(loginType = LOGIN_TYPE_STEAM_MAFILE))
         }
 
+        val cachedContext = bitwardenRepository.getAttachmentBitwardenContext(vault, cipherId)
+        if (cachedContext != null) {
+            loadEntryFromAttachments(vaultId, entry, cipherId, cachedContext)?.let { return it }
+        }
+
+        // A new device can receive the cipher before its attachment metadata is present in
+        // Monica's local attachment table. Fetch the cipher directly as a recovery step and
+        // resolve its per-item key before downloading the maFile.
+        val snapshot = bitwardenRepository.fetchAttachmentCipherSnapshot(vault, cipherId)
+            ?: return null
+        attachmentFacade.reconcileBitwardenAttachments(
+            owner = AttachmentOwner.password(entry.id),
+            remoteAttachments = snapshot.attachments
+        )
+        return loadEntryFromAttachments(vaultId, entry, cipherId, snapshot.context)
+    }
+
+    private suspend fun loadEntryFromAttachments(
+        vaultId: Long,
+        entry: PasswordEntry,
+        cipherId: String,
+        context: BitwardenContext
+    ): SteamBitwardenAccountRecord? {
         val attachments = attachmentFacade.listByPassword(entry.id)
             .filter { it.sourceEnum == AttachmentSource.BITWARDEN }
         val candidateNames = SteamExternalMaFileContract.candidateFileNames(
@@ -75,8 +121,6 @@ class SteamBitwardenAccountStore(
                     SteamExternalMaFileContract.isMaFile(it.fileName)
                 }.thenByDescending { it.updatedAt }
             )
-        val context = bitwardenRepository.getAttachmentBitwardenContext(vault, cipherId) ?: return null
-
         for (attachment in candidates) {
             if (attachment.sizeBytes > SteamExternalMaFileContract.MAX_MAFILE_BYTES) continue
             val bytes = runCatching {

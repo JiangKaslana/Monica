@@ -9,9 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -396,23 +393,10 @@ private fun PasswordAuthenticatorInlineRow(
                 )
             }
         }
-        state.progress?.let { progress ->
-            val animatedProgress = if (smoothProgress) {
-                animateFloatAsState(
-                    targetValue = progress,
-                    animationSpec = tween(durationMillis = 80, easing = LinearEasing),
-                    label = "password_auth_progress"
-                ).value
-            } else {
-                progress
-            }
-            LinearProgressIndicator(
-                progress = { animatedProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
+        if (state.progress != null) {
+            PasswordAuthenticatorProgressIndicator(
+                state = state,
+                smoothProgress = smoothProgress
             )
         }
     }
