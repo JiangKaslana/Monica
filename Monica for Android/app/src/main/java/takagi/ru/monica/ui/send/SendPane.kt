@@ -12,8 +12,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import android.net.Uri
 import androidx.compose.ui.unit.Dp
+import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel
 import takagi.ru.monica.data.bitwarden.BitwardenSend
 import takagi.ru.monica.ui.common.layout.DetailPane
@@ -108,7 +110,7 @@ internal fun SendPane(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Select an item to preview",
+                            text = stringResource(R.string.select_send_preview_hint),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

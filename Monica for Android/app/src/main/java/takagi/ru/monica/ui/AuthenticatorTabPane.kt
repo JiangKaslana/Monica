@@ -5,8 +5,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import takagi.ru.monica.R
 import takagi.ru.monica.ui.common.layout.DetailPane
 import takagi.ru.monica.ui.common.layout.ListPane
 import takagi.ru.monica.ui.screens.AddEditTotpScreen
@@ -164,7 +166,7 @@ internal fun AuthenticatorDetailPaneContent(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Select an item to view details",
+                text = stringResource(R.string.select_totp_hint),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -175,7 +177,7 @@ internal fun AuthenticatorDetailPaneContent(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "This item is not available for inline editing",
+                text = stringResource(R.string.inline_totp_edit_unavailable),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -2688,6 +2688,7 @@ fun SimpleMainScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
             ) {
                 if (!shouldHideBottomNavigation) {
                     NavigationRail(

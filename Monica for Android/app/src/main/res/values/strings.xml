@@ -2050,6 +2050,10 @@
     <string name="select_bank_card_hint">Select a bank card to view details</string>
     <string name="select_item_hint">Select an item to view details</string>
     <string name="select_steam_account_hint">Select a Steam account to view details</string>
+    <string name="select_note_hint">Select a note to view or edit</string>
+    <string name="select_send_preview_hint">Select an item to preview</string>
+    <string name="select_setting_hint">Select a setting to view details</string>
+    <string name="inline_totp_edit_unavailable">This item is not available for inline editing</string>
     
     <!-- Autofill Settings - General -->
     <string name="autofill_settings_title">Autofill</string>

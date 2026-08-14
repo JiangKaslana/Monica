@@ -4089,8 +4089,14 @@
     <string name="mdbx_snapshot_no_changes_title">没有新的数据库变更</string>
     <string name="mdbx_snapshot_no_changes_message">最新快照已经对应当前数据库状态，增量创建没有可保存的内容。是否仍创建一个完整快照？</string>
     <string name="mdbx_snapshot_create_full_anyway">创建完整快照</string>
+    <string name="select_password_hint">选择一个密码以查看详情</string>
+    <string name="select_totp_hint">选择一个验证器以查看详情</string>
     <string name="select_item_hint">选择一个项目以查看详情</string>
     <string name="select_steam_account_hint">选择一个 Steam 账号以查看详情</string>
+    <string name="select_note_hint">选择一条笔记进行查看或编辑</string>
+    <string name="select_send_preview_hint">选择一个项目进行预览</string>
+    <string name="select_setting_hint">选择一个设置项以查看详情</string>
+    <string name="inline_totp_edit_unavailable">当前项目无法在此处编辑</string>
     <string name="add_credential">添加凭据</string>
     <string name="credential_number">凭据 %1$d</string>
 </resources>

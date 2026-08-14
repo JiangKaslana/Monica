@@ -9,6 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import takagi.ru.monica.R
 import takagi.ru.monica.ui.animation.AnimationUtils
 import takagi.ru.monica.ui.screens.AddEditBankCardScreen
 import takagi.ru.monica.ui.screens.AddEditBillingAddressScreen
@@ -162,7 +164,7 @@ internal fun CardWalletDetailPaneContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Select an item to view details",
+                        text = stringResource(R.string.select_item_hint),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

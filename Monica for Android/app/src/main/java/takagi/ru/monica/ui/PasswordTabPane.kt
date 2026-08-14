@@ -5,8 +5,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import takagi.ru.monica.R
 import takagi.ru.monica.data.PasswordPageContentType
 import takagi.ru.monica.data.UnmatchedIconHandlingStrategy
 import takagi.ru.monica.data.bitwarden.BitwardenVault
@@ -264,7 +266,7 @@ internal fun PasswordDetailPaneContent(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Select an item to view details",
+                    text = stringResource(R.string.select_password_hint),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

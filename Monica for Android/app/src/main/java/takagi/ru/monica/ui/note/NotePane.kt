@@ -10,7 +10,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
+import takagi.ru.monica.R
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.ui.common.layout.DetailPane
 import takagi.ru.monica.ui.common.layout.ListPane
@@ -127,7 +129,7 @@ internal fun NoteDetailPaneContent(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Select a note to view or edit",
+                text = stringResource(R.string.select_note_hint),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
