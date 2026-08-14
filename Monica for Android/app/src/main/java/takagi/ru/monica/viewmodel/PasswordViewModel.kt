@@ -162,7 +162,23 @@ data class PasswordCredentialDraft(
     val password: String = "",
     val authenticatorKey: String = "",
     val customIconValue: String? = null,
-    val customIconUpdatedAt: Long? = null
+    val customIconUpdatedAt: Long? = null,
+    val notes: String = "",
+    val boundNoteId: Long? = null,
+    val email: String = "",
+    val phone: String = "",
+    val addressLine: String = "",
+    val city: String = "",
+    val state: String = "",
+    val zipCode: String = "",
+    val country: String = "",
+    val creditCardNumber: String = "",
+    val creditCardHolder: String = "",
+    val creditCardExpiry: String = "",
+    val creditCardCVV: String = "",
+    val passkeyBindings: String = "",
+    val sshKeyData: String = "",
+    val customFields: List<CustomFieldDraft> = emptyList()
 )
 
 data class SavedPasswordCredential(
@@ -171,6 +187,36 @@ data class SavedPasswordCredential(
     val savedPasswordIds: List<Long>,
     val replicaGroupId: String
 )
+
+data class EditedPasswordCredentialSavePlan(
+    val existingCredential: PasswordCredentialDraft,
+    val newCredentials: List<PasswordCredentialDraft>
+)
+
+internal fun buildEditedPasswordCredentialSavePlan(
+    originalIds: List<Long>,
+    credentials: List<PasswordCredentialDraft>
+): EditedPasswordCredentialSavePlan? {
+    if (originalIds.size != 1 || credentials.size <= 1) return null
+    return EditedPasswordCredentialSavePlan(
+        existingCredential = credentials.first(),
+        newCredentials = credentials.drop(1)
+    )
+}
+
+internal fun mergePasswordCredentialCustomFields(
+    commonFields: List<CustomFieldDraft>,
+    credentialFields: List<CustomFieldDraft>
+): List<CustomFieldDraft> {
+    val credentialTitles = credentialFields
+        .mapNotNull { field ->
+            field.title.trim().takeIf { it.isNotEmpty() }?.lowercase(Locale.ROOT)
+        }
+        .toSet()
+    return commonFields.filterNot { field ->
+        field.title.trim().lowercase(Locale.ROOT) in credentialTitles
+    } + credentialFields
+}
 
 internal fun buildIndependentPasswordCredentialTemplates(
     commonEntry: PasswordEntry,
@@ -184,6 +230,21 @@ internal fun buildIndependentPasswordCredentialTemplates(
         authenticatorKey = credential.authenticatorKey,
         customIconValue = credential.customIconValue ?: commonEntry.customIconValue,
         customIconUpdatedAt = credential.customIconUpdatedAt ?: commonEntry.customIconUpdatedAt,
+        notes = credential.notes,
+        boundNoteId = credential.boundNoteId,
+        email = credential.email,
+        phone = credential.phone,
+        addressLine = credential.addressLine,
+        city = credential.city,
+        state = credential.state,
+        zipCode = credential.zipCode,
+        country = credential.country,
+        creditCardNumber = credential.creditCardNumber,
+        creditCardHolder = credential.creditCardHolder,
+        creditCardExpiry = credential.creditCardExpiry,
+        creditCardCVV = credential.creditCardCVV,
+        passkeyBindings = credential.passkeyBindings,
+        sshKeyData = credential.sshKeyData,
         keepassEntryUuid = null,
         keepassGroupUuid = null,
         bitwardenCipherId = null,
@@ -4647,6 +4708,10 @@ class PasswordViewModel(
         templates.forEachIndexed { credentialIndex, credentialTemplate ->
             val replicaGroupId = requireNotNull(credentialTemplate.replicaGroupId)
             val savedIds = mutableListOf<Long>()
+            val credentialCustomFields = mergePasswordCredentialCustomFields(
+                commonFields = customFields,
+                credentialFields = credentials[credentialIndex].customFields
+            )
             targets.forEach { target ->
                 val targetEntry = target.applyToPasswordEntry(
                     credentialTemplate,
@@ -4656,7 +4721,7 @@ class PasswordViewModel(
                     originalIds = emptyList(),
                     commonEntry = targetEntry,
                     passwords = listOf(credentialTemplate.password),
-                    customFields = customFields,
+                    customFields = credentialCustomFields,
                     skipCategoryBinding = true
                 )
                 if (savedId == null) {

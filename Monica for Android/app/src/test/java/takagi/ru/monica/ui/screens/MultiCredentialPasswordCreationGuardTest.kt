@@ -40,8 +40,39 @@ class MultiCredentialPasswordCreationGuardTest {
         ).readText()
 
         assertTrue(screen.contains("if (isEditing)"))
+        assertTrue(screen.contains("val canAddIndependentCredential"))
+        assertTrue(screen.contains("originalIds.size == 1"))
+        assertTrue(screen.contains("buildEditedPasswordCredentialSavePlan("))
         assertTrue(screen.contains("viewModel.savePasswordsAcrossTargets("))
+        assertTrue(screen.contains("newCredentialIndex + 1"))
+        assertTrue(screen.contains("(!isEditing || selectedCredentialEditorIndex > 0)"))
+        assertTrue(screen.contains("val editsExistingCredential = isEditing && activeCredentialIndex == 0"))
+        assertTrue(screen.contains("credentialOriginalAuthenticatorKeys"))
         assertTrue(screen.contains("R.string.add_password"))
+    }
+
+    @Test
+    fun batchEditorKeepsOnlyCustomFieldsCommonAndScopesPersonalMetadataPerCredential() {
+        val screen = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/AddEditPasswordScreen.kt"
+        ).readText()
+        val viewModel = projectFile(
+            "app/src/main/java/takagi/ru/monica/viewmodel/PasswordViewModel.kt"
+        ).readText()
+
+        assertTrue(screen.contains("CredentialMetadataDraft"))
+        assertTrue(screen.contains("credentialMetadataDrafts"))
+        assertTrue(screen.contains("moveSingleEntryMetadataToFirstCredential()"))
+        assertTrue(screen.contains("firstCredential.notes = notes"))
+        assertTrue(screen.contains("showCredentialEditorContent && shouldShowCategoryAndNotes()"))
+        assertTrue(screen.contains("showCredentialEditorContent && shouldShowPersonalInfo()"))
+        assertTrue(screen.contains("showCredentialEditorContent && shouldShowAddressInfo()"))
+        assertTrue(screen.contains("showCredentialEditorContent && shouldShowPaymentInfo()"))
+        assertTrue(screen.contains("isMultiCredentialMode && showCredentialEditorContent"))
+        assertTrue(screen.contains("credentialCustomFields"))
+        assertTrue(screen.contains("mergePasswordCredentialCustomFields("))
+        assertTrue(viewModel.contains("credentialFields = credentials[credentialIndex].customFields"))
+        assertTrue(viewModel.contains("customFields = credentialCustomFields"))
     }
 
     private fun projectFile(relativePath: String): File {

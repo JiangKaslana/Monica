@@ -12,7 +12,7 @@ class VersionMetadataRegressionGuardTest {
         val buildScript = projectFile("app/build.gradle").readText()
 
         assertTrue(buildScript.contains("def appVersionCode = 12"))
-        assertTrue(buildScript.contains("\"1.0.302-\${previewVersionSuffix}\" : \"1.0.302\""))
+        assertTrue(buildScript.contains("\"1.0.303-\${previewVersionSuffix}\" : \"1.0.303\""))
         assertTrue(buildScript.contains("versionName fullVersionName"))
         assertTrue(buildScript.contains("'BASE_VERSION_NAME', \"\\\"\${baseVersionName}\\\"\""))
         assertTrue(buildScript.contains("'FULL_VERSION_NAME', \"\\\"\${fullVersionName}\\\"\""))

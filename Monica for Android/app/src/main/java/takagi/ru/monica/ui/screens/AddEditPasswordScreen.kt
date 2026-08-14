@@ -144,6 +144,8 @@ import takagi.ru.monica.viewmodel.CategoryFilter
 import takagi.ru.monica.viewmodel.NoteViewModel
 import takagi.ru.monica.viewmodel.PasswordViewModel
 import takagi.ru.monica.viewmodel.PasswordCredentialDraft
+import takagi.ru.monica.viewmodel.buildEditedPasswordCredentialSavePlan
+import takagi.ru.monica.viewmodel.mergePasswordCredentialCustomFields
 import takagi.ru.monica.viewmodel.TotpViewModel
 
 import takagi.ru.monica.viewmodel.LocalKeePassViewModel
@@ -169,6 +171,34 @@ private const val ICON_PICKER_PAGE_SIZE = 120
 private enum class MultiCredentialEditorSection {
     COMMON,
     CREDENTIAL
+}
+
+@Stable
+private class CredentialMetadataDraft {
+    var notes by mutableStateOf("")
+    var boundNoteId by mutableStateOf<Long?>(null)
+    val emails = mutableStateListOf("")
+    val phones = mutableStateListOf("")
+    var addressLine by mutableStateOf("")
+    var city by mutableStateOf("")
+    var state by mutableStateOf("")
+    var zipCode by mutableStateOf("")
+    var country by mutableStateOf("")
+    var creditCardNumber by mutableStateOf("")
+    var creditCardHolder by mutableStateOf("")
+    var creditCardExpiry by mutableStateOf("")
+    var creditCardCVV by mutableStateOf("")
+    val credentialCustomFields = mutableStateListOf<CustomFieldDraft>()
+
+    fun replaceEmails(values: List<String>) {
+        emails.clear()
+        emails.addAll(values.ifEmpty { listOf("") })
+    }
+
+    fun replacePhones(values: List<String>) {
+        phones.clear()
+        phones.addAll(values.ifEmpty { listOf("") })
+    }
 }
 
 private data class CommonAccountFillOption(
@@ -296,6 +326,9 @@ fun AddEditPasswordScreen(
             mutableStateListOf()
         )
     }
+    val credentialMetadataDrafts = remember {
+        mutableStateListOf(CredentialMetadataDraft())
+    }
     
     var authenticatorSecret by rememberSaveable { mutableStateOf("") }
     var selectedAuthenticatorOtpTypeName by rememberSaveable { mutableStateOf(OtpType.TOTP.name) }
@@ -337,6 +370,9 @@ fun AddEditPasswordScreen(
     val credentialAuthenticatorEditedFlags = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
         mutableStateListOf("0")
     }
+    val credentialOriginalAuthenticatorKeys = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf("")
+    }
     
     // 防止重复点击保存按钮
     var isSaving by remember { mutableStateOf(false) }
@@ -367,15 +403,27 @@ fun AddEditPasswordScreen(
     var zipCode by rememberSaveable { mutableStateOf("") }
     var country by rememberSaveable { mutableStateOf("") }
 
-    fun applyCommonBillingAddress(address: BillingAddress) {
-        addressLine = listOf(address.streetAddress, address.apartment)
+    fun applyCommonBillingAddress(
+        address: BillingAddress,
+        target: CredentialMetadataDraft? = null
+    ) {
+        val normalizedAddressLine = listOf(address.streetAddress, address.apartment)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .joinToString(", ")
-        city = address.city
-        state = address.stateProvince
-        zipCode = address.postalCode
-        country = address.country
+        if (target != null) {
+            target.addressLine = normalizedAddressLine
+            target.city = address.city
+            target.state = address.stateProvince
+            target.zipCode = address.postalCode
+            target.country = address.country
+        } else {
+            addressLine = normalizedAddressLine
+            city = address.city
+            state = address.stateProvince
+            zipCode = address.postalCode
+            country = address.country
+        }
     }
 
     var creditCardNumber by rememberSaveable { mutableStateOf("") }
@@ -430,9 +478,12 @@ fun AddEditPasswordScreen(
     var ssoProvider by rememberSaveable { mutableStateOf("") }
     var ssoRefEntryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var barcodePayload by rememberSaveable { mutableStateOf("") }
-    val usesCredentialCards = !isEditing &&
-        loginType.equals("PASSWORD", ignoreCase = true) &&
+    val isPasswordCredentialMode = loginType.equals("PASSWORD", ignoreCase = true) &&
         !loginType.equals(LOGIN_TYPE_BARCODE, ignoreCase = true)
+    val canAddIndependentCredential = isPasswordCredentialMode &&
+        (!isEditing || originalIds.size == 1)
+    val usesCredentialCards = isPasswordCredentialMode &&
+        (!isEditing || (originalIds.size == 1 && credentialUsernames.size > 1))
     val isMultiCredentialMode = usesCredentialCards && credentialUsernames.size > 1
     val multiCredentialEditorSection = remember(multiCredentialEditorSectionName) {
         runCatching { MultiCredentialEditorSection.valueOf(multiCredentialEditorSectionName) }
@@ -442,13 +493,49 @@ fun AddEditPasswordScreen(
         multiCredentialEditorSection == MultiCredentialEditorSection.COMMON
     val showCredentialEditorContent = !isMultiCredentialMode ||
         multiCredentialEditorSection == MultiCredentialEditorSection.CREDENTIAL
+    val activeCredentialMetadata = credentialMetadataDrafts[
+        selectedCredentialEditorIndex.coerceIn(0, credentialMetadataDrafts.lastIndex)
+    ]
+    val credentialScopedNotes = if (isMultiCredentialMode) activeCredentialMetadata.notes else notes
+    val credentialScopedBoundNoteId = if (isMultiCredentialMode) {
+        activeCredentialMetadata.boundNoteId
+    } else {
+        boundNoteId
+    }
+    val credentialScopedEmails = if (isMultiCredentialMode) activeCredentialMetadata.emails else emails
+    val credentialScopedPhones = if (isMultiCredentialMode) activeCredentialMetadata.phones else phones
+    val credentialScopedAddressLine = if (isMultiCredentialMode) activeCredentialMetadata.addressLine else addressLine
+    val credentialScopedCity = if (isMultiCredentialMode) activeCredentialMetadata.city else city
+    val credentialScopedState = if (isMultiCredentialMode) activeCredentialMetadata.state else state
+    val credentialScopedZipCode = if (isMultiCredentialMode) activeCredentialMetadata.zipCode else zipCode
+    val credentialScopedCountry = if (isMultiCredentialMode) activeCredentialMetadata.country else country
+    val credentialScopedCreditCardNumber = if (isMultiCredentialMode) {
+        activeCredentialMetadata.creditCardNumber
+    } else {
+        creditCardNumber
+    }
+    val credentialScopedCreditCardHolder = if (isMultiCredentialMode) {
+        activeCredentialMetadata.creditCardHolder
+    } else {
+        creditCardHolder
+    }
+    val credentialScopedCreditCardExpiry = if (isMultiCredentialMode) {
+        activeCredentialMetadata.creditCardExpiry
+    } else {
+        creditCardExpiry
+    }
+    val credentialScopedCreditCardCVV = if (isMultiCredentialMode) {
+        activeCredentialMetadata.creditCardCVV
+    } else {
+        creditCardCVV
+    }
     
     // 获取所有密码条目用于SSO关联选择；只需要元数据，避免打开编辑页时解密全量密码。
     val allPasswordsForRef by viewModel.allPasswordsForUi.collectAsState(initial = emptyList())
     val allNotes by (noteViewModel?.allNotes ?: flowOf(emptyList())).collectAsState(initial = emptyList())
     val selectableNotes = remember(allNotes) { allNotes.filter { !it.isDeleted } }
-    val selectedBoundNote = remember(boundNoteId, selectableNotes) {
-        boundNoteId?.let { noteId -> selectableNotes.firstOrNull { it.id == noteId } }
+    val selectedBoundNote = remember(credentialScopedBoundNoteId, selectableNotes) {
+        credentialScopedBoundNoteId?.let { noteId -> selectableNotes.firstOrNull { it.id == noteId } }
     }
     var showBoundNotePicker by remember { mutableStateOf(false) }
     var showAuthenticatorPicker by remember { mutableStateOf(false) }
@@ -1111,7 +1198,9 @@ fun AddEditPasswordScreen(
         while (credentialExistingTotpIds.size < targetCount) credentialExistingTotpIds.add("")
         while (credentialExistingTotpTitles.size < targetCount) credentialExistingTotpTitles.add("")
         while (credentialAuthenticatorEditedFlags.size < targetCount) credentialAuthenticatorEditedFlags.add("0")
+        while (credentialOriginalAuthenticatorKeys.size < targetCount) credentialOriginalAuthenticatorKeys.add("")
         while (credentialAttachmentDrafts.size < targetCount) credentialAttachmentDrafts.add(mutableStateListOf())
+        while (credentialMetadataDrafts.size < targetCount) credentialMetadataDrafts.add(CredentialMetadataDraft())
 
         while (credentialAuthenticatorSecrets.size > targetCount) credentialAuthenticatorSecrets.removeAt(
             credentialAuthenticatorSecrets.lastIndex
@@ -1131,8 +1220,14 @@ fun AddEditPasswordScreen(
         while (credentialAuthenticatorEditedFlags.size > targetCount) credentialAuthenticatorEditedFlags.removeAt(
             credentialAuthenticatorEditedFlags.lastIndex
         )
+        while (credentialOriginalAuthenticatorKeys.size > targetCount) credentialOriginalAuthenticatorKeys.removeAt(
+            credentialOriginalAuthenticatorKeys.lastIndex
+        )
         while (credentialAttachmentDrafts.size > targetCount) credentialAttachmentDrafts.removeAt(
             credentialAttachmentDrafts.lastIndex
+        )
+        while (credentialMetadataDrafts.size > targetCount) credentialMetadataDrafts.removeAt(
+            credentialMetadataDrafts.lastIndex
         )
     }
 
@@ -1145,6 +1240,7 @@ fun AddEditPasswordScreen(
         credentialExistingTotpIds[index] = existingTotpId?.toString().orEmpty()
         credentialExistingTotpTitles[index] = selectedExistingTotpTitle
         credentialAuthenticatorEditedFlags[index] = if (authenticatorEditedByUser) "1" else "0"
+        credentialOriginalAuthenticatorKeys[index] = originalAuthenticatorKey
     }
 
     fun loadCredentialAuthenticatorDraft(index: Int) {
@@ -1157,7 +1253,7 @@ fun AddEditPasswordScreen(
         existingTotpId = credentialExistingTotpIds[index].toLongOrNull()
         selectedExistingTotpTitle = credentialExistingTotpTitles[index]
         authenticatorEditedByUser = credentialAuthenticatorEditedFlags[index] == "1"
-        originalAuthenticatorKey = ""
+        originalAuthenticatorKey = credentialOriginalAuthenticatorKeys[index]
     }
 
     fun addCredentialField(usernameValue: String = "", passwordValue: String = "") {
@@ -1170,7 +1266,71 @@ fun AddEditPasswordScreen(
         credentialExistingTotpIds.add("")
         credentialExistingTotpTitles.add("")
         credentialAuthenticatorEditedFlags.add("0")
+        credentialOriginalAuthenticatorKeys.add("")
         credentialAttachmentDrafts.add(mutableStateListOf())
+        credentialMetadataDrafts.add(CredentialMetadataDraft())
+    }
+
+    fun moveSingleEntryMetadataToFirstCredential() {
+        ensureCredentialScopedDraftCount(1)
+        val firstCredential = credentialMetadataDrafts.first()
+        firstCredential.notes = notes
+        firstCredential.boundNoteId = boundNoteId
+        firstCredential.replaceEmails(emails.toList())
+        firstCredential.replacePhones(phones.toList())
+        firstCredential.addressLine = addressLine
+        firstCredential.city = city
+        firstCredential.state = state
+        firstCredential.zipCode = zipCode
+        firstCredential.country = country
+        firstCredential.creditCardNumber = creditCardNumber
+        firstCredential.creditCardHolder = creditCardHolder
+        firstCredential.creditCardExpiry = creditCardExpiry
+        firstCredential.creditCardCVV = creditCardCVV
+        firstCredential.credentialCustomFields.clear()
+
+        notes = ""
+        boundNoteId = null
+        emails.clear()
+        emails.add("")
+        phones.clear()
+        phones.add("")
+        addressLine = ""
+        city = ""
+        state = ""
+        zipCode = ""
+        country = ""
+        creditCardNumber = ""
+        creditCardHolder = ""
+        creditCardExpiry = ""
+        creditCardCVV = ""
+    }
+
+    fun restoreFirstCredentialMetadataToSingleEntry() {
+        val firstCredential = credentialMetadataDrafts.firstOrNull() ?: return
+        notes = firstCredential.notes
+        boundNoteId = firstCredential.boundNoteId
+        emails.clear()
+        emails.addAll(firstCredential.emails.ifEmpty { listOf("") })
+        phones.clear()
+        phones.addAll(firstCredential.phones.ifEmpty { listOf("") })
+        addressLine = firstCredential.addressLine
+        city = firstCredential.city
+        state = firstCredential.state
+        zipCode = firstCredential.zipCode
+        country = firstCredential.country
+        creditCardNumber = firstCredential.creditCardNumber
+        creditCardHolder = firstCredential.creditCardHolder
+        creditCardExpiry = firstCredential.creditCardExpiry
+        creditCardCVV = firstCredential.creditCardCVV
+
+        val mergedCustomFields = mergePasswordCredentialCustomFields(
+            commonFields = customFields.toList(),
+            credentialFields = firstCredential.credentialCustomFields.toList()
+        )
+        customFields.clear()
+        customFields.addAll(mergedCustomFields)
+        firstCredential.credentialCustomFields.clear()
     }
 
     fun removeCredentialFieldAt(index: Int) {
@@ -1186,12 +1346,15 @@ fun AddEditPasswordScreen(
         credentialExistingTotpIds.removeAt(index)
         credentialExistingTotpTitles.removeAt(index)
         credentialAuthenticatorEditedFlags.removeAt(index)
+        credentialOriginalAuthenticatorKeys.removeAt(index)
         credentialAttachmentDrafts.removeAt(index)
+        credentialMetadataDrafts.removeAt(index)
         credentialUsernameFocusRequesters.clear()
         credentialBringIntoViewRequesters.clear()
 
         selectedCredentialEditorIndex = index.coerceAtMost(credentialUsernames.lastIndex)
         if (credentialUsernames.size == 1) {
+            restoreFirstCredentialMetadataToSingleEntry()
             username = credentialUsernames.first()
             multiCredentialEditorSectionName = MultiCredentialEditorSection.COMMON.name
         } else {
@@ -1218,8 +1381,9 @@ fun AddEditPasswordScreen(
     }
 
     fun addAndSelectCredential() {
-        if (!usesCredentialCards) return
+        if (!canAddIndependentCredential) return
         if (credentialUsernames.size == 1) {
+            moveSingleEntryMetadataToFirstCredential()
             credentialUsernames[0] = username
             selectedCredentialEditorIndex = 0
             selectedAuthenticatorCredentialIndex = 0
@@ -1262,7 +1426,7 @@ fun AddEditPasswordScreen(
         when (field) {
             "username" -> {
                 val targetIndex = commonAccountSelectorTargetIndex.takeIf {
-                    !isEditing && it in credentialUsernames.indices
+                    it in credentialUsernames.indices && (isMultiCredentialMode || !isEditing)
                 }
                 if (targetIndex != null) {
                     credentialUsernames[targetIndex] = value
@@ -1271,23 +1435,23 @@ fun AddEditPasswordScreen(
                 }
             }
             "email" -> {
-                val targetIndex = commonAccountSelectorTargetIndex.takeIf { it in emails.indices }
+                val targetIndex = commonAccountSelectorTargetIndex.takeIf { it in credentialScopedEmails.indices }
                 if (targetIndex != null) {
-                    emails[targetIndex] = value
-                } else if (emails.size == 1 && emails[0].isEmpty()) {
-                    emails[0] = value
+                    credentialScopedEmails[targetIndex] = value
+                } else if (credentialScopedEmails.size == 1 && credentialScopedEmails[0].isEmpty()) {
+                    credentialScopedEmails[0] = value
                 } else {
-                    emails.add(value)
+                    credentialScopedEmails.add(value)
                 }
             }
             "phone" -> {
-                val targetIndex = commonAccountSelectorTargetIndex.takeIf { it in phones.indices }
+                val targetIndex = commonAccountSelectorTargetIndex.takeIf { it in credentialScopedPhones.indices }
                 if (targetIndex != null) {
-                    phones[targetIndex] = value
-                } else if (phones.size == 1 && phones[0].isEmpty()) {
-                    phones[0] = value
+                    credentialScopedPhones[targetIndex] = value
+                } else if (credentialScopedPhones.size == 1 && credentialScopedPhones[0].isEmpty()) {
+                    credentialScopedPhones[0] = value
                 } else {
-                    phones.add(value)
+                    credentialScopedPhones.add(value)
                 }
             }
             "password" -> {
@@ -1317,22 +1481,26 @@ fun AddEditPasswordScreen(
         !isBarcodeMode && (fieldVisibility.securityVerification || authenticatorSecret.isNotEmpty())
     fun shouldShowCategoryAndNotes() =
         fieldVisibility.categoryAndNotes ||
-            notes.isNotEmpty() ||
-            boundNoteId != null ||
+            credentialScopedNotes.isNotEmpty() ||
+            credentialScopedBoundNoteId != null ||
             noteViewModel != null
     fun shouldShowPersonalInfo() =
         !isBarcodeMode && (fieldVisibility.personalInfo ||
-            emails.any { it.isNotEmpty() } || phones.any { it.isNotEmpty() })
+            credentialScopedEmails.any { it.isNotEmpty() } ||
+            credentialScopedPhones.any { it.isNotEmpty() })
     // 地址信息仅看开关 + 当前条目已有数据；
     // 不再因为「常用账号」里存过账单地址而强制展示，否则用户关了开关仍会看到面板。
     fun shouldShowAddressInfo() =
         !isBarcodeMode && (fieldVisibility.addressInfo ||
-            addressLine.isNotEmpty() || city.isNotEmpty() || state.isNotEmpty() ||
-            zipCode.isNotEmpty() || country.isNotEmpty())
+            credentialScopedAddressLine.isNotEmpty() || credentialScopedCity.isNotEmpty() ||
+            credentialScopedState.isNotEmpty() || credentialScopedZipCode.isNotEmpty() ||
+            credentialScopedCountry.isNotEmpty())
     fun shouldShowPaymentInfo() =
         !isBarcodeMode && (fieldVisibility.paymentInfo ||
-            creditCardNumber.isNotEmpty() || creditCardHolder.isNotEmpty() ||
-            creditCardExpiry.isNotEmpty() || creditCardCVV.isNotEmpty())
+            credentialScopedCreditCardNumber.isNotEmpty() ||
+            credentialScopedCreditCardHolder.isNotEmpty() ||
+            credentialScopedCreditCardExpiry.isNotEmpty() ||
+            credentialScopedCreditCardCVV.isNotEmpty())
     
     // 新建条目时的自动填充标记（只执行一次）
     var hasAutoFilled by rememberSaveable { mutableStateOf(false) }
@@ -1868,7 +2036,7 @@ fun AddEditPasswordScreen(
                         it.title == MONICA_USERNAME_ALIAS_META_FIELD_TITLE
                 }
                 val normalizedSeparatedUsername = separatedUsername.trim().takeIf {
-                    !usesCredentialCards || credentialUsernames.size == 1
+                    !usesCredentialCards || credentialUsernames.size == 1 || isEditing
                 }.orEmpty()
                 if (normalizedSeparatedUsername.isNotEmpty()) {
                     add(
@@ -1955,7 +2123,7 @@ fun AddEditPasswordScreen(
                 hasSavedSuccessfully = true
 
                 val pendingAttachmentOwners = attachmentDraftOwners.filter { (_, drafts) -> drafts.isNotEmpty() }
-                if (!isEditing && pendingAttachmentOwners.isNotEmpty()) {
+                if (pendingAttachmentOwners.isNotEmpty()) {
                     coroutineScope.launch {
                         pendingAttachmentOwners.forEach { (attachmentOwnerId, pendingDrafts) ->
                             val savedEntry = viewModel.getPasswordEntryById(attachmentOwnerId)
@@ -1988,6 +2156,49 @@ fun AddEditPasswordScreen(
                 onNavigateBack()
             }
 
+            fun saveCredentialAuthenticator(
+                credentialIndex: Int,
+                rawKey: String,
+                firstPasswordId: Long,
+                savedPasswordIds: List<Long>,
+                allowExistingUnbind: Boolean
+            ) {
+                val scopedTotpViewModel = totpViewModel ?: return
+                val accountName = credentialUsernames.getOrNull(credentialIndex).orEmpty()
+                if (rawKey.isNotBlank()) {
+                    val resolvedAuthTotp = TotpDataResolver.fromAuthenticatorKey(
+                        rawKey = rawKey,
+                        fallbackIssuer = currentTitle,
+                        fallbackAccountName = accountName
+                    ) ?: TotpData(
+                        secret = rawKey,
+                        issuer = currentTitle,
+                        accountName = accountName
+                    )
+                    scopedTotpViewModel.savePasswordBoundTotps(
+                        passwordIds = savedPasswordIds.ifEmpty { listOf(firstPasswordId) },
+                        title = currentTitle,
+                        notes = "",
+                        totpData = resolvedAuthTotp.copy(
+                            issuer = resolvedAuthTotp.issuer.ifBlank { currentTitle },
+                            accountName = resolvedAuthTotp.accountName.ifBlank { accountName },
+                            boundPasswordId = firstPasswordId
+                        ),
+                        preferredTotpId = credentialExistingTotpIds
+                            .getOrNull(credentialIndex)
+                            ?.toLongOrNull()
+                    )
+                } else if (allowExistingUnbind) {
+                    credentialOriginalAuthenticatorKeys
+                        .getOrNull(credentialIndex)
+                        .orEmpty()
+                        .takeIf { it.isNotBlank() }
+                        ?.let { originalKey ->
+                            scopedTotpViewModel.unbindTotpFromPassword(firstPasswordId, originalKey)
+                        }
+                }
+            }
+
             val usesIndependentCredentialSave = usesCredentialCards
             if (usesIndependentCredentialSave) {
                 coroutineScope.launch {
@@ -2011,13 +2222,188 @@ fun AddEditPasswordScreen(
                     }
                     val credentialAuthKeys = credentialUsernames.indices.map(::credentialAuthenticatorKeyAt)
                     val credentialDrafts = credentialUsernames.indices.map { index ->
+                        val metadata = credentialMetadataDrafts[index]
                         PasswordCredentialDraft(
                             username = credentialUsernames[index],
                             password = passwords.getOrNull(index).orEmpty(),
                             authenticatorKey = credentialAuthKeys[index],
                             customIconValue = credentialIconValues[index],
-                            customIconUpdatedAt = customIconUpdatedAt + index
+                            customIconUpdatedAt = customIconUpdatedAt + index,
+                            notes = if (isMultiCredentialMode) metadata.notes else notes,
+                            boundNoteId = if (isMultiCredentialMode) metadata.boundNoteId else boundNoteId,
+                            email = if (isMultiCredentialMode) {
+                                metadata.emails.filter { it.isNotBlank() }.joinToString("|")
+                            } else {
+                                emails.filter { it.isNotBlank() }.joinToString("|")
+                            },
+                            phone = if (isMultiCredentialMode) {
+                                metadata.phones.filter { it.isNotBlank() }.joinToString("|")
+                            } else {
+                                phones.filter { it.isNotBlank() }.joinToString("|")
+                            },
+                            addressLine = if (isMultiCredentialMode) metadata.addressLine else addressLine,
+                            city = if (isMultiCredentialMode) metadata.city else city,
+                            state = if (isMultiCredentialMode) metadata.state else state,
+                            zipCode = if (isMultiCredentialMode) metadata.zipCode else zipCode,
+                            country = if (isMultiCredentialMode) metadata.country else country,
+                            creditCardNumber = if (isMultiCredentialMode) {
+                                metadata.creditCardNumber
+                            } else {
+                                creditCardNumber
+                            },
+                            creditCardHolder = if (isMultiCredentialMode) {
+                                metadata.creditCardHolder
+                            } else {
+                                creditCardHolder
+                            },
+                            creditCardExpiry = if (isMultiCredentialMode) {
+                                metadata.creditCardExpiry
+                            } else {
+                                creditCardExpiry
+                            },
+                            creditCardCVV = if (isMultiCredentialMode) metadata.creditCardCVV else creditCardCVV,
+                            passkeyBindings = if (!isMultiCredentialMode || index == 0) passkeyBindings else "",
+                            sshKeyData = if (!isMultiCredentialMode || index == 0) existingSshKeyData else "",
+                            customFields = if (isMultiCredentialMode) {
+                                metadata.credentialCustomFields.toList()
+                            } else {
+                                emptyList()
+                            }
                         )
+                    }
+                    val editedCredentialSavePlan = if (isEditing) {
+                        buildEditedPasswordCredentialSavePlan(
+                            originalIds = originalIds,
+                            credentials = credentialDrafts
+                        )
+                    } else {
+                        null
+                    }
+                    if (isEditing) {
+                        if (editedCredentialSavePlan == null) {
+                            copiedIconFiles.forEach { file -> PasswordCustomIconStore.deleteIconFile(context, file) }
+                            isSaving = false
+                            Toast.makeText(context, context.getString(R.string.save_failed), Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+
+                        val existingCredential = editedCredentialSavePlan.existingCredential
+                        val newCredentialCustomFields = currentCustomFields.filterNot { field ->
+                            field.title == MONICA_USERNAME_ALIAS_FIELD_TITLE ||
+                                field.title == MONICA_USERNAME_ALIAS_META_FIELD_TITLE
+                        }
+                        val existingCredentialCustomFields = mergePasswordCredentialCustomFields(
+                            commonFields = currentCustomFields,
+                            credentialFields = existingCredential.customFields
+                        )
+                        viewModel.savePasswordsAcrossTargets(
+                            originalIds = originalIds,
+                            commonEntry = commonEntry.copy(
+                                username = existingCredential.username,
+                                password = "",
+                                authenticatorKey = existingCredential.authenticatorKey,
+                                customIconValue = existingCredential.customIconValue,
+                                customIconUpdatedAt = existingCredential.customIconUpdatedAt
+                                    ?: commonEntry.customIconUpdatedAt,
+                                notes = existingCredential.notes,
+                                boundNoteId = existingCredential.boundNoteId,
+                                email = existingCredential.email,
+                                phone = existingCredential.phone,
+                                addressLine = existingCredential.addressLine,
+                                city = existingCredential.city,
+                                state = existingCredential.state,
+                                zipCode = existingCredential.zipCode,
+                                country = existingCredential.country,
+                                creditCardNumber = existingCredential.creditCardNumber,
+                                creditCardHolder = existingCredential.creditCardHolder,
+                                creditCardExpiry = existingCredential.creditCardExpiry,
+                                creditCardCVV = existingCredential.creditCardCVV,
+                                passkeyBindings = existingCredential.passkeyBindings,
+                                sshKeyData = existingCredential.sshKeyData,
+                                replicaGroupId = currentReplicaGroupId
+                            ),
+                            passwords = listOf(existingCredential.password),
+                            targets = storageTargetsForSave,
+                            customFields = existingCredentialCustomFields,
+                            onCompleteWithIds = existingSave@{ firstPasswordId, savedPasswordIds ->
+                                if (firstPasswordId == null) {
+                                    copiedIconFiles.forEach { file ->
+                                        PasswordCustomIconStore.deleteIconFile(context, file)
+                                    }
+                                    isSaving = false
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.save_failed),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    return@existingSave
+                                }
+
+                                saveCredentialAuthenticator(
+                                    credentialIndex = 0,
+                                    rawKey = existingCredential.authenticatorKey,
+                                    firstPasswordId = firstPasswordId,
+                                    savedPasswordIds = savedPasswordIds,
+                                    allowExistingUnbind = true
+                                )
+
+                                viewModel.saveCredentialsAcrossTargets(
+                                    commonEntry = commonEntry.copy(
+                                        username = "",
+                                        password = "",
+                                        authenticatorKey = "",
+                                        replicaGroupId = null
+                                    ),
+                                    credentials = editedCredentialSavePlan.newCredentials,
+                                    targets = storageTargetsForSave,
+                                    customFields = newCredentialCustomFields,
+                                    onComplete = newCredentialsSave@{ savedCredentials ->
+                                        if (savedCredentials.size != editedCredentialSavePlan.newCredentials.size) {
+                                            copiedIconFiles.forEach { file ->
+                                                PasswordCustomIconStore.deleteIconFile(context, file)
+                                            }
+                                            isSaving = false
+                                            Toast.makeText(
+                                                context,
+                                                context.getString(R.string.save_failed),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            return@newCredentialsSave
+                                        }
+
+                                        savedCredentials.forEach { savedCredential ->
+                                            val newCredentialIndex = savedCredential.credentialIndex
+                                            val sourceCredentialIndex = newCredentialIndex + 1
+                                            saveCredentialAuthenticator(
+                                                credentialIndex = sourceCredentialIndex,
+                                                rawKey = credentialAuthKeys
+                                                    .getOrNull(sourceCredentialIndex)
+                                                    .orEmpty(),
+                                                firstPasswordId = savedCredential.firstPasswordId,
+                                                savedPasswordIds = savedCredential.savedPasswordIds,
+                                                allowExistingUnbind = false
+                                            )
+                                        }
+                                        val attachmentOwners = savedCredentials.mapNotNull { savedCredential ->
+                                            val sourceCredentialIndex = savedCredential.credentialIndex + 1
+                                            val drafts = credentialAttachmentDrafts.getOrNull(sourceCredentialIndex)
+                                                ?: return@mapNotNull null
+                                            savedCredential.firstPasswordId to drafts
+                                        }
+                                        finishSave(
+                                            firstPasswordId,
+                                            firstPasswordId,
+                                            savedPasswordIds,
+                                            existingCredential.username,
+                                            attachmentOwners,
+                                            copiedIconFiles,
+                                            false
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                        return@launch
                     }
                     viewModel.saveCredentialsAcrossTargets(
                         commonEntry = commonEntry.copy(
@@ -2095,11 +2481,15 @@ fun AddEditPasswordScreen(
                             firstPasswordId,
                             savedPasswordIds,
                             currentUsername,
-                            listOfNotNull(
-                                firstPasswordId?.let { ownerId ->
-                                    ownerId to credentialAttachmentDrafts.first()
-                                }
-                            ),
+                            if (isEditing) {
+                                emptyList()
+                            } else {
+                                listOfNotNull(
+                                    firstPasswordId?.let { ownerId ->
+                                        ownerId to credentialAttachmentDrafts.first()
+                                    }
+                                )
+                            },
                             emptyList(),
                             true
                         )
@@ -2362,7 +2752,10 @@ fun AddEditPasswordScreen(
                                     onClick = { showCredentialEditor(index) }
                                 )
                             }
-                            if (multiCredentialEditorSection == MultiCredentialEditorSection.CREDENTIAL) {
+                            if (
+                                multiCredentialEditorSection == MultiCredentialEditorSection.CREDENTIAL &&
+                                (!isEditing || selectedCredentialEditorIndex > 0)
+                            ) {
                                 HorizontalDivider()
                                 DropdownMenuItem(
                                     text = {
@@ -2388,7 +2781,7 @@ fun AddEditPasswordScreen(
                     }
                 }
 
-                if (usesCredentialCards) {
+                if (canAddIndependentCredential) {
                     SmallFloatingActionButton(
                         onClick = ::addAndSelectCredential,
                         modifier = Modifier.size(48.dp),
@@ -3341,7 +3734,7 @@ fun AddEditPasswordScreen(
             }
 
             // Organization Card - 根据设置和数据决定是否显示
-            if (showCommonEditorContent && shouldShowCategoryAndNotes()) {
+            if (showCredentialEditorContent && shouldShowCategoryAndNotes()) {
                 item {
                     InfoCard(title = stringResource(R.string.notes)) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3356,8 +3749,14 @@ fun AddEditPasswordScreen(
                             }
 
                             OutlinedTextField(
-                                value = notes,
-                                onValueChange = { notes = it },
+                                value = credentialScopedNotes,
+                                onValueChange = { value ->
+                                    if (isMultiCredentialMode) {
+                                        activeCredentialMetadata.notes = value
+                                    } else {
+                                        notes = value
+                                    }
+                                },
                                 label = { Text(stringResource(R.string.notes)) },
                                 leadingIcon = { Icon(Icons.Default.Edit, null) },
                                 modifier = Modifier
@@ -3423,7 +3822,13 @@ fun AddEditPasswordScreen(
                                             FilledTonalButton(onClick = { showBoundNotePicker = true }) {
                                                 Text(stringResource(R.string.change_bound_note))
                                             }
-                                            TextButton(onClick = { boundNoteId = null }) {
+                                            TextButton(onClick = {
+                                                if (isMultiCredentialMode) {
+                                                    activeCredentialMetadata.boundNoteId = null
+                                                } else {
+                                                    boundNoteId = null
+                                                }
+                                            }) {
                                                 Text(stringResource(R.string.unbind_note))
                                             }
                                         }
@@ -3477,11 +3882,51 @@ fun AddEditPasswordScreen(
 
             }
 
+            if (!isBarcodeMode && isMultiCredentialMode && showCredentialEditorContent) {
+                item {
+                    CustomFieldSectionHeader(
+                        onAddClick = {
+                            activeCredentialMetadata.credentialCustomFields.add(
+                                CustomFieldDraft(
+                                    id = CustomFieldDraft.nextTempId(),
+                                    title = "",
+                                    value = "",
+                                    isProtected = false
+                                )
+                            )
+                        }
+                    )
+                }
+
+                items(activeCredentialMetadata.credentialCustomFields.size) { index ->
+                    val field = activeCredentialMetadata.credentialCustomFields[index]
+                    CustomFieldEditCard(
+                        index = index,
+                        field = field,
+                        onFieldChange = { updated ->
+                            activeCredentialMetadata.credentialCustomFields[index] = updated
+                        },
+                        onDelete = {
+                            activeCredentialMetadata.credentialCustomFields.removeAt(index)
+                        }
+                    )
+                }
+            }
+
             if (!isBarcodeMode && showCredentialEditorContent) {
                 // 附件区块：批量模式下每个凭据页维护自己的附件草稿。
                 item {
+                    val activeCredentialIndex = if (isMultiCredentialMode) {
+                        selectedCredentialEditorIndex.coerceIn(
+                            0,
+                            credentialAttachmentDrafts.lastIndex
+                        )
+                    } else {
+                        0
+                    }
+                    val editsExistingCredential = isEditing && activeCredentialIndex == 0
                     val editKeePassContext = if (
-                        isEditing &&
+                        editsExistingCredential &&
                         keepassDatabaseId != null
                     ) {
                         editingKeePassEntryUuid?.takeIf { it.isNotBlank() }?.let { entryUuid ->
@@ -3494,7 +3939,7 @@ fun AddEditPasswordScreen(
                         null
                     }
                     takagi.ru.monica.attachments.ui.AttachmentsEditSection(
-                        passwordId = passwordId ?: -1L,
+                        passwordId = if (editsExistingCredential) passwordId ?: -1L else -1L,
                         isPlusActivated = settings.isPlusActivated,
                         attachmentSource = if (editKeePassContext != null) {
                             takagi.ru.monica.attachments.model.AttachmentSource.KEEPASS
@@ -3502,26 +3947,17 @@ fun AddEditPasswordScreen(
                             takagi.ru.monica.attachments.model.AttachmentSource.LOCAL
                         },
                         keepassContext = editKeePassContext,
-                        pendingDrafts = if (isEditing) {
+                        pendingDrafts = if (editsExistingCredential) {
                             null
                         } else {
-                            credentialAttachmentDrafts[
-                                if (isMultiCredentialMode) {
-                                    selectedCredentialEditorIndex.coerceIn(
-                                        0,
-                                        credentialAttachmentDrafts.lastIndex
-                                    )
-                                } else {
-                                    0
-                                }
-                            ]
+                            credentialAttachmentDrafts[activeCredentialIndex]
                         }
                     )
                 }
             }
 
             // Collapsible: Personal Info - 根据设置和数据决定是否显示
-            if (showCommonEditorContent && shouldShowPersonalInfo()) {
+            if (showCredentialEditorContent && shouldShowPersonalInfo()) {
                 item {
                     CollapsibleCard(
                         title = stringResource(R.string.personal_info),
@@ -3542,14 +3978,14 @@ fun AddEditPasswordScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                         }
-                        emails.forEachIndexed { index, emailValue ->
+                        credentialScopedEmails.forEachIndexed { index, emailValue ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedTextField(
                                     value = emailValue,
-                                    onValueChange = { emails[index] = it },
+                                    onValueChange = { credentialScopedEmails[index] = it },
                                     label = { Text("${stringResource(R.string.field_email)} ${index + 1}") },
                                     leadingIcon = { Icon(MonicaIcons.General.email, null) },
                                     modifier = Modifier.weight(1f),
@@ -3575,9 +4011,9 @@ fun AddEditPasswordScreen(
                                         }
                                     } else null
                                 )
-                                if (emails.size > 1) {
+                                if (credentialScopedEmails.size > 1) {
                                     IconButton(
-                                        onClick = { emails.removeAt(index) }
+                                        onClick = { credentialScopedEmails.removeAt(index) }
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Delete,
@@ -3589,7 +4025,7 @@ fun AddEditPasswordScreen(
                             }
                         }
                         TextButton(
-                            onClick = { emails.add("") },
+                            onClick = { credentialScopedEmails.add("") },
                             modifier = Modifier.align(Alignment.Start)
                         ) {
                             Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
@@ -3611,14 +4047,18 @@ fun AddEditPasswordScreen(
                                 modifier = Modifier.weight(1f)
                             )
                         }
-                        phones.forEachIndexed { index, phoneValue ->
+                        credentialScopedPhones.forEachIndexed { index, phoneValue ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedTextField(
                                     value = phoneValue,
-                                    onValueChange = { if (it.all { char -> char.isDigit() } && it.length <= 15) phones[index] = it },
+                                    onValueChange = {
+                                        if (it.all { char -> char.isDigit() } && it.length <= 15) {
+                                            credentialScopedPhones[index] = it
+                                        }
+                                    },
                                     label = { Text("${stringResource(R.string.field_phone)} ${index + 1}") },
                                     leadingIcon = { Icon(MonicaIcons.General.phone, null) },
                                     modifier = Modifier.weight(1f),
@@ -3643,9 +4083,9 @@ fun AddEditPasswordScreen(
                                         }
                                     } else null
                                 )
-                                if (phones.size > 1) {
+                                if (credentialScopedPhones.size > 1) {
                                     IconButton(
-                                        onClick = { phones.removeAt(index) }
+                                        onClick = { credentialScopedPhones.removeAt(index) }
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Delete,
@@ -3657,7 +4097,7 @@ fun AddEditPasswordScreen(
                             }
                         }
                         TextButton(
-                            onClick = { phones.add("") },
+                            onClick = { credentialScopedPhones.add("") },
                             modifier = Modifier.align(Alignment.Start)
                         ) {
                             Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
@@ -3670,7 +4110,7 @@ fun AddEditPasswordScreen(
             }  // Personal Info if 结束
 
             // Collapsible: Address Info - 根据设置和数据决定是否显示
-            if (showCommonEditorContent && shouldShowAddressInfo()) {
+            if (showCredentialEditorContent && shouldShowAddressInfo()) {
                 item {
                     CollapsibleCard(
                         title = stringResource(R.string.address_info),
@@ -3682,7 +4122,10 @@ fun AddEditPasswordScreen(
                             if (!commonAccountInfo.billingAddress.isEmpty()) {
                                 OutlinedButton(
                                     onClick = {
-                                        applyCommonBillingAddress(commonAccountInfo.billingAddress)
+                                        applyCommonBillingAddress(
+                                            commonAccountInfo.billingAddress,
+                                            target = activeCredentialMetadata.takeIf { isMultiCredentialMode }
+                                        )
                                         addressInfoExpanded = true
                                         Toast.makeText(
                                             context,
@@ -3699,8 +4142,14 @@ fun AddEditPasswordScreen(
                                 }
                             }
                             OutlinedTextField(
-                                value = addressLine,
-                                onValueChange = { addressLine = it },
+                                value = credentialScopedAddressLine,
+                                onValueChange = { value ->
+                                    if (isMultiCredentialMode) {
+                                        activeCredentialMetadata.addressLine = value
+                                    } else {
+                                        addressLine = value
+                                    }
+                                },
                                 label = { Text(stringResource(R.string.field_address)) },
                                 leadingIcon = { Icon(Icons.Default.Home, null) },
                             modifier = Modifier.fillMaxWidth(),
@@ -3709,16 +4158,20 @@ fun AddEditPasswordScreen(
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
-                                value = city,
-                                onValueChange = { city = it },
+                                value = credentialScopedCity,
+                                onValueChange = { value ->
+                                    if (isMultiCredentialMode) activeCredentialMetadata.city = value else city = value
+                                },
                                 label = { Text(stringResource(R.string.field_city)) },
                                 modifier = Modifier.weight(1f),
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
                             )
                             OutlinedTextField(
-                                value = state,
-                                onValueChange = { state = it },
+                                value = credentialScopedState,
+                                onValueChange = { value ->
+                                    if (isMultiCredentialMode) activeCredentialMetadata.state = value else state = value
+                                },
                                 label = { Text(stringResource(R.string.field_state)) },
                                 modifier = Modifier.weight(1f),
                                 singleLine = true,
@@ -3727,8 +4180,16 @@ fun AddEditPasswordScreen(
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
-                                value = zipCode,
-                                onValueChange = { if (it.all { char -> char.isDigit() } && it.length <= 6) zipCode = it },
+                                value = credentialScopedZipCode,
+                                onValueChange = { value ->
+                                    if (value.all { char -> char.isDigit() } && value.length <= 6) {
+                                        if (isMultiCredentialMode) {
+                                            activeCredentialMetadata.zipCode = value
+                                        } else {
+                                            zipCode = value
+                                        }
+                                    }
+                                },
                                 label = { Text(stringResource(R.string.field_postal_code)) },
                                 modifier = Modifier.weight(1f),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -3736,8 +4197,10 @@ fun AddEditPasswordScreen(
                                 shape = RoundedCornerShape(12.dp)
                             )
                             OutlinedTextField(
-                                value = country,
-                                onValueChange = { country = it },
+                                value = credentialScopedCountry,
+                                onValueChange = { value ->
+                                    if (isMultiCredentialMode) activeCredentialMetadata.country = value else country = value
+                                },
                                 label = { Text(stringResource(R.string.field_country)) },
                                 modifier = Modifier.weight(1f),
                                 singleLine = true,
@@ -3750,7 +4213,7 @@ fun AddEditPasswordScreen(
             }  // Address Info if 结束
 
             // Collapsible: Payment Info
-            if (showCommonEditorContent && shouldShowPaymentInfo()) {
+            if (showCredentialEditorContent && shouldShowPaymentInfo()) {
             item {
                 CollapsibleCard(
                     title = stringResource(R.string.payment_info),
@@ -3789,12 +4252,19 @@ fun AddEditPasswordScreen(
                                                     supportingContent = { Text(stringResource(R.string.tail_number_last4, cardData.cardNumber.takeLast(4))) },
                                                     leadingContent = { Icon(Icons.Default.CreditCard, null) },
                                                     modifier = Modifier.clickable {
-                                                        creditCardNumber = cardData.cardNumber
-                                                        creditCardHolder = cardData.cardholderName
-                                                        creditCardCVV = cardData.cvv
                                                         val month = cardData.expiryMonth.padStart(2, '0')
                                                         val year = if (cardData.expiryYear.length == 4) cardData.expiryYear.takeLast(2) else cardData.expiryYear
-                                                        creditCardExpiry = "$month/$year"
+                                                        if (isMultiCredentialMode) {
+                                                            activeCredentialMetadata.creditCardNumber = cardData.cardNumber
+                                                            activeCredentialMetadata.creditCardHolder = cardData.cardholderName
+                                                            activeCredentialMetadata.creditCardCVV = cardData.cvv
+                                                            activeCredentialMetadata.creditCardExpiry = "$month/$year"
+                                                        } else {
+                                                            creditCardNumber = cardData.cardNumber
+                                                            creditCardHolder = cardData.cardholderName
+                                                            creditCardCVV = cardData.cvv
+                                                            creditCardExpiry = "$month/$year"
+                                                        }
                                                         showBankCardDialog = false
                                                         Toast.makeText(context, context.getString(R.string.imported), Toast.LENGTH_SHORT).show()
                                                     }
@@ -3808,15 +4278,23 @@ fun AddEditPasswordScreen(
                         }
 
                         OutlinedTextField(
-                            value = creditCardNumber,
-                            onValueChange = { if (it.all { char -> char.isDigit() } && it.length <= 19) creditCardNumber = it },
+                            value = credentialScopedCreditCardNumber,
+                            onValueChange = { value ->
+                                if (value.all { char -> char.isDigit() } && value.length <= 19) {
+                                    if (isMultiCredentialMode) {
+                                        activeCredentialMetadata.creditCardNumber = value
+                                    } else {
+                                        creditCardNumber = value
+                                    }
+                                }
+                            },
                             label = { Text(stringResource(R.string.field_card_number)) },
                             leadingIcon = { Icon(MonicaIcons.Data.creditCard, null) },
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            visualTransformation = if (creditCardNumber.isNotEmpty()) {
+                            visualTransformation = if (credentialScopedCreditCardNumber.isNotEmpty()) {
                                 VisualTransformation { text ->
                                     val offsetMapping = object : OffsetMapping {
                                         override fun originalToTransformed(offset: Int) = if (offset <= 0) 0 else offset + (offset - 1) / 4
@@ -3828,8 +4306,14 @@ fun AddEditPasswordScreen(
                         )
 
                         OutlinedTextField(
-                            value = creditCardHolder,
-                            onValueChange = { creditCardHolder = it },
+                            value = credentialScopedCreditCardHolder,
+                            onValueChange = { value ->
+                                if (isMultiCredentialMode) {
+                                    activeCredentialMetadata.creditCardHolder = value
+                                } else {
+                                    creditCardHolder = value
+                                }
+                            },
                             label = { Text(stringResource(R.string.field_cardholder)) },
                             leadingIcon = { Icon(Icons.Default.Person, null) },
                             modifier = Modifier.fillMaxWidth(),
@@ -3839,13 +4323,18 @@ fun AddEditPasswordScreen(
 
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
-                                value = creditCardExpiry,
+                                value = credentialScopedCreditCardExpiry,
                                 onValueChange = {
                                     val digits = it.filter { char -> char.isDigit() }
-                                    creditCardExpiry = when {
+                                    val formatted = when {
                                         digits.length <= 2 -> digits
                                         digits.length <= 4 -> "${digits.substring(0, 2)}/${digits.substring(2)}"
                                         else -> "${digits.substring(0, 2)}/${digits.substring(2, 4)}"
+                                    }
+                                    if (isMultiCredentialMode) {
+                                        activeCredentialMetadata.creditCardExpiry = formatted
+                                    } else {
+                                        creditCardExpiry = formatted
                                     }
                                 },
                                 label = { Text(stringResource(R.string.field_expiry)) },
@@ -3855,8 +4344,16 @@ fun AddEditPasswordScreen(
                                 shape = RoundedCornerShape(12.dp)
                             )
                             OutlinedTextField(
-                                value = creditCardCVV,
-                                onValueChange = { if (it.all { char -> char.isDigit() } && it.length <= 4) creditCardCVV = it },
+                                value = credentialScopedCreditCardCVV,
+                                onValueChange = { value ->
+                                    if (value.all { char -> char.isDigit() } && value.length <= 4) {
+                                        if (isMultiCredentialMode) {
+                                            activeCredentialMetadata.creditCardCVV = value
+                                        } else {
+                                            creditCardCVV = value
+                                        }
+                                    }
+                                },
                                 label = { Text(stringResource(R.string.field_cvv)) },
                                 modifier = Modifier.weight(1f),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -3976,9 +4473,13 @@ fun AddEditPasswordScreen(
         visible = showBoundNotePicker,
         title = stringResource(R.string.note_picker_title),
         notes = selectableNotes,
-        selectedNoteId = boundNoteId,
+        selectedNoteId = credentialScopedBoundNoteId,
         onSelect = { note ->
-            boundNoteId = note.id
+            if (isMultiCredentialMode) {
+                activeCredentialMetadata.boundNoteId = note.id
+            } else {
+                boundNoteId = note.id
+            }
             showBoundNotePicker = false
         },
         onDismiss = { showBoundNotePicker = false }
