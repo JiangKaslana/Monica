@@ -20,6 +20,18 @@ class SplashThemeResourceTest {
         assertTrue(!darkApi31.contains("system_neutral"))
         assertTrue(lightApi31.contains("android:windowSplashScreenBackground"))
         assertTrue(darkApi31.contains("android:windowSplashScreenBackground"))
+        assertTrue(
+            lightApi31.contains(
+                "<item name=\"android:windowSplashScreenIconBackgroundColor\">" +
+                    "@android:color/transparent</item>"
+            )
+        )
+        assertTrue(
+            darkApi31.contains(
+                "<item name=\"android:windowSplashScreenIconBackgroundColor\">" +
+                    "@android:color/transparent</item>"
+            )
+        )
         assertTrue(lightTheme.contains("<item name=\"android:windowLightStatusBar\">true</item>"))
         assertTrue(lightTheme.contains("<item name=\"android:windowLightNavigationBar\">true</item>"))
         assertTrue(darkTheme.contains("<item name=\"android:windowLightStatusBar\">false</item>"))
@@ -41,7 +53,7 @@ class SplashThemeResourceTest {
         assertTrue(!baseActivity.contains("cachedSettings = startupSettings"))
         assertTrue(mainActivity.split("installSplashScreen()").size - 1 == 1)
         assertTrue(mainActivity.contains("setContent {"))
-        assertTrue(mainActivity.contains("MonicaApp(repository"))
+        assertTrue(mainActivity.contains("MonicaApp("))
     }
 
     private fun projectFile(path: String): File {

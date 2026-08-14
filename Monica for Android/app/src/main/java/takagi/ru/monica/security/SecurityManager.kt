@@ -20,6 +20,15 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
+data class SecurityQuestionsBackupSnapshot(
+    val question1Id: Int,
+    val question1Text: String?,
+    val answer1Hash: String,
+    val question2Id: Int,
+    val question2Text: String?,
+    val answer2Hash: String
+)
+
 /**
  * Security manager for encryption and master password handling
  */
@@ -91,6 +100,7 @@ class SecurityManager(private val context: Context) {
         private const val SECURITY_QUESTION_2_ID_KEY = "security_question_2_id"
         private const val SECURITY_QUESTION_2_ANSWER_KEY = "security_question_2_answer"
         private const val SECURITY_QUESTION_2_TEXT_KEY = "security_question_2_text"
+        private val SECURITY_ANSWER_HASH_PATTERN = Regex("^[0-9a-fA-F]{64}$")
         private const val PBKDF2_ITERATIONS = 100000
         private const val MDK_PASSWORD_BLOB_KEY = "mdk_password_blob"
         private const val MDK_PASSWORD_SALT_KEY = "mdk_password_salt"
@@ -602,6 +612,85 @@ class SecurityManager(private val context: Context) {
         val hashedAnswer2 = hashAnswer(answer2)
         
         return hashedAnswer1 == storedAnswer1 && hashedAnswer2 == storedAnswer2
+    }
+
+    fun exportSecurityQuestionsForBackup(): SecurityQuestionsBackupSnapshot? {
+        if (!areSecurityQuestionsSet()) return null
+        val answer1Hash = sharedPreferences.getString(SECURITY_QUESTION_1_ANSWER_KEY, null)
+            ?.takeIf(::isValidSecurityAnswerHash)
+            ?: return null
+        val answer2Hash = sharedPreferences.getString(SECURITY_QUESTION_2_ANSWER_KEY, null)
+            ?.takeIf(::isValidSecurityAnswerHash)
+            ?: return null
+        val question1Id = getSecurityQuestion1Id()
+        val question2Id = getSecurityQuestion2Id()
+        if (!isValidSecurityQuestionId(question1Id) || !isValidSecurityQuestionId(question2Id)) {
+            return null
+        }
+        return SecurityQuestionsBackupSnapshot(
+            question1Id = question1Id,
+            question1Text = sharedPreferences.getString(SECURITY_QUESTION_1_TEXT_KEY, null),
+            answer1Hash = answer1Hash,
+            question2Id = question2Id,
+            question2Text = sharedPreferences.getString(SECURITY_QUESTION_2_TEXT_KEY, null),
+            answer2Hash = answer2Hash
+        )
+    }
+
+    fun restoreSecurityQuestionsFromBackup(snapshot: SecurityQuestionsBackupSnapshot): Boolean {
+        val normalized = snapshot.copy(
+            question1Text = snapshot.question1Text?.trim()?.takeIf { it.isNotEmpty() },
+            answer1Hash = snapshot.answer1Hash.trim().lowercase(),
+            question2Text = snapshot.question2Text?.trim()?.takeIf { it.isNotEmpty() },
+            answer2Hash = snapshot.answer2Hash.trim().lowercase()
+        )
+        if (
+            !isValidSecurityQuestionId(normalized.question1Id) ||
+            !isValidSecurityQuestionId(normalized.question2Id) ||
+            !isValidSecurityAnswerHash(normalized.answer1Hash) ||
+            !isValidSecurityAnswerHash(normalized.answer2Hash)
+        ) {
+            return false
+        }
+        if (
+            PredefinedSecurityQuestions.isCustomQuestion(normalized.question1Id) &&
+            normalized.question1Text == null
+        ) {
+            return false
+        }
+        if (
+            PredefinedSecurityQuestions.isCustomQuestion(normalized.question2Id) &&
+            normalized.question2Text == null
+        ) {
+            return false
+        }
+        sharedPreferences.edit()
+            .putInt(SECURITY_QUESTION_1_ID_KEY, normalized.question1Id)
+            .putString(SECURITY_QUESTION_1_ANSWER_KEY, normalized.answer1Hash)
+            .putString(
+                SECURITY_QUESTION_1_TEXT_KEY,
+                normalized.question1Text.takeIf {
+                    PredefinedSecurityQuestions.isCustomQuestion(normalized.question1Id)
+                }
+            )
+            .putInt(SECURITY_QUESTION_2_ID_KEY, normalized.question2Id)
+            .putString(SECURITY_QUESTION_2_ANSWER_KEY, normalized.answer2Hash)
+            .putString(
+                SECURITY_QUESTION_2_TEXT_KEY,
+                normalized.question2Text.takeIf {
+                    PredefinedSecurityQuestions.isCustomQuestion(normalized.question2Id)
+                }
+            )
+            .apply()
+        return true
+    }
+
+    private fun isValidSecurityQuestionId(questionId: Int): Boolean {
+        return PredefinedSecurityQuestions.getQuestionById(questionId) != null
+    }
+
+    private fun isValidSecurityAnswerHash(value: String): Boolean {
+        return SECURITY_ANSWER_HASH_PATTERN.matches(value)
     }
     
     private fun hashAnswer(answer: String): String {

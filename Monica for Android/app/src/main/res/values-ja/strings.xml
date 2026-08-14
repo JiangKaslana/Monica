@@ -3525,4 +3525,6 @@
     <string name="extensions_steam_settings">Steam</string>
     <string name="steam_mini_profile_background_title">ミニプロフィール背景</string>
     <string name="steam_mini_profile_background_description">トークンとアカウント詳細カードに Steam のミニプロフィール背景を表示します。動画は表示中のみ再生され、キャッシュは最大 64 MB です。</string>
+    <string name="add_credential">資格情報を追加</string>
+    <string name="credential_number">資格情報 %1$d</string>
 </resources>

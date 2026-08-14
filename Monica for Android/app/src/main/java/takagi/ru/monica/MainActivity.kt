@@ -77,6 +77,7 @@ import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordHistoryManager
 import takagi.ru.monica.data.ThemeMode
+import takagi.ru.monica.data.ColorScheme
 import takagi.ru.monica.data.model.LOGIN_TYPE_BARCODE
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.isBarcodeEntry
@@ -161,6 +162,27 @@ import takagi.ru.monica.util.FileOperationHelper
 import takagi.ru.monica.util.PhotoPickerHelper
 import takagi.ru.monica.utils.SettingsManager
 import takagi.ru.monica.utils.AutoBackupManager
+
+private val PLUS_ONLY_COLOR_SCHEMES = setOf(
+    ColorScheme.WATER_LILIES,
+    ColorScheme.IMPRESSION_SUNRISE,
+    ColorScheme.JAPANESE_BRIDGE,
+    ColorScheme.HAYSTACKS,
+    ColorScheme.ROUEN_CATHEDRAL,
+    ColorScheme.PARLIAMENT_FOG,
+    ColorScheme.CATPPUCCIN_LATTE,
+    ColorScheme.CATPPUCCIN_FRAPPE,
+    ColorScheme.CATPPUCCIN_MACCHIATO,
+    ColorScheme.CATPPUCCIN_MOCHA,
+)
+
+private fun effectiveColorSchemeForPlusAccess(settings: AppSettings): ColorScheme {
+    return if (!settings.isPlusActivated && settings.colorScheme in PLUS_ONLY_COLOR_SCHEMES) {
+        ColorScheme.DEFAULT
+    } else {
+        settings.colorScheme
+    }
+}
 
 private data class PendingAddStorageDefaults(
     val categoryId: Long? = null,
@@ -691,7 +713,7 @@ fun MonicaApp(
         MonicaTheme(
             darkTheme = darkTheme,
             oledPureBlackEnabled = settings.oledPureBlackEnabled,
-            colorScheme = settings.colorScheme,
+            colorScheme = effectiveColorSchemeForPlusAccess(settings),
             customPrimaryColor = settings.customPrimaryColor,
             customSecondaryColor = settings.customSecondaryColor,
             customTertiaryColor = settings.customTertiaryColor,

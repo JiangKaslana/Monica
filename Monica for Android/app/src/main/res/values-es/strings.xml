@@ -4250,4 +4250,6 @@
     <string name="mdbx_snapshot_no_changes_title">No hay nuevos cambios en la base de datos</string>
     <string name="mdbx_snapshot_no_changes_message">La última instantánea ya representa el estado actual de la base de datos, por lo que no hay cambios incrementales para guardar. ¿Crear una instantánea completa de todos modos?</string>
     <string name="mdbx_snapshot_create_full_anyway">Crear instantánea completa</string>
+    <string name="add_credential">Añadir credencial</string>
+    <string name="credential_number">Credencial %1$d</string>
 </resources>

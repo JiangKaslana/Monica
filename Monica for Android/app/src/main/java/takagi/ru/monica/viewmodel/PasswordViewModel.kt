@@ -72,6 +72,8 @@ import takagi.ru.monica.util.TotpDataResolver
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -154,6 +156,42 @@ internal data class MdbxSecureItemBatchResult(
 )
 
 private const val PASSWORD_SCROLL_LOG_TAG = "PasswordScrollDebug"
+
+data class PasswordCredentialDraft(
+    val username: String = "",
+    val password: String = "",
+    val authenticatorKey: String = "",
+    val customIconValue: String? = null,
+    val customIconUpdatedAt: Long? = null
+)
+
+data class SavedPasswordCredential(
+    val credentialIndex: Int,
+    val firstPasswordId: Long,
+    val savedPasswordIds: List<Long>,
+    val replicaGroupId: String
+)
+
+internal fun buildIndependentPasswordCredentialTemplates(
+    commonEntry: PasswordEntry,
+    credentials: List<PasswordCredentialDraft>,
+    replicaGroupIdFactory: () -> String = { "password:${UUID.randomUUID()}" }
+): List<PasswordEntry> = credentials.map { credential ->
+    commonEntry.copy(
+        id = 0,
+        username = credential.username.trim(),
+        password = credential.password.trim(),
+        authenticatorKey = credential.authenticatorKey,
+        customIconValue = credential.customIconValue ?: commonEntry.customIconValue,
+        customIconUpdatedAt = credential.customIconUpdatedAt ?: commonEntry.customIconUpdatedAt,
+        keepassEntryUuid = null,
+        keepassGroupUuid = null,
+        bitwardenCipherId = null,
+        bitwardenRevisionDate = null,
+        bitwardenLocalModified = false,
+        replicaGroupId = replicaGroupIdFactory()
+    )
+}
 
 private data class KeePassCustomFieldFingerprint(
     val title: String,
@@ -4544,6 +4582,121 @@ class PasswordViewModel(
 
             onComplete(saveResult.firstPasswordId)
             onCompleteWithIds(saveResult.firstPasswordId, saveResult.savedPasswordIds)
+        }
+    }
+
+    fun saveCredentialsAcrossTargets(
+        commonEntry: PasswordEntry,
+        credentials: List<PasswordCredentialDraft>,
+        targets: List<StorageTarget>,
+        customFields: List<CustomFieldDraft> = emptyList(),
+        onComplete: (List<SavedPasswordCredential>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val distinctTargets = targets.distinctBy(StorageTarget::stableKey)
+            val normalizedCredentials = credentials.map {
+                it.copy(
+                    username = it.username.trim(),
+                    password = it.password.trim()
+                )
+            }
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    if (distinctTargets.isEmpty() || normalizedCredentials.isEmpty()) {
+                        emptyList()
+                    } else if (!canWriteKeePassTargets(distinctTargets)) {
+                        Log.w(
+                            "PasswordViewModel",
+                            "saveCredentialsAcrossTargets blocked because a KeePass target is unavailable"
+                        )
+                        emptyList()
+                    } else {
+                        saveIndependentCredentialsInternal(
+                            commonEntry = commonEntry,
+                            credentials = normalizedCredentials,
+                            targets = distinctTargets,
+                            customFields = customFields
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(
+                    "PasswordViewModel",
+                    "saveCredentialsAcrossTargets crashed credentials=${normalizedCredentials.size} targets=${distinctTargets.map(StorageTarget::stableKey)}",
+                    e
+                )
+                emptyList()
+            }
+            onComplete(result)
+        }
+    }
+
+    private suspend fun saveIndependentCredentialsInternal(
+        commonEntry: PasswordEntry,
+        credentials: List<PasswordCredentialDraft>,
+        targets: List<StorageTarget>,
+        customFields: List<CustomFieldDraft>
+    ): List<SavedPasswordCredential> {
+        val templates = buildIndependentPasswordCredentialTemplates(commonEntry, credentials)
+        val savedCredentials = mutableListOf<SavedPasswordCredential>()
+        val allCreatedIds = mutableListOf<Long>()
+
+        try {
+        templates.forEachIndexed { credentialIndex, credentialTemplate ->
+            val replicaGroupId = requireNotNull(credentialTemplate.replicaGroupId)
+            val savedIds = mutableListOf<Long>()
+            targets.forEach { target ->
+                val targetEntry = target.applyToPasswordEntry(
+                    credentialTemplate,
+                    replicaGroupId = replicaGroupId
+                )
+                val savedId = saveGroupedPasswordsInternal(
+                    originalIds = emptyList(),
+                    commonEntry = targetEntry,
+                    passwords = listOf(credentialTemplate.password),
+                    customFields = customFields,
+                    skipCategoryBinding = true
+                )
+                if (savedId == null) {
+                    Log.e(
+                        "PasswordViewModel",
+                        "Independent credential save failed credential=$credentialIndex target=${target.stableKey}"
+                    )
+                    rollbackIndependentCredentialCreates(allCreatedIds)
+                    return emptyList()
+                }
+                savedIds += savedId
+                allCreatedIds += savedId
+            }
+            savedCredentials += SavedPasswordCredential(
+                credentialIndex = credentialIndex,
+                firstPasswordId = savedIds.first(),
+                savedPasswordIds = savedIds.distinct(),
+                replicaGroupId = replicaGroupId
+            )
+        }
+
+        return savedCredentials
+        } catch (e: Exception) {
+            rollbackIndependentCredentialCreates(allCreatedIds)
+            throw e
+        }
+    }
+
+    private suspend fun rollbackIndependentCredentialCreates(createdIds: List<Long>) {
+        withContext(NonCancellable) {
+            createdIds.asReversed().forEach { createdId ->
+                runCatching { rollbackPasswordTransferTargetAwait(createdId) }
+                    .onFailure { rollbackError ->
+                        Log.e(
+                            "PasswordViewModel",
+                            "Independent credential rollback failed entryId=$createdId",
+                            rollbackError
+                        )
+                    }
+            }
         }
     }
 

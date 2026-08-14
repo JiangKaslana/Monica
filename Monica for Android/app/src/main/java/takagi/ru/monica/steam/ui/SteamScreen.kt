@@ -1420,14 +1420,12 @@ fun SteamScreen(
                     Box(
                         modifier = Modifier
                             .width(wideListPaneWidth)
-                            .fillMaxHeight()
                     ) {
                         RenderSteamRootTopBar()
                     }
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight()
                     ) {
                         detailAccount?.let { account -> RenderSteamDetailTopBar(account) }
                     }
@@ -2465,7 +2463,9 @@ private fun SteamCodeContent(
                         val totpItem = remember(account) { account.toSteamTotpUiItem() }
                         val totpData = remember(account) { account.toSteamTotpUiData() }
                         val miniProfileBackgroundRequested =
-                            appSettings.steamMiniProfileBackgroundEnabled && account.hasRealSteamId
+                            appSettings.isPlusActivated &&
+                            appSettings.steamMiniProfileBackgroundEnabled &&
+                            account.hasRealSteamId
                         var miniProfileBackgroundAvailable by remember(
                             account.steamId,
                             miniProfileBackgroundRequested
@@ -2591,7 +2591,9 @@ private fun SteamAccountDetailContent(
     val totpItem = remember(account) { account.toSteamTotpUiItem() }
     val totpData = remember(account) { account.toSteamTotpUiData() }
     val miniProfileBackgroundRequested =
-        appSettings.steamMiniProfileBackgroundEnabled && account.hasRealSteamId
+        appSettings.isPlusActivated &&
+        appSettings.steamMiniProfileBackgroundEnabled &&
+        account.hasRealSteamId
     var miniProfileBackgroundAvailable by remember(
         account.steamId,
         miniProfileBackgroundRequested

@@ -2730,6 +2730,10 @@ fun SimpleMainScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        // Wide layouts render page-owned top bars inside this host. Keep
+                        // the host below the status bar while the navigation rail applies
+                        // its own inset independently.
+                        .windowInsetsPadding(WindowInsets.statusBars)
                 ) {
                 AuthenticatorPasskeyAnimatedContent(currentTab = currentTab) { displayedTab ->
                 when (displayedTab) {

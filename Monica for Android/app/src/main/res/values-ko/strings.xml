@@ -4250,4 +4250,6 @@
     <string name="mdbx_snapshot_no_changes_title">새 데이터베이스 변경 사항 없음</string>
     <string name="mdbx_snapshot_no_changes_message">최신 스냅샷은 이미 현재 데이터베이스 상태를 나타내므로 저장할 증분 변경 사항이 없습니다. 그래도 전체 스냅샷을 만드시겠습니까?</string>
     <string name="mdbx_snapshot_create_full_anyway">전체 스냅샷을 만드세요</string>
+    <string name="add_credential">자격 증명 추가</string>
+    <string name="credential_number">자격 증명 %1$d</string>
 </resources>

@@ -42,6 +42,18 @@ class SteamTopBarUiRegressionGuardTest {
     }
 
     @Test
+    fun wideTokenTopBarWrapsContentHeightSoTheTokenListRemainsVisible() {
+        val source = steamSource()
+        val scaffoldTopBar = source.substringAfter("topBar = {")
+            .substringBefore("floatingActionButton = {")
+
+        assertTrue(scaffoldTopBar.contains("!isCompactWidth && selectedSection == SteamSection.CODE"))
+        assertTrue(scaffoldTopBar.contains("RenderSteamRootTopBar()"))
+        assertTrue(scaffoldTopBar.contains("RenderSteamDetailTopBar(account)"))
+        assertFalse(scaffoldTopBar.contains(".fillMaxHeight()"))
+    }
+
+    @Test
     fun steamPullSearchDoesNotDrawAnExtraIndicatorBehindTheTopBar() {
         val source = steamSource()
 

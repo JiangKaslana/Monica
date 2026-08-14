@@ -4250,4 +4250,6 @@
     <string name="mdbx_snapshot_no_changes_title">Keine neuen Datenbankänderungen</string>
     <string name="mdbx_snapshot_no_changes_message">Der neueste Snapshot stellt bereits den aktuellen Datenbankstatus dar, sodass keine inkrementellen Änderungen gespeichert werden müssen. Trotzdem einen vollständigen Snapshot erstellen?</string>
     <string name="mdbx_snapshot_create_full_anyway">Vollständigen Snapshot erstellen</string>
+    <string name="add_credential">Zugangsdaten hinzufügen</string>
+    <string name="credential_number">Zugangsdaten %1$d</string>
 </resources>

@@ -35,10 +35,13 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -64,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -139,6 +143,7 @@ import takagi.ru.monica.viewmodel.BankCardViewModel
 import takagi.ru.monica.viewmodel.CategoryFilter
 import takagi.ru.monica.viewmodel.NoteViewModel
 import takagi.ru.monica.viewmodel.PasswordViewModel
+import takagi.ru.monica.viewmodel.PasswordCredentialDraft
 import takagi.ru.monica.viewmodel.TotpViewModel
 
 import takagi.ru.monica.viewmodel.LocalKeePassViewModel
@@ -160,6 +165,11 @@ private const val MONICA_USERNAME_ALIAS_FIELD_TITLE = "__monica_username_alias"
 private const val MONICA_USERNAME_ALIAS_META_FIELD_TITLE = "__monica_username_alias_meta"
 private const val MONICA_USERNAME_ALIAS_META_VALUE = "migrated_v1"
 private const val ICON_PICKER_PAGE_SIZE = 120
+
+private enum class MultiCredentialEditorSection {
+    COMMON,
+    CREDENTIAL
+}
 
 private data class CommonAccountFillOption(
     val id: String,
@@ -229,6 +239,7 @@ fun AddEditPasswordScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val isEditing = passwordId != null && passwordId > 0
     val coroutineScope = rememberCoroutineScope()
     val database = remember { PasswordDatabase.getDatabase(context) }
     val securityManager = remember(context) { SecurityManager(context.applicationContext) }
@@ -258,6 +269,10 @@ fun AddEditPasswordScreen(
     val separatedUsernameSuggestionBringIntoViewRequester = remember { BringIntoViewRequester() }
     val passwordSuggestionBringIntoViewRequester = remember { BringIntoViewRequester() }
     var focusedPasswordFieldIndex by remember { mutableStateOf<Int?>(null) }
+    var focusedCredentialUsernameIndex by remember { mutableStateOf<Int?>(null) }
+    var pendingCredentialFocusIndex by remember { mutableStateOf<Int?>(null) }
+    val credentialUsernameFocusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    val credentialBringIntoViewRequesters = remember { mutableMapOf<Int, BringIntoViewRequester>() }
 
     var title by rememberSaveable { mutableStateOf("") }
     var website by rememberSaveable { mutableStateOf("") }
@@ -267,14 +282,19 @@ fun AddEditPasswordScreen(
     var username by rememberSaveable { mutableStateOf("") }
     // CHANGE: Support multiple passwords
     val passwords = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) { mutableStateListOf("") }
+    val credentialUsernames = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf("")
+    }
     var originalIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var unreadablePasswordIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var hasOwnershipConflict by remember { mutableStateOf(false) }
 
-    // 新建密码阶段的附件草稿队列。由 AttachmentsEditSection 在草稿模式下写入；
-    // 保存成功拿到新密码 id 后统一 flush 成真实附件。
-    val pendingAttachmentDrafts = remember {
-        mutableStateListOf<takagi.ru.monica.attachments.ui.AttachmentPendingDraft>()
+    // 新建密码阶段按凭据维护附件草稿。单凭据时始终只使用第 1 组，进入批量模式后
+    // 每个凭据页继续使用原附件组件，但不会把附件错误地挂到其他独立条目。
+    val credentialAttachmentDrafts = remember {
+        mutableStateListOf<SnapshotStateList<takagi.ru.monica.attachments.ui.AttachmentPendingDraft>>(
+            mutableStateListOf()
+        )
     }
     
     var authenticatorSecret by rememberSaveable { mutableStateOf("") }
@@ -293,6 +313,30 @@ fun AddEditPasswordScreen(
     val passwordVisibilityStates = remember { mutableStateMapOf<Int, Boolean>() }
     var showPasswordGenerator by remember { mutableStateOf(false) }
     var currentPasswordIndexForGenerator by remember { mutableStateOf(-1) }
+    var selectedCredentialEditorIndex by rememberSaveable { mutableStateOf(0) }
+    var multiCredentialEditorSectionName by rememberSaveable {
+        mutableStateOf(MultiCredentialEditorSection.COMMON.name)
+    }
+    var credentialMenuExpanded by remember { mutableStateOf(false) }
+    var selectedAuthenticatorCredentialIndex by rememberSaveable { mutableStateOf(0) }
+    val credentialAuthenticatorSecrets = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf("")
+    }
+    val credentialAuthenticatorOtpTypes = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf(OtpType.TOTP.name)
+    }
+    val credentialAuthenticatorPayloads = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf("")
+    }
+    val credentialExistingTotpIds = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf("")
+    }
+    val credentialExistingTotpTitles = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf("")
+    }
+    val credentialAuthenticatorEditedFlags = rememberSaveable(saver = takagi.ru.monica.utils.StringListSaver) {
+        mutableStateListOf("0")
+    }
     
     // 防止重复点击保存按钮
     var isSaving by remember { mutableStateOf(false) }
@@ -386,6 +430,18 @@ fun AddEditPasswordScreen(
     var ssoProvider by rememberSaveable { mutableStateOf("") }
     var ssoRefEntryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var barcodePayload by rememberSaveable { mutableStateOf("") }
+    val usesCredentialCards = !isEditing &&
+        loginType.equals("PASSWORD", ignoreCase = true) &&
+        !loginType.equals(LOGIN_TYPE_BARCODE, ignoreCase = true)
+    val isMultiCredentialMode = usesCredentialCards && credentialUsernames.size > 1
+    val multiCredentialEditorSection = remember(multiCredentialEditorSectionName) {
+        runCatching { MultiCredentialEditorSection.valueOf(multiCredentialEditorSectionName) }
+            .getOrDefault(MultiCredentialEditorSection.COMMON)
+    }
+    val showCommonEditorContent = !isMultiCredentialMode ||
+        multiCredentialEditorSection == MultiCredentialEditorSection.COMMON
+    val showCredentialEditorContent = !isMultiCredentialMode ||
+        multiCredentialEditorSection == MultiCredentialEditorSection.CREDENTIAL
     
     // 获取所有密码条目用于SSO关联选择；只需要元数据，避免打开编辑页时解密全量密码。
     val allPasswordsForRef by viewModel.allPasswordsForUi.collectAsState(initial = emptyList())
@@ -419,11 +475,16 @@ fun AddEditPasswordScreen(
     val selectedAuthenticatorOtpType = remember(selectedAuthenticatorOtpTypeName) {
         runCatching { OtpType.valueOf(selectedAuthenticatorOtpTypeName) }.getOrDefault(OtpType.TOTP)
     }
+    val authenticatorAccountName = if (isMultiCredentialMode) {
+        credentialUsernames.getOrNull(selectedCredentialEditorIndex).orEmpty()
+    } else {
+        username
+    }
     val authenticatorKey = remember(
         authenticatorSecret,
         selectedAuthenticatorOtpType,
         title,
-        username,
+        authenticatorAccountName,
         authenticatorPayloadOverride
     ) {
         authenticatorPayloadOverride
@@ -432,14 +493,14 @@ fun AddEditPasswordScreen(
                 secret = authenticatorSecret,
                 otpType = selectedAuthenticatorOtpType,
                 issuer = title,
-                accountName = username
+                accountName = authenticatorAccountName
             )
     }
-    val authenticatorPreviewTotpData = remember(authenticatorKey, title, username) {
+    val authenticatorPreviewTotpData = remember(authenticatorKey, title, authenticatorAccountName) {
         buildPasswordScreenInlinePreviewTotpData(
             rawKey = authenticatorKey,
             issuer = title,
-            accountName = username
+            accountName = authenticatorAccountName
         )
     }
     val authenticatorPreviewVisible = authenticatorPreviewTotpData != null
@@ -488,7 +549,6 @@ fun AddEditPasswordScreen(
     var addressInfoExpanded by remember { mutableStateOf(false) }
     var paymentInfoExpanded by remember { mutableStateOf(false) }
 
-    val isEditing = passwordId != null && passwordId > 0
     val usernameLabel = stringResource(R.string.autofill_username)
     val selectedSimpleIconBitmap = rememberSimpleIconBitmap(
         slug = if (customIconType == PASSWORD_ICON_TYPE_SIMPLE) customIconValue else null,
@@ -540,7 +600,7 @@ fun AddEditPasswordScreen(
             TotpDataResolver.fromAuthenticatorKey(
                 rawKey = trimmed,
                 fallbackIssuer = title,
-                fallbackAccountName = username
+                fallbackAccountName = authenticatorAccountName
             )
         } else {
             null
@@ -574,8 +634,12 @@ fun AddEditPasswordScreen(
                         .ifBlank { imported.issuer }
                         .ifBlank { title }
                 }
-                if (username.isBlank()) {
-                    username = imported.accountName
+                if (authenticatorAccountName.isBlank()) {
+                    if (!isMultiCredentialMode) {
+                        username = imported.accountName
+                    } else {
+                        credentialUsernames[selectedCredentialEditorIndex] = imported.accountName
+                    }
                 }
             }
             is takagi.ru.monica.util.TotpScanParseResult.Multiple -> {
@@ -596,8 +660,12 @@ fun AddEditPasswordScreen(
                             .ifBlank { imported.issuer }
                             .ifBlank { title }
                     }
-                    if (username.isBlank()) {
-                        username = imported.accountName
+                    if (authenticatorAccountName.isBlank()) {
+                        if (!isMultiCredentialMode) {
+                            username = imported.accountName
+                        } else {
+                            credentialUsernames[selectedCredentialEditorIndex] = imported.accountName
+                        }
                     }
                 }
                 Toast.makeText(
@@ -652,8 +720,12 @@ fun AddEditPasswordScreen(
         if (title.isBlank()) {
             title = normalized.issuer.ifBlank { candidate.item.title }.ifBlank { title }
         }
-        if (username.isBlank()) {
-            username = normalized.accountName
+        if (authenticatorAccountName.isBlank()) {
+            if (!isMultiCredentialMode) {
+                username = normalized.accountName
+            } else {
+                credentialUsernames[selectedCredentialEditorIndex] = normalized.accountName
+            }
         }
     }
 
@@ -913,10 +985,29 @@ fun AddEditPasswordScreen(
             )
         }
     }
+    val credentialUsernameSuggestionState = remember(
+        focusedCredentialUsernameIndex,
+        credentialUsernames.toList(),
+        allPasswordsForRef,
+        isMultiCredentialMode
+    ) {
+        val index = focusedCredentialUsernameIndex
+        if (!isMultiCredentialMode || index == null || index !in credentialUsernames.indices) {
+            UsernameSuggestionState.Hidden
+        } else {
+            buildUsernameSuggestionState(
+                query = credentialUsernames[index],
+                currentEntryId = null,
+                passwordEntries = allPasswordsForRef
+            )
+        }
+    }
 
     val usernameSuggestionVisible = usernameSuggestionState !is UsernameSuggestionState.Hidden
     val separatedUsernameSuggestionVisible =
         separatedUsernameSuggestionState !is UsernameSuggestionState.Hidden
+    val credentialUsernameSuggestionVisible =
+        credentialUsernameSuggestionState !is UsernameSuggestionState.Hidden
     val focusedPasswordSuggestionVisible = focusedPasswordFieldIndex?.let { index ->
         index in passwords.indices &&
             passwords[index].isBlank() &&
@@ -933,6 +1024,14 @@ fun AddEditPasswordScreen(
         if (separatedUsernameSuggestionVisible) {
             kotlinx.coroutines.delay(80)
             separatedUsernameSuggestionBringIntoViewRequester.bringIntoView()
+        }
+    }
+    LaunchedEffect(credentialUsernameSuggestionVisible, focusedCredentialUsernameIndex) {
+        if (credentialUsernameSuggestionVisible) {
+            kotlinx.coroutines.delay(80)
+            focusedCredentialUsernameIndex
+                ?.let(credentialBringIntoViewRequesters::get)
+                ?.bringIntoView()
         }
     }
     LaunchedEffect(focusedPasswordSuggestionVisible) {
@@ -995,6 +1094,160 @@ fun AddEditPasswordScreen(
             currentPasswordIndexForGenerator > index -> currentPasswordIndexForGenerator - 1
             else -> currentPasswordIndexForGenerator
         }
+        focusedCredentialUsernameIndex = when {
+            focusedCredentialUsernameIndex == index -> null
+            focusedCredentialUsernameIndex != null && focusedCredentialUsernameIndex!! > index ->
+                focusedCredentialUsernameIndex!! - 1
+            else -> focusedCredentialUsernameIndex
+        }
+    }
+
+    fun ensureCredentialScopedDraftCount(targetCount: Int = credentialUsernames.size) {
+        while (credentialAuthenticatorSecrets.size < targetCount) credentialAuthenticatorSecrets.add("")
+        while (credentialAuthenticatorOtpTypes.size < targetCount) {
+            credentialAuthenticatorOtpTypes.add(OtpType.TOTP.name)
+        }
+        while (credentialAuthenticatorPayloads.size < targetCount) credentialAuthenticatorPayloads.add("")
+        while (credentialExistingTotpIds.size < targetCount) credentialExistingTotpIds.add("")
+        while (credentialExistingTotpTitles.size < targetCount) credentialExistingTotpTitles.add("")
+        while (credentialAuthenticatorEditedFlags.size < targetCount) credentialAuthenticatorEditedFlags.add("0")
+        while (credentialAttachmentDrafts.size < targetCount) credentialAttachmentDrafts.add(mutableStateListOf())
+
+        while (credentialAuthenticatorSecrets.size > targetCount) credentialAuthenticatorSecrets.removeAt(
+            credentialAuthenticatorSecrets.lastIndex
+        )
+        while (credentialAuthenticatorOtpTypes.size > targetCount) credentialAuthenticatorOtpTypes.removeAt(
+            credentialAuthenticatorOtpTypes.lastIndex
+        )
+        while (credentialAuthenticatorPayloads.size > targetCount) credentialAuthenticatorPayloads.removeAt(
+            credentialAuthenticatorPayloads.lastIndex
+        )
+        while (credentialExistingTotpIds.size > targetCount) credentialExistingTotpIds.removeAt(
+            credentialExistingTotpIds.lastIndex
+        )
+        while (credentialExistingTotpTitles.size > targetCount) credentialExistingTotpTitles.removeAt(
+            credentialExistingTotpTitles.lastIndex
+        )
+        while (credentialAuthenticatorEditedFlags.size > targetCount) credentialAuthenticatorEditedFlags.removeAt(
+            credentialAuthenticatorEditedFlags.lastIndex
+        )
+        while (credentialAttachmentDrafts.size > targetCount) credentialAttachmentDrafts.removeAt(
+            credentialAttachmentDrafts.lastIndex
+        )
+    }
+
+    fun persistCurrentAuthenticatorDraft(index: Int = selectedAuthenticatorCredentialIndex) {
+        if (index !in credentialUsernames.indices) return
+        ensureCredentialScopedDraftCount()
+        credentialAuthenticatorSecrets[index] = authenticatorSecret
+        credentialAuthenticatorOtpTypes[index] = selectedAuthenticatorOtpTypeName
+        credentialAuthenticatorPayloads[index] = authenticatorPayloadOverride.orEmpty()
+        credentialExistingTotpIds[index] = existingTotpId?.toString().orEmpty()
+        credentialExistingTotpTitles[index] = selectedExistingTotpTitle
+        credentialAuthenticatorEditedFlags[index] = if (authenticatorEditedByUser) "1" else "0"
+    }
+
+    fun loadCredentialAuthenticatorDraft(index: Int) {
+        if (index !in credentialUsernames.indices) return
+        ensureCredentialScopedDraftCount()
+        selectedAuthenticatorCredentialIndex = index
+        authenticatorSecret = credentialAuthenticatorSecrets[index]
+        selectedAuthenticatorOtpTypeName = credentialAuthenticatorOtpTypes[index]
+        authenticatorPayloadOverride = credentialAuthenticatorPayloads[index].takeIf { it.isNotEmpty() }
+        existingTotpId = credentialExistingTotpIds[index].toLongOrNull()
+        selectedExistingTotpTitle = credentialExistingTotpTitles[index]
+        authenticatorEditedByUser = credentialAuthenticatorEditedFlags[index] == "1"
+        originalAuthenticatorKey = ""
+    }
+
+    fun addCredentialField(usernameValue: String = "", passwordValue: String = "") {
+        ensureCredentialScopedDraftCount()
+        credentialUsernames.add(usernameValue)
+        passwords.add(passwordValue)
+        credentialAuthenticatorSecrets.add("")
+        credentialAuthenticatorOtpTypes.add(OtpType.TOTP.name)
+        credentialAuthenticatorPayloads.add("")
+        credentialExistingTotpIds.add("")
+        credentialExistingTotpTitles.add("")
+        credentialAuthenticatorEditedFlags.add("0")
+        credentialAttachmentDrafts.add(mutableStateListOf())
+    }
+
+    fun removeCredentialFieldAt(index: Int) {
+        if (credentialUsernames.size <= 1 || index !in credentialUsernames.indices || index !in passwords.indices) {
+            return
+        }
+        persistCurrentAuthenticatorDraft()
+        credentialUsernames.removeAt(index)
+        removePasswordFieldAt(index)
+        credentialAuthenticatorSecrets.removeAt(index)
+        credentialAuthenticatorOtpTypes.removeAt(index)
+        credentialAuthenticatorPayloads.removeAt(index)
+        credentialExistingTotpIds.removeAt(index)
+        credentialExistingTotpTitles.removeAt(index)
+        credentialAuthenticatorEditedFlags.removeAt(index)
+        credentialAttachmentDrafts.removeAt(index)
+        credentialUsernameFocusRequesters.clear()
+        credentialBringIntoViewRequesters.clear()
+
+        selectedCredentialEditorIndex = index.coerceAtMost(credentialUsernames.lastIndex)
+        if (credentialUsernames.size == 1) {
+            username = credentialUsernames.first()
+            multiCredentialEditorSectionName = MultiCredentialEditorSection.COMMON.name
+        } else {
+            multiCredentialEditorSectionName = MultiCredentialEditorSection.CREDENTIAL.name
+        }
+        loadCredentialAuthenticatorDraft(selectedCredentialEditorIndex)
+    }
+
+    fun showCommonCredentialEditor() {
+        if (isMultiCredentialMode) persistCurrentAuthenticatorDraft()
+        focusedCredentialUsernameIndex = null
+        focusedPasswordFieldIndex = null
+        credentialMenuExpanded = false
+        multiCredentialEditorSectionName = MultiCredentialEditorSection.COMMON.name
+    }
+
+    fun showCredentialEditor(index: Int) {
+        if (index !in credentialUsernames.indices) return
+        if (isMultiCredentialMode) persistCurrentAuthenticatorDraft()
+        selectedCredentialEditorIndex = index
+        loadCredentialAuthenticatorDraft(index)
+        credentialMenuExpanded = false
+        multiCredentialEditorSectionName = MultiCredentialEditorSection.CREDENTIAL.name
+    }
+
+    fun addAndSelectCredential() {
+        if (!usesCredentialCards) return
+        if (credentialUsernames.size == 1) {
+            credentialUsernames[0] = username
+            selectedCredentialEditorIndex = 0
+            selectedAuthenticatorCredentialIndex = 0
+        }
+        persistCurrentAuthenticatorDraft()
+        addCredentialField()
+        val newIndex = credentialUsernames.lastIndex
+        selectedCredentialEditorIndex = newIndex
+        loadCredentialAuthenticatorDraft(newIndex)
+        multiCredentialEditorSectionName = MultiCredentialEditorSection.CREDENTIAL.name
+        credentialMenuExpanded = false
+        pendingCredentialFocusIndex = newIndex
+    }
+
+    fun credentialAuthenticatorKeyAt(index: Int): String {
+        if (index !in credentialUsernames.indices) return ""
+        ensureCredentialScopedDraftCount()
+        credentialAuthenticatorPayloads[index].takeIf { it.isNotBlank() }?.let { return it }
+        val secret = credentialAuthenticatorSecrets[index].trim()
+        if (secret.isEmpty()) return ""
+        val otpType = runCatching { OtpType.valueOf(credentialAuthenticatorOtpTypes[index]) }
+            .getOrDefault(OtpType.TOTP)
+        return buildPasswordScreenAuthenticatorPayload(
+            secret = secret,
+            otpType = otpType,
+            issuer = title,
+            accountName = credentialUsernames[index]
+        )
     }
 
     fun isPasswordFieldVisible(index: Int): Boolean = passwordVisibilityStates[index] == true
@@ -1007,7 +1260,16 @@ fun AddEditPasswordScreen(
         val value = content.trim()
         if (value.isEmpty()) return
         when (field) {
-            "username" -> username = value
+            "username" -> {
+                val targetIndex = commonAccountSelectorTargetIndex.takeIf {
+                    !isEditing && it in credentialUsernames.indices
+                }
+                if (targetIndex != null) {
+                    credentialUsernames[targetIndex] = value
+                } else {
+                    username = value
+                }
+            }
             "email" -> {
                 val targetIndex = commonAccountSelectorTargetIndex.takeIf { it in emails.indices }
                 if (targetIndex != null) {
@@ -1034,7 +1296,7 @@ fun AddEditPasswordScreen(
                     passwords[targetIndex] = value
                 } else if (passwords.size == 1 && passwords[0].isEmpty()) {
                     passwords[0] = value
-                } else {
+                } else if (isEditing) {
                     passwords.add(value)
                 }
             }
@@ -1134,8 +1396,10 @@ fun AddEditPasswordScreen(
     LaunchedEffect(commonAccountInfo, isEditing, hasAutoFilled) {
         if (!isEditing && !hasAutoFilled && commonAccountInfo.autoFillEnabled && commonAccountInfo.hasAnyInfo()) {
             hasAutoFilled = true
-            if (username.isEmpty() && commonAccountInfo.username.isNotEmpty()) {
-                username = commonAccountInfo.username
+            if (credentialUsernames.firstOrNull().isNullOrEmpty() && commonAccountInfo.username.isNotEmpty()) {
+                if (credentialUsernames.isEmpty()) credentialUsernames.add("")
+                credentialUsernames[0] = commonAccountInfo.username
+                if (username.isEmpty()) username = commonAccountInfo.username
             }
             if (emails.size == 1 && emails[0].isEmpty() && commonAccountInfo.email.isNotEmpty()) {
                 emails[0] = commonAccountInfo.email
@@ -1156,6 +1420,32 @@ fun AddEditPasswordScreen(
         }
     }
     
+    var previousCredentialCardMode by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(usesCredentialCards) {
+        val previousMode = previousCredentialCardMode
+        if (previousMode != null && previousMode != usesCredentialCards && !isEditing && !isBarcodeMode) {
+            if (usesCredentialCards) {
+                if (credentialUsernames.isEmpty()) credentialUsernames.add("")
+                credentialUsernames[0] = username
+            } else {
+                username = credentialUsernames.firstOrNull().orEmpty()
+            }
+        }
+        previousCredentialCardMode = usesCredentialCards
+    }
+
+    LaunchedEffect(credentialUsernames.size) {
+        ensureCredentialScopedDraftCount()
+        selectedCredentialEditorIndex = selectedCredentialEditorIndex.coerceIn(
+            0,
+            credentialUsernames.lastIndex.coerceAtLeast(0)
+        )
+        if (credentialUsernames.size <= 1) {
+            credentialMenuExpanded = false
+            multiCredentialEditorSectionName = MultiCredentialEditorSection.COMMON.name
+        }
+    }
+
     // 新建条目时初始化预设自定义字段（只执行一次）
     var hasLoadedPresets by rememberSaveable { mutableStateOf(false) }
     
@@ -1204,6 +1494,8 @@ fun AddEditPasswordScreen(
                     title = entry.title
                     replaceWebsiteUrlsFromRaw(entry.website)
                     username = entry.username
+                    credentialUsernames.clear()
+                    credentialUsernames.add(entry.username)
                     notes = entry.notes
                     boundNoteId = entry.boundNoteId
                     appPackageName = entry.appPackageName
@@ -1444,10 +1736,14 @@ fun AddEditPasswordScreen(
               existingReplicaTargetKeys = emptySet()
               existingSshKeyData = ""
               if (passwords.isEmpty()) passwords.add("")
+              if (credentialUsernames.isEmpty()) credentialUsernames.add("")
              if (!initialDraftApplied && initialDraft != null) {
                  if (title.isBlank()) title = initialDraft.title
                  if (website.isBlank()) replaceWebsiteUrlsFromRaw(initialDraft.website)
                  if (username.isBlank()) username = initialDraft.username
+                 if (credentialUsernames.firstOrNull().isNullOrBlank()) {
+                     credentialUsernames[0] = initialDraft.username
+                 }
                  if (appPackageName.isBlank()) appPackageName = initialDraft.appPackageName
                  if (appName.isBlank()) appName = initialDraft.appName
                  if (initialDraft.password.isNotBlank()) {
@@ -1456,6 +1752,7 @@ fun AddEditPasswordScreen(
                  }
                  initialDraftApplied = true
              }
+             username = credentialUsernames.firstOrNull().orEmpty()
         }
     }
 
@@ -1497,6 +1794,14 @@ fun AddEditPasswordScreen(
             findBlockedKeePassOperation()?.let { blocked ->
                 blockedKeePassOperation = blocked
                 return@handleSave
+            }
+            if (usesCredentialCards) {
+                ensureCredentialScopedDraftCount()
+                if (!isMultiCredentialMode) {
+                    credentialUsernames[0] = username
+                    selectedAuthenticatorCredentialIndex = 0
+                }
+                persistCurrentAuthenticatorDraft()
             }
             isSaving = true // 防止重复点击
             val normalizedPasswords = if (isBarcodeMode) {
@@ -1562,7 +1867,9 @@ fun AddEditPasswordScreen(
                     it.title == MONICA_USERNAME_ALIAS_FIELD_TITLE ||
                         it.title == MONICA_USERNAME_ALIAS_META_FIELD_TITLE
                 }
-                val normalizedSeparatedUsername = separatedUsername.trim()
+                val normalizedSeparatedUsername = separatedUsername.trim().takeIf {
+                    !usesCredentialCards || credentialUsernames.size == 1
+                }.orEmpty()
                 if (normalizedSeparatedUsername.isNotEmpty()) {
                     add(
                         CustomFieldDraft(
@@ -1581,104 +1888,88 @@ fun AddEditPasswordScreen(
                 }
             }
 
-            viewModel.savePasswordsAcrossTargets(
-                // isEditing is the authoritative mode; this defensive guard
-                // prevents any stale remembered IDs from turning a new save
-                // into an update.
-                originalIds = originalIds.takeIf { isEditing }.orEmpty(),
-                // A new item must receive a fresh replica identity in the
-                // repository layer. Never let a remembered editor group make
-                // savePasswordsAcrossTargets discover and update old replicas.
-                commonEntry = commonEntry.copy(
-                    replicaGroupId = currentReplicaGroupId.takeIf { isEditing }
-                ),
-                passwords = normalizedPasswords, // Snapshot (trimmed)
-                targets = storageTargetsForSave,
-                customFields = currentCustomFields, // 保存自定义字段
-                onCompleteWithIds = onComplete@{ firstPasswordId, savedPasswordIds ->
-                    if (firstPasswordId == null) {
-                        isSaving = false
-                        Toast.makeText(context, context.getString(R.string.save_failed), Toast.LENGTH_SHORT).show()
-                        return@onComplete
-                    }
-                    // Save TOTP if authenticatorKey is provided
-                    if (currentAuthKey.isNotEmpty() && totpViewModel != null) {
-                        val resolvedAuthTotp = TotpDataResolver.fromAuthenticatorKey(
-                            rawKey = currentAuthKey,
-                            fallbackIssuer = currentTitle,
-                            fallbackAccountName = currentUsername
-                        ) ?: TotpData(
-                            secret = currentAuthKey,
-                            issuer = currentTitle,
-                            accountName = currentUsername
-                        )
+            val finishSave = finishSave@{
+                    primaryPasswordId: Long?,
+                    totpPasswordId: Long?,
+                    savedPasswordIds: List<Long>,
+                    totpAccountName: String,
+                    attachmentDraftOwners: List<Pair<Long, SnapshotStateList<takagi.ru.monica.attachments.ui.AttachmentPendingDraft>>>,
+                    failedIconCopies: List<String>,
+                    saveCurrentAuthenticator: Boolean ->
+                if (primaryPasswordId == null) {
+                    failedIconCopies.forEach { PasswordCustomIconStore.deleteIconFile(context, it) }
+                    isSaving = false
+                    Toast.makeText(context, context.getString(R.string.save_failed), Toast.LENGTH_SHORT).show()
+                    return@finishSave
+                }
+                val firstPasswordId = totpPasswordId ?: primaryPasswordId
+                // Save TOTP if authenticatorKey is provided
+                if (saveCurrentAuthenticator && currentAuthKey.isNotEmpty() && totpViewModel != null) {
+                    val resolvedAuthTotp = TotpDataResolver.fromAuthenticatorKey(
+                        rawKey = currentAuthKey,
+                        fallbackIssuer = currentTitle,
+                        fallbackAccountName = totpAccountName
+                    ) ?: TotpData(
+                        secret = currentAuthKey,
+                        issuer = currentTitle,
+                        accountName = totpAccountName
+                    )
+                    val totpData = resolvedAuthTotp.copy(
+                        issuer = resolvedAuthTotp.issuer.ifBlank { currentTitle },
+                        accountName = resolvedAuthTotp.accountName.ifBlank { totpAccountName },
+                        boundPasswordId = firstPasswordId
+                    )
+                    totpViewModel.savePasswordBoundTotps(
+                        passwordIds = savedPasswordIds.ifEmpty { listOf(firstPasswordId) },
+                        title = currentTitle,
+                        notes = "",
+                        totpData = totpData,
+                        preferredTotpId = existingTotpId
+                    )
+                } else if (
+                    saveCurrentAuthenticator &&
+                    currentAuthKey.isEmpty() &&
+                    originalAuthenticatorKey.isNotEmpty() &&
+                    totpViewModel != null
+                ) {
+                    totpViewModel.unbindTotpFromPassword(firstPasswordId, originalAuthenticatorKey)
+                }
 
-                        val totpData = resolvedAuthTotp.copy(
-                            secret = resolvedAuthTotp.secret,
-                            issuer = resolvedAuthTotp.issuer.ifBlank { currentTitle },
-                            accountName = resolvedAuthTotp.accountName.ifBlank { currentUsername },
-                            otpType = resolvedAuthTotp.otpType,
-                            digits = resolvedAuthTotp.digits,
-                            period = resolvedAuthTotp.period,
-                            algorithm = resolvedAuthTotp.algorithm,
-                            counter = resolvedAuthTotp.counter,
-                            boundPasswordId = firstPasswordId,
-                        )
+                if (currentAppPackageName.isNotEmpty()) {
+                    if (currentBindWebsite && currentWebsite.isNotEmpty()) {
+                        viewModel.updateAppAssociationByWebsite(currentWebsite, currentAppPackageName, currentAppName)
+                    }
+                    if (currentBindTitle && currentTitle.isNotEmpty()) {
+                        viewModel.updateAppAssociationByTitle(currentTitle, currentAppPackageName, currentAppName)
+                    }
+                }
+                val originalUploaded = if (originalCustomIconType == PASSWORD_ICON_TYPE_UPLOADED) {
+                    normalizedIconFileName(originalCustomIconValue)
+                } else null
+                val currentUploaded = if (customIconType == PASSWORD_ICON_TYPE_UPLOADED) {
+                    normalizedIconFileName(customIconValue)
+                } else null
+                if (!originalUploaded.isNullOrBlank() && originalUploaded != currentUploaded) {
+                    PasswordCustomIconStore.deleteIconFile(context, originalUploaded)
+                }
+                hasSavedSuccessfully = true
 
-                        totpViewModel.savePasswordBoundTotps(
-                            passwordIds = savedPasswordIds.ifEmpty { listOf(firstPasswordId) },
-                            title = currentTitle,
-                            notes = "",
-                            totpData = totpData,
-                            preferredTotpId = existingTotpId
-                        )
-                    } else if (currentAuthKey.isEmpty() && originalAuthenticatorKey.isNotEmpty() && totpViewModel != null) {
-                        // 密码页清空密钥：只取消验证器绑定，不删除验证器
-                        totpViewModel.unbindTotpFromPassword(firstPasswordId, originalAuthenticatorKey)
-                    }
-
-                    if (currentAppPackageName.isNotEmpty()) {
-                        if (currentBindWebsite && currentWebsite.isNotEmpty()) {
-                            viewModel.updateAppAssociationByWebsite(currentWebsite, currentAppPackageName, currentAppName)
-                        }
-                        if (currentBindTitle && currentTitle.isNotEmpty()) {
-                            viewModel.updateAppAssociationByTitle(currentTitle, currentAppPackageName, currentAppName)
-                        }
-                    }
-                    val originalUploaded = if (originalCustomIconType == PASSWORD_ICON_TYPE_UPLOADED) {
-                        normalizedIconFileName(originalCustomIconValue)
-                    } else {
-                        null
-                    }
-                    val currentUploaded = if (customIconType == PASSWORD_ICON_TYPE_UPLOADED) {
-                        normalizedIconFileName(customIconValue)
-                    } else {
-                        null
-                    }
-                    if (!originalUploaded.isNullOrBlank() && originalUploaded != currentUploaded) {
-                        PasswordCustomIconStore.deleteIconFile(context, originalUploaded)
-                    }
-                    hasSavedSuccessfully = true
-                    // 新建密码：把草稿附件挂到新 id 上再导航返回
-                    if (!isEditing && pendingAttachmentDrafts.isNotEmpty()) {
-                        coroutineScope.launch {
-                            val savedEntry = viewModel.getPasswordEntryById(firstPasswordId)
+                val pendingAttachmentOwners = attachmentDraftOwners.filter { (_, drafts) -> drafts.isNotEmpty() }
+                if (!isEditing && pendingAttachmentOwners.isNotEmpty()) {
+                    coroutineScope.launch {
+                        pendingAttachmentOwners.forEach { (attachmentOwnerId, pendingDrafts) ->
+                            val savedEntry = viewModel.getPasswordEntryById(attachmentOwnerId)
                             val draftKeePassContext = savedEntry?.let { entry ->
                                 val databaseId = entry.keepassDatabaseId
                                 val entryUuid = entry.keepassEntryUuid?.takeIf { it.isNotBlank() }
                                 if (databaseId != null && entryUuid != null) {
-                                    AttachmentFacade.KeePassContext(
-                                        databaseId = databaseId,
-                                        entryUuid = entryUuid
-                                    )
-                                } else {
-                                    null
-                                }
+                                    AttachmentFacade.KeePassContext(databaseId = databaseId, entryUuid = entryUuid)
+                                } else null
                             }
                             takagi.ru.monica.attachments.ui.flushPendingDraftsTo(
                                 context = context,
-                                passwordId = firstPasswordId,
-                                pendingDrafts = pendingAttachmentDrafts,
+                                passwordId = attachmentOwnerId,
+                                pendingDrafts = pendingDrafts,
                                 isPlusActivated = settings.isPlusActivated,
                                 attachmentSource = if (draftKeePassContext != null) {
                                     takagi.ru.monica.attachments.model.AttachmentSource.KEEPASS
@@ -1687,15 +1978,134 @@ fun AddEditPasswordScreen(
                                 },
                                 keepassContext = draftKeePassContext
                             )
-                            onSaveCompleted?.invoke(firstPasswordId)
-                            onNavigateBack()
                         }
-                        return@onComplete
+                        onSaveCompleted?.invoke(primaryPasswordId)
+                        onNavigateBack()
                     }
-                    onSaveCompleted?.invoke(firstPasswordId)
-                    onNavigateBack()
+                    return@finishSave
                 }
-            )
+                onSaveCompleted?.invoke(primaryPasswordId)
+                onNavigateBack()
+            }
+
+            val usesIndependentCredentialSave = usesCredentialCards
+            if (usesIndependentCredentialSave) {
+                coroutineScope.launch {
+                    val copiedIconFiles = mutableListOf<String>()
+                    val credentialIconValues = try {
+                        credentialUsernames.indices.map { index ->
+                            if (index == 0 || customIconType != PASSWORD_ICON_TYPE_UPLOADED || customIconValue.isNullOrBlank()) {
+                                normalizedIconFileName(customIconValue)
+                            } else {
+                                PasswordCustomIconStore.duplicateIconFile(context, customIconValue)
+                                    .getOrThrow()
+                                    .also(copiedIconFiles::add)
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        copiedIconFiles.forEach { file -> PasswordCustomIconStore.deleteIconFile(context, file) }
+                        if (error is CancellationException) throw error
+                        isSaving = false
+                        Toast.makeText(context, context.getString(R.string.save_failed), Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    val credentialAuthKeys = credentialUsernames.indices.map(::credentialAuthenticatorKeyAt)
+                    val credentialDrafts = credentialUsernames.indices.map { index ->
+                        PasswordCredentialDraft(
+                            username = credentialUsernames[index],
+                            password = passwords.getOrNull(index).orEmpty(),
+                            authenticatorKey = credentialAuthKeys[index],
+                            customIconValue = credentialIconValues[index],
+                            customIconUpdatedAt = customIconUpdatedAt + index
+                        )
+                    }
+                    viewModel.saveCredentialsAcrossTargets(
+                        commonEntry = commonEntry.copy(
+                            username = "",
+                            password = "",
+                            authenticatorKey = "",
+                            replicaGroupId = null
+                        ),
+                        credentials = credentialDrafts,
+                        targets = storageTargetsForSave,
+                        customFields = currentCustomFields,
+                        onComplete = { savedCredentials ->
+                            val firstCredential = savedCredentials.firstOrNull()
+                            if (totpViewModel != null) {
+                                savedCredentials.forEach { savedCredential ->
+                                    val index = savedCredential.credentialIndex
+                                    val rawKey = credentialAuthKeys.getOrNull(index).orEmpty()
+                                    if (rawKey.isBlank()) return@forEach
+                                    val accountName = credentialUsernames.getOrNull(index).orEmpty()
+                                    val resolvedAuthTotp = TotpDataResolver.fromAuthenticatorKey(
+                                        rawKey = rawKey,
+                                        fallbackIssuer = currentTitle,
+                                        fallbackAccountName = accountName
+                                    ) ?: TotpData(
+                                        secret = rawKey,
+                                        issuer = currentTitle,
+                                        accountName = accountName
+                                    )
+                                    totpViewModel.savePasswordBoundTotps(
+                                        passwordIds = savedCredential.savedPasswordIds.ifEmpty {
+                                            listOf(savedCredential.firstPasswordId)
+                                        },
+                                        title = currentTitle,
+                                        notes = "",
+                                        totpData = resolvedAuthTotp.copy(
+                                            issuer = resolvedAuthTotp.issuer.ifBlank { currentTitle },
+                                            accountName = resolvedAuthTotp.accountName.ifBlank { accountName },
+                                            boundPasswordId = savedCredential.firstPasswordId
+                                        ),
+                                        preferredTotpId = credentialExistingTotpIds
+                                            .getOrNull(index)
+                                            ?.toLongOrNull()
+                                    )
+                                }
+                            }
+                            val attachmentOwners = savedCredentials.mapNotNull { savedCredential ->
+                                val drafts = credentialAttachmentDrafts.getOrNull(savedCredential.credentialIndex)
+                                    ?: return@mapNotNull null
+                                savedCredential.firstPasswordId to drafts
+                            }
+                            finishSave(
+                                firstCredential?.firstPasswordId,
+                                firstCredential?.firstPasswordId,
+                                firstCredential?.savedPasswordIds.orEmpty(),
+                                credentialUsernames.firstOrNull().orEmpty(),
+                                attachmentOwners,
+                                copiedIconFiles,
+                                false
+                            )
+                        }
+                    )
+                }
+            } else {
+                viewModel.savePasswordsAcrossTargets(
+                    originalIds = originalIds.takeIf { isEditing }.orEmpty(),
+                    commonEntry = commonEntry.copy(
+                        replicaGroupId = currentReplicaGroupId.takeIf { isEditing }
+                    ),
+                    passwords = normalizedPasswords,
+                    targets = storageTargetsForSave,
+                    customFields = currentCustomFields,
+                    onCompleteWithIds = { firstPasswordId, savedPasswordIds ->
+                        finishSave(
+                            firstPasswordId,
+                            firstPasswordId,
+                            savedPasswordIds,
+                            currentUsername,
+                            listOfNotNull(
+                                firstPasswordId?.let { ownerId ->
+                                    ownerId to credentialAttachmentDrafts.first()
+                                }
+                            ),
+                            emptyList(),
+                            true
+                        )
+                    }
+                )
+            }
         }
     }
 
@@ -1835,29 +2245,187 @@ fun AddEditPasswordScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = handleSave,
-                containerColor = if (canSave) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
-                contentColor = if (canSave) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = stringResource(R.string.save)
-                    )
+                if (isMultiCredentialMode) {
+                    SmallFloatingActionButton(
+                        onClick = ::showCommonCredentialEditor,
+                        modifier = Modifier.size(48.dp),
+                        containerColor = if (multiCredentialEditorSection == MultiCredentialEditorSection.COMMON) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        contentColor = if (multiCredentialEditorSection == MultiCredentialEditorSection.COMMON) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    ) {
+                        when {
+                            selectedSimpleIconBitmap != null -> Image(
+                                bitmap = selectedSimpleIconBitmap,
+                                contentDescription = stringResource(R.string.common_info),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            selectedUploadedIconBitmap != null -> Image(
+                                bitmap = selectedUploadedIconBitmap,
+                                contentDescription = stringResource(R.string.common_info),
+                                modifier = Modifier.size(24.dp).clip(CircleShape)
+                            )
+                            autoMatchedSimpleIcon.bitmap != null -> Image(
+                                bitmap = autoMatchedSimpleIcon.bitmap,
+                                contentDescription = stringResource(R.string.common_info),
+                                modifier = Modifier.size(24.dp).clip(CircleShape)
+                            )
+                            fallbackWebsiteFavicon != null -> Image(
+                                bitmap = fallbackWebsiteFavicon,
+                                contentDescription = stringResource(R.string.common_info),
+                                modifier = Modifier.size(24.dp).clip(CircleShape)
+                            )
+                            else -> Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = stringResource(R.string.common_info)
+                            )
+                        }
+                    }
+
+                    Box {
+                        Surface(
+                            modifier = Modifier
+                                .height(48.dp)
+                                .widthIn(min = 96.dp, max = 136.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { credentialMenuExpanded = true },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (multiCredentialEditorSection == MultiCredentialEditorSection.CREDENTIAL) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            contentColor = if (multiCredentialEditorSection == MultiCredentialEditorSection.CREDENTIAL) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            shadowElevation = 6.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = stringResource(
+                                        R.string.credential_number,
+                                        selectedCredentialEditorIndex + 1
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = credentialMenuExpanded,
+                            onDismissRequest = { credentialMenuExpanded = false }
+                        ) {
+                            credentialUsernames.forEachIndexed { index, credentialUsername ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = credentialDisplayLabel(index, credentialUsername),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (index == selectedCredentialEditorIndex) {
+                                            Icon(Icons.Default.Check, contentDescription = null)
+                                        } else {
+                                            Icon(Icons.Default.AccountCircle, contentDescription = null)
+                                        }
+                                    },
+                                    onClick = { showCredentialEditor(index) }
+                                )
+                            }
+                            if (multiCredentialEditorSection == MultiCredentialEditorSection.CREDENTIAL) {
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.delete),
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    onClick = {
+                                        credentialMenuExpanded = false
+                                        removeCredentialFieldAt(selectedCredentialEditorIndex)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (usesCredentialCards) {
+                    SmallFloatingActionButton(
+                        onClick = ::addAndSelectCredential,
+                        modifier = Modifier.size(48.dp),
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = stringResource(R.string.add_credential)
+                        )
+                    }
+                }
+
+                FloatingActionButton(
+                    onClick = handleSave,
+                    containerColor = if (canSave) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    contentColor = if (canSave) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = stringResource(R.string.save)
+                        )
+                    }
                 }
             }
         }
@@ -1877,23 +2445,25 @@ fun AddEditPasswordScreen(
             contentPadding = listContentPadding
         ) {
             // Vault/Storage Selector - 保管库选择器（类似Bitwarden）
-            item {
-                MultiStorageTargetSelectorCard(
-                    selectedTargets = selectedStorageTargets,
-                    existingTargetKeys = existingReplicaTargetKeys,
-                    categories = categories,
-                    keepassDatabases = keepassDatabases,
-                    mdbxDatabases = mdbxDatabases,
-                    bitwardenVaults = bitwardenVaults,
-                    bitwardenFolderDao = database.bitwardenFolderDao(),
-                    getMdbxFolders = viewModel::getMdbxFolders,
-                    isEditing = isEditing,
-                    onAddTargetClick = { showStorageTargetSheet = true },
-                    onRemoveTarget = ::removeSelectedStorageTarget
-                )
+            if (showCommonEditorContent) {
+                item {
+                    MultiStorageTargetSelectorCard(
+                        selectedTargets = selectedStorageTargets,
+                        existingTargetKeys = existingReplicaTargetKeys,
+                        categories = categories,
+                        keepassDatabases = keepassDatabases,
+                        mdbxDatabases = mdbxDatabases,
+                        bitwardenVaults = bitwardenVaults,
+                        bitwardenFolderDao = database.bitwardenFolderDao(),
+                        getMdbxFolders = viewModel::getMdbxFolders,
+                        isEditing = isEditing,
+                        onAddTargetClick = { showStorageTargetSheet = true },
+                        onRemoveTarget = ::removeSelectedStorageTarget
+                    )
+                }
             }
 
-            if (hasOwnershipConflict) {
+            if (showCommonEditorContent && hasOwnershipConflict) {
                 item {
                     ElevatedCard(
                         modifier = Modifier.fillMaxWidth(),
@@ -1931,6 +2501,7 @@ fun AddEditPasswordScreen(
                     )
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (showCommonEditorContent) {
                         // Title
                         if (settings.iconCardsEnabled) {
                             Row(
@@ -2224,180 +2795,238 @@ fun AddEditPasswordScreen(
                                 }
                             )
                         }
-                        // Username - 支持常用账号填充
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = username,
-                                onValueChange = { username = it },
-                                label = { Text(stringResource(R.string.field_account)) },
-                                leadingIcon = { Icon(Icons.Default.Person, null) },
-                                trailingIcon = {
-                                    Row {
-                                        // 常用账号填充按钮（新建时可从模板/默认值中选择）
-                                        if (canSelectUsernameTemplate) {
-                                            IconButton(
-                                                onClick = {
-                                                    commonAccountSelectorField = "username"
-                                                    commonAccountSelectorTargetIndex = -1
-                                                    showCommonAccountSelector = true
-                                                }
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.PersonAdd,
-                                                    contentDescription = stringResource(R.string.fill_common_account),
-                                                    modifier = Modifier.size(20.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        }
-                                        // 复制按钮
-                                        if (username.isNotEmpty()) {
-                                            IconButton(onClick = {
-                                                ClipboardUtils.copyToClipboard(
-                                                    context = context,
-                                                    text = username,
-                                                    label = context.getString(R.string.username),
-                                                    sensitive = true
-                                                )
-                                                Toast.makeText(context, context.getString(R.string.username_copied), Toast.LENGTH_SHORT).show()
-                                            }) {
-                                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(20.dp))
-                                            }
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .onFocusChanged { focusState ->
-                                        isUsernameFieldFocused = focusState.isFocused
-                                    },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                                shape = RoundedCornerShape(12.dp)
-                            )
                         }
+                        }
+                        // 单凭据继续使用原页面；批量模式只显示当前菜单选中的账号。
+                        if (showCredentialEditorContent && !isBarcodeMode) {
+                            val activeCredentialIndex = if (isMultiCredentialMode) {
+                                selectedCredentialEditorIndex.coerceIn(0, credentialUsernames.lastIndex)
+                            } else {
+                                0
+                            }
+                            val activeUsername = if (isMultiCredentialMode) {
+                                credentialUsernames[activeCredentialIndex]
+                            } else {
+                                username
+                            }
+                            val activeUsernameFocusRequester = credentialUsernameFocusRequesters.getOrPut(
+                                activeCredentialIndex
+                            ) { FocusRequester() }
+                            val activeUsernameBringIntoViewRequester = credentialBringIntoViewRequesters.getOrPut(
+                                activeCredentialIndex
+                            ) { BringIntoViewRequester() }
+                            val activeUsernameSuggestionState = if (isMultiCredentialMode) {
+                                credentialUsernameSuggestionState
+                            } else {
+                                usernameSuggestionState
+                            }
+                            val activeUsernameSuggestionVisible = if (isMultiCredentialMode) {
+                                credentialUsernameSuggestionVisible
+                            } else {
+                                usernameSuggestionVisible
+                            }
 
-                        val usernameSuggestionAnimationSpec = remember {
-                            spring<IntSize>(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        }
-                        AnimatedVisibility(
-                            visible = usernameSuggestionVisible,
-                            enter = slideInVertically(
-                                animationSpec = tween(
-                                    durationMillis = 240,
-                                    easing = FastOutSlowInEasing
-                                ),
-                                initialOffsetY = { -it / 2 }
-                            ) +
-                                fadeIn(animationSpec = tween(180)) +
-                                expandVertically(
-                                    expandFrom = Alignment.Top,
-                                    animationSpec = usernameSuggestionAnimationSpec
-                                ),
-                            exit = slideOutVertically(
-                                animationSpec = tween(
-                                    durationMillis = 160,
-                                    easing = FastOutSlowInEasing
-                                ),
-                                targetOffsetY = { -it / 4 }
-                            ) +
-                                fadeOut(animationSpec = tween(120)) +
-                                shrinkVertically(
-                                    shrinkTowards = Alignment.Top,
-                                    animationSpec = tween(160, easing = FastOutSlowInEasing)
-                                )
-                        ) {
-                            UsernameSuggestionPanel(
-                                state = usernameSuggestionState,
-                                onApplySuggestion = { applyCommonAccountSelection("username", it) },
-                                modifier = Modifier.bringIntoViewRequester(usernameSuggestionBringIntoViewRequester)
-                            )
-                        }
-
-                        AnimatedVisibility(
-                            visible = settings.separateUsernameAccountEnabled,
-                            enter = EnterTransition.None,
-                            exit = ExitTransition.None
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 OutlinedTextField(
-                                    value = separatedUsername,
-                                    onValueChange = { separatedUsername = it },
-                                    label = { Text(stringResource(R.string.autofill_username)) },
-                                    leadingIcon = { Icon(Icons.Default.Badge, null) },
+                                    value = activeUsername,
+                                    onValueChange = { value ->
+                                        if (isMultiCredentialMode) {
+                                            credentialUsernames[activeCredentialIndex] = value
+                                        } else {
+                                            username = value
+                                        }
+                                    },
+                                    label = { Text(stringResource(R.string.field_account)) },
+                                    leadingIcon = { Icon(Icons.Default.Person, null) },
+                                    trailingIcon = {
+                                        Row {
+                                            if (canSelectUsernameTemplate) {
+                                                IconButton(
+                                                    onClick = {
+                                                        commonAccountSelectorField = "username"
+                                                        commonAccountSelectorTargetIndex = if (isMultiCredentialMode) {
+                                                            activeCredentialIndex
+                                                        } else {
+                                                            -1
+                                                        }
+                                                        showCommonAccountSelector = true
+                                                    }
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.PersonAdd,
+                                                        contentDescription = stringResource(R.string.fill_common_account),
+                                                        modifier = Modifier.size(20.dp),
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                            }
+                                            if (activeUsername.isNotEmpty()) {
+                                                IconButton(onClick = {
+                                                    ClipboardUtils.copyToClipboard(
+                                                        context = context,
+                                                        text = activeUsername,
+                                                        label = context.getString(R.string.username),
+                                                        sensitive = true
+                                                    )
+                                                    Toast.makeText(
+                                                        context,
+                                                        context.getString(R.string.username_copied),
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }) {
+                                                    Icon(
+                                                        Icons.Default.ContentCopy,
+                                                        contentDescription = "Copy",
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    },
                                     modifier = Modifier
-                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .focusRequester(activeUsernameFocusRequester)
+                                        .bringIntoViewRequester(activeUsernameBringIntoViewRequester)
                                         .onFocusChanged { focusState ->
-                                            isSeparatedUsernameFieldFocused = focusState.isFocused
+                                            if (isMultiCredentialMode) {
+                                                focusedCredentialUsernameIndex = if (focusState.isFocused) {
+                                                    activeCredentialIndex
+                                                } else {
+                                                    focusedCredentialUsernameIndex.takeUnless {
+                                                        it == activeCredentialIndex
+                                                    }
+                                                }
+                                            } else {
+                                                isUsernameFieldFocused = focusState.isFocused
+                                            }
                                         },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                     shape = RoundedCornerShape(12.dp)
                                 )
+                            }
 
-                                AnimatedVisibility(
-                                    visible = separatedUsernameSuggestionVisible,
-                                    enter = slideInVertically(
-                                        animationSpec = tween(
-                                            durationMillis = 240,
-                                            easing = FastOutSlowInEasing
-                                        ),
-                                        initialOffsetY = { -it / 2 }
-                                    ) +
-                                        fadeIn(animationSpec = tween(180)) +
-                                        expandVertically(
-                                            expandFrom = Alignment.Top,
-                                            animationSpec = usernameSuggestionAnimationSpec
-                                        ),
-                                    exit = slideOutVertically(
-                                        animationSpec = tween(
-                                            durationMillis = 160,
-                                            easing = FastOutSlowInEasing
-                                        ),
-                                        targetOffsetY = { -it / 4 }
-                                    ) +
-                                        fadeOut(animationSpec = tween(120)) +
-                                        shrinkVertically(
-                                            shrinkTowards = Alignment.Top,
-                                            animationSpec = tween(160, easing = FastOutSlowInEasing)
-                                        )
-                                ) {
-                                    UsernameSuggestionPanel(
-                                        state = separatedUsernameSuggestionState,
-                                        onApplySuggestion = { separatedUsername = it },
-                                        modifier = Modifier.bringIntoViewRequester(
-                                            separatedUsernameSuggestionBringIntoViewRequester
-                                        )
+                            AnimatedVisibility(
+                                visible = activeUsernameSuggestionVisible,
+                                enter = slideInVertically(
+                                    animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                    initialOffsetY = { -it / 2 }
+                                ) + fadeIn(animationSpec = tween(180)) + expandVertically(
+                                    expandFrom = Alignment.Top,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
                                     )
+                                ),
+                                exit = slideOutVertically(
+                                    animationSpec = tween(160, easing = FastOutSlowInEasing),
+                                    targetOffsetY = { -it / 4 }
+                                ) + fadeOut(animationSpec = tween(120)) + shrinkVertically(
+                                    shrinkTowards = Alignment.Top,
+                                    animationSpec = tween(160, easing = FastOutSlowInEasing)
+                                )
+                            ) {
+                                UsernameSuggestionPanel(
+                                    state = activeUsernameSuggestionState,
+                                    onApplySuggestion = { suggestion ->
+                                        if (isMultiCredentialMode) {
+                                            credentialUsernames[activeCredentialIndex] = suggestion
+                                        } else {
+                                            username = suggestion
+                                        }
+                                    },
+                                    modifier = Modifier.bringIntoViewRequester(
+                                        if (isMultiCredentialMode) {
+                                            activeUsernameBringIntoViewRequester
+                                        } else {
+                                            usernameSuggestionBringIntoViewRequester
+                                        }
+                                    )
+                                )
+                            }
+
+                            LaunchedEffect(pendingCredentialFocusIndex, activeCredentialIndex) {
+                                if (
+                                    isMultiCredentialMode &&
+                                    pendingCredentialFocusIndex == activeCredentialIndex
+                                ) {
+                                    kotlinx.coroutines.delay(80)
+                                    activeUsernameFocusRequester.requestFocus()
+                                    activeUsernameBringIntoViewRequester.bringIntoView()
+                                    pendingCredentialFocusIndex = null
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = settings.separateUsernameAccountEnabled && !isMultiCredentialMode,
+                                enter = EnterTransition.None,
+                                exit = ExitTransition.None
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                    OutlinedTextField(
+                                        value = separatedUsername,
+                                        onValueChange = { separatedUsername = it },
+                                        label = { Text(stringResource(R.string.autofill_username)) },
+                                        leadingIcon = { Icon(Icons.Default.Badge, null) },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .onFocusChanged { focusState ->
+                                                isSeparatedUsernameFieldFocused = focusState.isFocused
+                                            },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+
+                                    AnimatedVisibility(
+                                        visible = separatedUsernameSuggestionVisible,
+                                        enter = fadeIn(animationSpec = tween(180)) + expandVertically(),
+                                        exit = fadeOut(animationSpec = tween(120)) + shrinkVertically()
+                                    ) {
+                                        UsernameSuggestionPanel(
+                                            state = separatedUsernameSuggestionState,
+                                            onApplySuggestion = { separatedUsername = it },
+                                            modifier = Modifier.bringIntoViewRequester(
+                                                separatedUsernameSuggestionBringIntoViewRequester
+                                            )
+                                        )
+                                    }
                                 }
                             }
                         }
-                        
-                        // 登录方式选择
-                        LoginTypeSelector(
-                            loginType = loginType,
-                            ssoProvider = ssoProvider,
-                            ssoRefEntryId = ssoRefEntryId,
-                            allPasswords = allPasswordsForRef,
-                            onLoginTypeChange = { loginType = it },
-                            onSsoProviderChange = { ssoProvider = it },
-                            onSsoRefEntryIdChange = { ssoRefEntryId = it }
-                        )
+
+                        // 登录方式选择；批量模式固定为账号密码，避免切换类型后破坏独立凭据。
+                        if (showCommonEditorContent && !isMultiCredentialMode) {
+                            LoginTypeSelector(
+                                loginType = loginType,
+                                ssoProvider = ssoProvider,
+                                ssoRefEntryId = ssoRefEntryId,
+                                allPasswords = allPasswordsForRef,
+                                onLoginTypeChange = { loginType = it },
+                                onSsoProviderChange = { ssoProvider = it },
+                                onSsoRefEntryIdChange = { ssoRefEntryId = it }
+                            )
+                        }
 
                         // Passwords (仅在账号密码模式下显示)
                         AnimatedVisibility(
-                            visible = loginType.equals("PASSWORD", ignoreCase = true) && !isBarcodeMode,
+                            visible = showCredentialEditorContent &&
+                                loginType.equals("PASSWORD", ignoreCase = true) &&
+                                !isBarcodeMode,
                             enter = EnterTransition.None,
                             exit = ExitTransition.None
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                passwords.forEachIndexed { index, pwd ->
+                                val visiblePasswordIndices = if (isMultiCredentialMode) {
+                                    listOf(selectedCredentialEditorIndex.coerceIn(0, passwords.lastIndex))
+                                } else {
+                                    passwords.indices.toList()
+                                }
+                                visiblePasswordIndices.forEach { index ->
+                                    val pwd = passwords[index]
                                     val isPasswordVisible = isPasswordFieldVisible(index)
                                     val isUnreadablePassword =
                                         isEditing && originalIds.getOrNull(index) in unreadablePasswordIds
@@ -2410,7 +3039,15 @@ fun AddEditPasswordScreen(
                                             OutlinedTextField(
                                                 value = pwd,
                                                 onValueChange = { passwords[index] = it },
-                                                label = { Text(if (passwords.size > 1) stringResource(R.string.password) + " ${index + 1}" else stringResource(R.string.password)) },
+                                                label = {
+                                                    Text(
+                                                        if (!isMultiCredentialMode && passwords.size > 1) {
+                                                            stringResource(R.string.password) + " ${index + 1}"
+                                                        } else {
+                                                            stringResource(R.string.password)
+                                                        }
+                                                    )
+                                                },
                                                 leadingIcon = { Icon(Icons.Default.Lock, null) },
                                                 visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                                 trailingIcon = {
@@ -2431,7 +3068,7 @@ fun AddEditPasswordScreen(
                                                             )
                                                         }
                                                         // Allow removing only if more than 1
-                                                        if (passwords.size > 1) {
+                                                        if (!isMultiCredentialMode && passwords.size > 1) {
                                                             IconButton(onClick = { removePasswordFieldAt(index) }) {
                                                                 Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                                                             }
@@ -2483,7 +3120,10 @@ fun AddEditPasswordScreen(
                                                 fadeIn(animationSpec = tween(180)) +
                                                 expandVertically(
                                                     expandFrom = Alignment.Top,
-                                                    animationSpec = usernameSuggestionAnimationSpec
+                                                    animationSpec = spring<IntSize>(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
                                                 ),
                                             exit = slideOutVertically(
                                                 animationSpec = tween(
@@ -2524,25 +3164,26 @@ fun AddEditPasswordScreen(
                                     }
                                 }
 
-                                // Add Password Button
-                                OutlinedButton(
-                                    onClick = { passwords.add("") },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(Icons.Default.Add, null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(stringResource(R.string.add_password))
+                                // 旧的“一个条目多个密码”编辑能力继续保留；批量凭据每页固定一个密码。
+                                if (!isMultiCredentialMode) {
+                                    OutlinedButton(
+                                        onClick = { passwords.add("") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(stringResource(R.string.add_password))
+                                    }
                                 }
                             }
-                        }
                         }
                     }
                 }
             }
-            
+
             // Security Card (TOTP) - 根据设置和数据决定是否显示
-            if (shouldShowSecurityVerification()) {
+            if (showCredentialEditorContent && shouldShowSecurityVerification()) {
                 item {
                     InfoCard(title = stringResource(R.string.section_security_verification)) {
                         Column {
@@ -2700,7 +3341,7 @@ fun AddEditPasswordScreen(
             }
 
             // Organization Card - 根据设置和数据决定是否显示
-            if (shouldShowCategoryAndNotes()) {
+            if (showCommonEditorContent && shouldShowCategoryAndNotes()) {
                 item {
                     InfoCard(title = stringResource(R.string.notes)) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2804,7 +3445,7 @@ fun AddEditPasswordScreen(
                 }
             }  // 分类与备注 if 结束
             
-            if (!isBarcodeMode) {
+            if (!isBarcodeMode && showCommonEditorContent) {
                 // 自定义字段区域标题 (带添加按钮)
                 item {
                     CustomFieldSectionHeader(
@@ -2834,7 +3475,10 @@ fun AddEditPasswordScreen(
                     )
                 }
 
-                // 附件区块：编辑模式直接操作附件表；新建阶段使用草稿 list，在保存后统一 flush
+            }
+
+            if (!isBarcodeMode && showCredentialEditorContent) {
+                // 附件区块：批量模式下每个凭据页维护自己的附件草稿。
                 item {
                     val editKeePassContext = if (
                         isEditing &&
@@ -2858,13 +3502,26 @@ fun AddEditPasswordScreen(
                             takagi.ru.monica.attachments.model.AttachmentSource.LOCAL
                         },
                         keepassContext = editKeePassContext,
-                        pendingDrafts = if (isEditing) null else pendingAttachmentDrafts
+                        pendingDrafts = if (isEditing) {
+                            null
+                        } else {
+                            credentialAttachmentDrafts[
+                                if (isMultiCredentialMode) {
+                                    selectedCredentialEditorIndex.coerceIn(
+                                        0,
+                                        credentialAttachmentDrafts.lastIndex
+                                    )
+                                } else {
+                                    0
+                                }
+                            ]
+                        }
                     )
                 }
             }
 
             // Collapsible: Personal Info - 根据设置和数据决定是否显示
-            if (shouldShowPersonalInfo()) {
+            if (showCommonEditorContent && shouldShowPersonalInfo()) {
                 item {
                     CollapsibleCard(
                         title = stringResource(R.string.personal_info),
@@ -3013,7 +3670,7 @@ fun AddEditPasswordScreen(
             }  // Personal Info if 结束
 
             // Collapsible: Address Info - 根据设置和数据决定是否显示
-            if (shouldShowAddressInfo()) {
+            if (showCommonEditorContent && shouldShowAddressInfo()) {
                 item {
                     CollapsibleCard(
                         title = stringResource(R.string.address_info),
@@ -3093,7 +3750,7 @@ fun AddEditPasswordScreen(
             }  // Address Info if 结束
 
             // Collapsible: Payment Info
-            if (shouldShowPaymentInfo()) {
+            if (showCommonEditorContent && shouldShowPaymentInfo()) {
             item {
                 CollapsibleCard(
                     title = stringResource(R.string.payment_info),
@@ -3827,6 +4484,12 @@ private fun PasswordTotpBindingPickerBottomSheet(
             }
         }
     }
+}
+
+@Composable
+private fun credentialDisplayLabel(index: Int, username: String): String {
+    val base = stringResource(R.string.credential_number, index + 1)
+    return username.trim().takeIf { it.isNotEmpty() }?.let { "$base · $it" } ?: base
 }
 
 @Composable
@@ -4991,6 +5654,12 @@ private fun getSsoProviderIcon(providerName: String): ImageVector {
 }
 
 private fun buildPasswordSiblingGroupKey(entry: PasswordEntry): String {
+    entry.replicaGroupId
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { replicaGroupId ->
+            return "replica:$replicaGroupId|target:${entry.toStorageTarget().stableKey}"
+        }
     val sourceKey = when {
         !entry.bitwardenCipherId.isNullOrBlank() ->
             "bw:${entry.bitwardenVaultId}:${entry.bitwardenCipherId}"

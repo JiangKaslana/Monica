@@ -242,6 +242,7 @@ fun TotpCodeCard(
         if (allowVibration &&
             isScreenStarted &&
             isScreenResumed &&
+            settings.isPlusActivated &&
             settings.validatorVibrationEnabled && 
             totpData.otpType != OtpType.HOTP && 
             remainingSeconds in 1..5) {
@@ -268,7 +269,8 @@ fun TotpCodeCard(
     
     // 判断是否复制下一个验证码
     val codeToCopy = remember(currentCode, nextCode, remainingSeconds, settings.copyNextCodeWhenExpiring, totpData.otpType) {
-        if (settings.copyNextCodeWhenExpiring && 
+        if (settings.isPlusActivated &&
+            settings.copyNextCodeWhenExpiring &&
             totpData.otpType != OtpType.HOTP && 
             remainingSeconds in 1..5) {
             nextCode

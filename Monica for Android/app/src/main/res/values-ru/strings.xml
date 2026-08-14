@@ -3621,4 +3621,6 @@
     <string name="extensions_steam_settings">Steam</string>
     <string name="steam_mini_profile_background_title">Фон мини-профиля</string>
     <string name="steam_mini_profile_background_description">Показывать фон мини-профиля Steam на карточках токена и аккаунта. Анимация работает только на экране, размер кэша ограничен 64 МБ.</string>
+    <string name="add_credential">Добавить учётные данные</string>
+    <string name="credential_number">Учётные данные %1$d</string>
 </resources>

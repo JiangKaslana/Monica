@@ -1356,6 +1356,9 @@ fun VaultV2Pane(
 	// 0 = 无, 1 = 时间线, 2 = 回收站
 	var vaultHistoryPageMode by rememberSaveable { mutableStateOf(0) }
 	val timelineViewModel: takagi.ru.monica.viewmodel.TimelineViewModel = viewModel()
+	BackHandler(enabled = vaultHistoryPageMode != 0) {
+		vaultHistoryPageMode = 0
+	}
 
 	// 历史/回收站页面优先渲染，覆盖整个 VaultV2Pane
 	if (useEmbeddedHistoryPages && vaultHistoryPageMode != 0) {

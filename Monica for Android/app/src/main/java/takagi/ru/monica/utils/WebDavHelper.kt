@@ -38,6 +38,7 @@ import takagi.ru.monica.passkey.PasskeyBackupPortabilityPolicy
 import takagi.ru.monica.passkey.PasskeyPrivateKeyStore
 import takagi.ru.monica.passkey.PasskeyPrivateKeySupport
 import takagi.ru.monica.security.SecurityManager
+import takagi.ru.monica.security.SecurityQuestionsBackupSnapshot
 import takagi.ru.monica.steam.data.SteamAccountRepository
 import takagi.ru.monica.steam.data.SteamDatabase
 import takagi.ru.monica.steam.importer.SteamMaFileBackupCodec
@@ -71,6 +72,9 @@ import java.io.OutputStreamWriter
 import java.util.concurrent.TimeUnit
 
 private class PasskeyBackupEncryptionRequiredException(message: String) :
+    IllegalStateException(message)
+
+private class SecurityQuestionsBackupEncryptionRequiredException(message: String) :
     IllegalStateException(message)
 
 /**
@@ -351,6 +355,16 @@ private data class AutofillBlacklistBackupEntry(
 )
 
 @Serializable
+private data class SecurityQuestionsBackupEntry(
+    val question1Id: Int = -1,
+    val question1Text: String? = null,
+    val answer1Hash: String = "",
+    val question2Id: Int = -1,
+    val question2Text: String? = null,
+    val answer2Hash: String = "",
+)
+
+@Serializable
 private data class PageAdjustmentPasswordFieldVisibilityBackupEntry(
     val securityVerification: Boolean = true,
     val categoryAndNotes: Boolean = true,
@@ -393,6 +407,7 @@ private data class PageAdjustmentSettingsBackupEntry(
     val bottomNavVisibilityNotes: Boolean = false,
     val bottomNavVisibilitySend: Boolean = false,
     val bottomNavVisibilityPasskey: Boolean = true,
+    val bottomNavVisibilitySteam: Boolean = false,
     val useDraggableBottomNav: Boolean = false,
     val autoHideBottomNavWhenSingleTab: Boolean = false,
     val passwordListQuickAccessEnabled: Boolean = true,
@@ -413,6 +428,7 @@ private data class PageAdjustmentSettingsBackupEntry(
     val copyNextCodeWhenExpiring: Boolean = false,
     val securityAnalysisAutoEnabled: Boolean = false,
     val passwordDetailSecurityAnalysisEnabled: Boolean = true,
+    val steamMiniProfileBackgroundEnabled: Boolean = false,
     val autofillAuthRequired: Boolean = true,
     val iconCardsEnabled: Boolean = true,
     val appLauncherIcon: String = "MODERN",
@@ -561,6 +577,327 @@ class WebDavHelper(
             bitwardenVaultId = null,
             bitwardenFolderId = null
         )
+    }
+
+    private fun PageAdjustmentSettingsSnapshot.toBackupEntry(): PageAdjustmentSettingsBackupEntry {
+        return PageAdjustmentSettingsBackupEntry(
+            passwordListQuickFiltersEnabled = passwordListQuickFiltersEnabled,
+            passwordListQuickFilterItems = passwordListQuickFilterItems,
+            passwordListCategoryQuickFiltersEnabled = passwordListCategoryQuickFiltersEnabled,
+            passwordListQuickFoldersEnabled = passwordListQuickFoldersEnabled,
+            passwordListQuickFolderStyle = passwordListQuickFolderStyle,
+            passwordListQuickFolderPathBannerEnabled = passwordListQuickFolderPathBannerEnabled,
+            passwordListSystemBackToParentFolderEnabled = passwordListSystemBackToParentFolderEnabled,
+            addButtonBehaviorMode = addButtonBehaviorMode,
+            addButtonMenuOrder = addButtonMenuOrder,
+            addButtonMenuEnabledActions = addButtonMenuEnabledActions,
+            passwordPageAggregateEnabled = passwordPageAggregateEnabled,
+            passwordPageVisibleContentTypes = passwordPageVisibleContentTypes,
+            categorySelectionUiMode = categorySelectionUiMode,
+            colorSettingsVersion = colorSettingsVersion,
+            oledPureBlackEnabled = oledPureBlackEnabled,
+            colorScheme = colorScheme,
+            customPrimaryColor = customPrimaryColor,
+            customSecondaryColor = customSecondaryColor,
+            customTertiaryColor = customTertiaryColor,
+            customNeutralColor = customNeutralColor,
+            customNeutralVariantColor = customNeutralVariantColor,
+            bottomNavSettingsVersion = bottomNavSettingsVersion,
+            bottomNavOrder = bottomNavOrder,
+            bottomNavVisibilityVaultV2 = bottomNavVisibilityVaultV2,
+            bottomNavVisibilityPasswords = bottomNavVisibilityPasswords,
+            bottomNavVisibilityAuthenticator = bottomNavVisibilityAuthenticator,
+            bottomNavVisibilityCardWallet = bottomNavVisibilityCardWallet,
+            bottomNavVisibilityGenerator = bottomNavVisibilityGenerator,
+            bottomNavVisibilityNotes = bottomNavVisibilityNotes,
+            bottomNavVisibilitySend = bottomNavVisibilitySend,
+            bottomNavVisibilityPasskey = bottomNavVisibilityPasskey,
+            bottomNavVisibilitySteam = bottomNavVisibilitySteam,
+            useDraggableBottomNav = useDraggableBottomNav,
+            autoHideBottomNavWhenSingleTab = autoHideBottomNavWhenSingleTab,
+            passwordListQuickAccessEnabled = passwordListQuickAccessEnabled,
+            passwordListTopModulesOrder = passwordListTopModulesOrder,
+            passwordCardDisplayMode = passwordCardDisplayMode,
+            passwordCardDisplayFields = passwordCardDisplayFields,
+            passwordCardShowAuthenticator = passwordCardShowAuthenticator,
+            passwordCardHideOtherContentWhenAuthenticator = passwordCardHideOtherContentWhenAuthenticator,
+            stackCardMode = stackCardMode,
+            passwordGroupMode = passwordGroupMode,
+            passwordWebsiteStackMatchMode = passwordWebsiteStackMatchMode,
+            authenticatorCardDisplayFields = authenticatorCardDisplayFields,
+            authenticatorCardHideCodeByDefault = authenticatorCardHideCodeByDefault,
+            validatorProgressBarStyle = validatorProgressBarStyle,
+            validatorUnifiedProgressBar = validatorUnifiedProgressBar,
+            validatorSmoothProgress = validatorSmoothProgress,
+            validatorVibrationEnabled = validatorVibrationEnabled,
+            copyNextCodeWhenExpiring = copyNextCodeWhenExpiring,
+            securityAnalysisAutoEnabled = securityAnalysisAutoEnabled,
+            passwordDetailSecurityAnalysisEnabled = passwordDetailSecurityAnalysisEnabled,
+            steamMiniProfileBackgroundEnabled = steamMiniProfileBackgroundEnabled,
+            autofillAuthRequired = autofillAuthRequired,
+            iconCardsEnabled = iconCardsEnabled,
+            appLauncherIcon = appLauncherIcon,
+            appLauncherLabel = appLauncherLabel,
+            passwordPageIconEnabled = passwordPageIconEnabled,
+            authenticatorPageIconEnabled = authenticatorPageIconEnabled,
+            passkeyPageIconEnabled = passkeyPageIconEnabled,
+            unmatchedIconHandlingStrategy = unmatchedIconHandlingStrategy,
+            passwordFieldSettingsVersion = passwordFieldSettingsVersion,
+            separateUsernameAccountEnabled = separateUsernameAccountEnabled,
+            presetCustomFieldsJson = presetCustomFieldsJson,
+            passwordFieldVisibility = PageAdjustmentPasswordFieldVisibilityBackupEntry(
+                securityVerification = passwordFieldVisibility.securityVerification,
+                categoryAndNotes = passwordFieldVisibility.categoryAndNotes,
+                appBinding = passwordFieldVisibility.appBinding,
+                personalInfo = passwordFieldVisibility.personalInfo,
+                addressInfo = passwordFieldVisibility.addressInfo,
+                paymentInfo = passwordFieldVisibility.paymentInfo,
+            ),
+        )
+    }
+
+    private suspend fun writePortableAppSettingsBackup(
+        zipOut: ZipOutputStream,
+        cacheBackupDir: File,
+        backupEncryptPassword: String?,
+        warnings: MutableList<String>,
+    ) {
+        try {
+            val json = Json { prettyPrint = false }
+            val monicaConfigDir = File(cacheBackupDir, "monica_config").apply { mkdirs() }
+            val pageAdjustmentSettingsFile = File(monicaConfigDir, "page_adjustment_settings.json")
+            pageAdjustmentSettingsFile.writeText(
+                json.encodeToString(
+                    PageAdjustmentSettingsBackupEntry.serializer(),
+                    SettingsManager(context).exportPageAdjustmentSettings().toBackupEntry(),
+                ),
+                Charsets.UTF_8,
+            )
+            addFileToZip(
+                zipOut,
+                pageAdjustmentSettingsFile,
+                "monica_config/${pageAdjustmentSettingsFile.name}",
+            )
+            pageAdjustmentSettingsFile.delete()
+
+            val securityQuestionsSnapshot = securityManager.exportSecurityQuestionsForBackup()
+            if (securityQuestionsSnapshot != null && backupEncryptPassword == null) {
+                throw SecurityQuestionsBackupEncryptionRequiredException(
+                    "密保问题包含可验证答案摘要，仅会写入已加密的备份"
+                )
+            }
+            securityQuestionsSnapshot?.let { snapshot ->
+                val securityQuestionsFile = File(monicaConfigDir, "security_questions.json")
+                securityQuestionsFile.writeText(
+                    json.encodeToString(
+                        SecurityQuestionsBackupEntry.serializer(),
+                        snapshot.toBackupEntry(),
+                    ),
+                    Charsets.UTF_8,
+                )
+                addFileToZip(
+                    zipOut,
+                    securityQuestionsFile,
+                    "monica_config/${securityQuestionsFile.name}",
+                )
+                securityQuestionsFile.delete()
+            }
+            android.util.Log.d(
+                "WebDavHelper",
+                "Backup portable app settings (pageAdjustmentSettings=true, securityQuestions=${securityQuestionsSnapshot != null})",
+            )
+        } catch (e: SecurityQuestionsBackupEncryptionRequiredException) {
+            android.util.Log.w("WebDavHelper", e.message.orEmpty())
+            warnings.add(e.message.orEmpty())
+        } catch (e: Exception) {
+            android.util.Log.w("WebDavHelper", "Failed to backup portable app settings: ${e.message}")
+            warnings.add("Monica应用设置备份失败: ${e.message}")
+        }
+    }
+
+    private fun SecurityQuestionsBackupSnapshot.toBackupEntry(): SecurityQuestionsBackupEntry {
+        return SecurityQuestionsBackupEntry(
+            question1Id = question1Id,
+            question1Text = question1Text,
+            answer1Hash = answer1Hash,
+            question2Id = question2Id,
+            question2Text = question2Text,
+            answer2Hash = answer2Hash,
+        )
+    }
+
+    private suspend fun writeConnectionConfigBackup(
+        zipOut: ZipOutputStream,
+        cacheBackupDir: File,
+        backupEncryptPassword: String?,
+        warnings: MutableList<String>,
+    ) {
+        try {
+            val autofillPreferences = AutofillPreferences(context)
+            val blockedFieldSignatures = autofillPreferences.blockedFieldSignatureRecords.first()
+                .map { record ->
+                    AutofillBlockedFieldBackupEntry(
+                        signatureKey = record.signatureKey,
+                        packageName = record.packageName,
+                        webDomain = record.webDomain,
+                        hints = record.hints,
+                        blockedAt = record.blockedAt,
+                    )
+                }
+            val saveBlockedTargets = autofillPreferences.saveBlockedTargetRecords.first()
+                .map { it.key }
+                .distinct()
+            val autofillBlacklistEnabled = autofillPreferences.isBlacklistEnabled.first()
+            val autofillBlacklistPackages = autofillPreferences.blacklistPackages.first()
+                .mapNotNull { it.trim().takeIf { packageName -> packageName.isNotBlank() } }
+                .distinct()
+                .sorted()
+            val bitwardenVaults = PasswordDatabase.getDatabase(context)
+                .bitwardenVaultDao()
+                .getAllVaults()
+
+            if (backupEncryptPassword == null) {
+                warnings.add("未启用备份加密，已跳过 WebDAV 连接凭证和 Bitwarden Vault 密钥材料")
+            }
+
+            val encryptedWebDavPassword = backupEncryptPassword?.let {
+                EncryptionHelper.encryptString(password, it)
+            } ?: ""
+            val encryptedEncPassword = if (
+                backupEncryptPassword != null &&
+                enableEncryption &&
+                encryptionPassword.isNotEmpty()
+            ) {
+                EncryptionHelper.encryptString(encryptionPassword, backupEncryptPassword)
+            } else {
+                ""
+            }
+            val bitwardenVaultBackups = bitwardenVaults.map { vault ->
+                BitwardenVaultBackupEntry(
+                    id = vault.id,
+                    email = vault.email,
+                    userId = vault.userId,
+                    displayName = vault.displayName,
+                    serverUrl = vault.serverUrl,
+                    identityUrl = vault.identityUrl,
+                    apiUrl = vault.apiUrl,
+                    eventsUrl = vault.eventsUrl,
+                    encryptedAccessToken = encryptSensitiveBackupValue(vault.encryptedAccessToken, backupEncryptPassword),
+                    encryptedRefreshToken = encryptSensitiveBackupValue(vault.encryptedRefreshToken, backupEncryptPassword),
+                    accessTokenExpiresAt = vault.accessTokenExpiresAt,
+                    encryptedMasterKey = encryptSensitiveBackupValue(vault.encryptedMasterKey, backupEncryptPassword),
+                    encryptedEncKey = encryptSensitiveBackupValue(vault.encryptedEncKey, backupEncryptPassword),
+                    encryptedMacKey = encryptSensitiveBackupValue(vault.encryptedMacKey, backupEncryptPassword),
+                    kdfType = vault.kdfType,
+                    kdfIterations = vault.kdfIterations,
+                    kdfMemory = vault.kdfMemory,
+                    kdfParallelism = vault.kdfParallelism,
+                    lastSyncAt = vault.lastSyncAt,
+                    lastFullSyncAt = vault.lastFullSyncAt,
+                    revisionDate = vault.revisionDate,
+                    isDefault = vault.isDefault,
+                    isConnected = vault.isConnected,
+                    syncEnabled = vault.syncEnabled,
+                    createdAt = vault.createdAt,
+                    updatedAt = vault.updatedAt,
+                )
+            }
+
+            val json = Json { prettyPrint = false }
+            val monicaConfigDir = File(cacheBackupDir, "monica_config").apply { mkdirs() }
+            val webDavConnectionFile = File(monicaConfigDir, "webdav_connection.json")
+            webDavConnectionFile.writeText(
+                json.encodeToString(
+                    WebDavConnectionBackupEntry.serializer(),
+                    WebDavConnectionBackupEntry(
+                        serverUrl = serverUrl,
+                        username = username,
+                        encryptedPassword = encryptedWebDavPassword,
+                        enableEncryption = enableEncryption,
+                        encryptedEncryptionPassword = encryptedEncPassword,
+                        autoBackupEnabled = isAutoBackupEnabled(),
+                    ),
+                ),
+                Charsets.UTF_8,
+            )
+            addFileToZip(
+                zipOut,
+                webDavConnectionFile,
+                "monica_config/${webDavConnectionFile.name}",
+            )
+            webDavConnectionFile.delete()
+
+            val autofillBlockedFieldsFile = File(monicaConfigDir, "autofill_blocked_fields.json")
+            autofillBlockedFieldsFile.writeText(
+                json.encodeToString(
+                    AutofillBlockedFieldsBackupEntry.serializer(),
+                    AutofillBlockedFieldsBackupEntry(blockedFieldSignatures),
+                ),
+                Charsets.UTF_8,
+            )
+            addFileToZip(
+                zipOut,
+                autofillBlockedFieldsFile,
+                "monica_config/${autofillBlockedFieldsFile.name}",
+            )
+            autofillBlockedFieldsFile.delete()
+
+            val autofillSaveBlockedTargetsFile = File(monicaConfigDir, "autofill_save_blocked_targets.json")
+            autofillSaveBlockedTargetsFile.writeText(
+                json.encodeToString(
+                    AutofillSaveBlockedTargetsBackupEntry.serializer(),
+                    AutofillSaveBlockedTargetsBackupEntry(saveBlockedTargets),
+                ),
+                Charsets.UTF_8,
+            )
+            addFileToZip(
+                zipOut,
+                autofillSaveBlockedTargetsFile,
+                "monica_config/${autofillSaveBlockedTargetsFile.name}",
+            )
+            autofillSaveBlockedTargetsFile.delete()
+
+            val autofillBlacklistFile = File(monicaConfigDir, "autofill_blacklist.json")
+            autofillBlacklistFile.writeText(
+                json.encodeToString(
+                    AutofillBlacklistBackupEntry.serializer(),
+                    AutofillBlacklistBackupEntry(
+                        enabled = autofillBlacklistEnabled,
+                        packages = autofillBlacklistPackages,
+                    ),
+                ),
+                Charsets.UTF_8,
+            )
+            addFileToZip(
+                zipOut,
+                autofillBlacklistFile,
+                "monica_config/${autofillBlacklistFile.name}",
+            )
+            autofillBlacklistFile.delete()
+            if (bitwardenVaultBackups.isNotEmpty()) {
+                val bitwardenVaultsFile = File(monicaConfigDir, "bitwarden_vaults.json")
+                bitwardenVaultsFile.writeText(
+                    json.encodeToString(
+                        BitwardenVaultsBackupEntry.serializer(),
+                        BitwardenVaultsBackupEntry(bitwardenVaultBackups),
+                    ),
+                    Charsets.UTF_8,
+                )
+                addFileToZip(
+                    zipOut,
+                    bitwardenVaultsFile,
+                    "monica_config/${bitwardenVaultsFile.name}",
+                )
+                bitwardenVaultsFile.delete()
+            }
+            android.util.Log.d(
+                "WebDavHelper",
+                "Backup connection config (server: $serverUrl, blockedFields=${blockedFieldSignatures.size}, saveBlockedTargets=${saveBlockedTargets.size}, blacklistPackages=${autofillBlacklistPackages.size}, bitwardenVaults=${bitwardenVaultBackups.size})",
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("WebDavHelper", "Failed to backup connection config: ${e.message}")
+            warnings.add("Monica连接配置备份失败: ${e.message}")
+        }
     }
 
     private fun isLocalSecureItem(item: SecureItem): Boolean {
@@ -1911,319 +2248,20 @@ class WebDavHelper(
                         warnings.add("常用账号信息备份失败: ${e.message}")
                     }
                     
-                    // 7.8 ✅ 备份 Monica 配置（分文件存放）
+                    // 7.8 ✅ 便携应用设置始终随正常备份保存；连接凭据仍需用户明确选择。
+                    writePortableAppSettingsBackup(
+                        zipOut = zipOut,
+                        cacheBackupDir = cacheBackupDir,
+                        backupEncryptPassword = backupEncryptPassword,
+                        warnings = warnings,
+                    )
                     if (preferences.includeWebDavConfig && isConfigured()) {
-                        try {
-                            val autofillPreferences = AutofillPreferences(context)
-                            val blockedFieldSignatures = autofillPreferences.blockedFieldSignatureRecords.first()
-                                .map { record ->
-                                    AutofillBlockedFieldBackupEntry(
-                                        signatureKey = record.signatureKey,
-                                        packageName = record.packageName,
-                                        webDomain = record.webDomain,
-                                        hints = record.hints,
-                                        blockedAt = record.blockedAt,
-                                    )
-                                }
-                            val saveBlockedTargets = autofillPreferences.saveBlockedTargetRecords.first()
-                                .map { it.key }
-                                .distinct()
-                            val autofillBlacklistEnabled = autofillPreferences.isBlacklistEnabled.first()
-                            val autofillBlacklistPackages = autofillPreferences.blacklistPackages.first()
-                                .mapNotNull { it.trim().takeIf { packageName -> packageName.isNotBlank() } }
-                                .distinct()
-                                .sorted()
-                            val bitwardenVaults = PasswordDatabase.getDatabase(context)
-                                .bitwardenVaultDao()
-                                .getAllVaults()
-                            val pageAdjustmentSettingsSnapshot = SettingsManager(context)
-                                .exportPageAdjustmentSettings()
-
-                            val canExportSensitiveConfig = backupEncryptPassword != null
-                            if (!canExportSensitiveConfig) {
-                                warnings.add("未启用备份加密，已跳过 WebDAV 连接凭证和 Bitwarden Vault 密钥材料")
-                            }
-
-                            val encryptedWebDavPassword = backupEncryptPassword?.let {
-                                EncryptionHelper.encryptString(password, it)
-                            } ?: ""
-                            val encryptedEncPassword = if (
-                                backupEncryptPassword != null &&
-                                this@WebDavHelper.enableEncryption &&
-                                this@WebDavHelper.encryptionPassword.isNotEmpty()
-                            ) {
-                                EncryptionHelper.encryptString(this@WebDavHelper.encryptionPassword, backupEncryptPassword)
-                            } else {
-                                ""
-                            }
-                            val bitwardenVaultBackups = bitwardenVaults.map { vault: takagi.ru.monica.data.bitwarden.BitwardenVault ->
-                                BitwardenVaultBackupEntry(
-                                    id = vault.id,
-                                    email = vault.email,
-                                    userId = vault.userId,
-                                    displayName = vault.displayName,
-                                    serverUrl = vault.serverUrl,
-                                    identityUrl = vault.identityUrl,
-                                    apiUrl = vault.apiUrl,
-                                    eventsUrl = vault.eventsUrl,
-                                    encryptedAccessToken = encryptSensitiveBackupValue(vault.encryptedAccessToken, backupEncryptPassword),
-                                    encryptedRefreshToken = encryptSensitiveBackupValue(vault.encryptedRefreshToken, backupEncryptPassword),
-                                    accessTokenExpiresAt = vault.accessTokenExpiresAt,
-                                    encryptedMasterKey = encryptSensitiveBackupValue(vault.encryptedMasterKey, backupEncryptPassword),
-                                    encryptedEncKey = encryptSensitiveBackupValue(vault.encryptedEncKey, backupEncryptPassword),
-                                    encryptedMacKey = encryptSensitiveBackupValue(vault.encryptedMacKey, backupEncryptPassword),
-                                    kdfType = vault.kdfType,
-                                    kdfIterations = vault.kdfIterations,
-                                    kdfMemory = vault.kdfMemory,
-                                    kdfParallelism = vault.kdfParallelism,
-                                    lastSyncAt = vault.lastSyncAt,
-                                    lastFullSyncAt = vault.lastFullSyncAt,
-                                    revisionDate = vault.revisionDate,
-                                    isDefault = vault.isDefault,
-                                    isConnected = vault.isConnected,
-                                    syncEnabled = vault.syncEnabled,
-                                    createdAt = vault.createdAt,
-                                    updatedAt = vault.updatedAt,
-                                )
-                            }
-
-                            val webDavConnectionBackup = WebDavConnectionBackupEntry(
-                                serverUrl = serverUrl,
-                                username = username,
-                                encryptedPassword = encryptedWebDavPassword,
-                                enableEncryption = this@WebDavHelper.enableEncryption,
-                                encryptedEncryptionPassword = encryptedEncPassword,
-                                autoBackupEnabled = isAutoBackupEnabled(),
-                            )
-                            val autofillBlockedFieldsBackup = AutofillBlockedFieldsBackupEntry(
-                                blockedFieldSignatures = blockedFieldSignatures,
-                            )
-                            val autofillSaveBlockedTargetsBackup = AutofillSaveBlockedTargetsBackupEntry(
-                                blockedTargets = saveBlockedTargets,
-                            )
-                            val autofillBlacklistBackup = AutofillBlacklistBackupEntry(
-                                enabled = autofillBlacklistEnabled,
-                                packages = autofillBlacklistPackages,
-                            )
-                            val bitwardenVaultsBackup = BitwardenVaultsBackupEntry(
-                                vaults = bitwardenVaultBackups,
-                            )
-                            val pageAdjustmentSettingsBackup = PageAdjustmentSettingsBackupEntry(
-                                passwordListQuickFiltersEnabled = pageAdjustmentSettingsSnapshot.passwordListQuickFiltersEnabled,
-                                passwordListQuickFilterItems = pageAdjustmentSettingsSnapshot.passwordListQuickFilterItems,
-                                passwordListCategoryQuickFiltersEnabled =
-                                    pageAdjustmentSettingsSnapshot.passwordListCategoryQuickFiltersEnabled,
-                                passwordListQuickFoldersEnabled = pageAdjustmentSettingsSnapshot.passwordListQuickFoldersEnabled,
-                                passwordListQuickFolderStyle = pageAdjustmentSettingsSnapshot.passwordListQuickFolderStyle,
-                                passwordListQuickFolderPathBannerEnabled =
-                                    pageAdjustmentSettingsSnapshot.passwordListQuickFolderPathBannerEnabled,
-                                passwordListSystemBackToParentFolderEnabled =
-                                    pageAdjustmentSettingsSnapshot.passwordListSystemBackToParentFolderEnabled,
-                                addButtonBehaviorMode = pageAdjustmentSettingsSnapshot.addButtonBehaviorMode,
-                                addButtonMenuOrder = pageAdjustmentSettingsSnapshot.addButtonMenuOrder,
-                                addButtonMenuEnabledActions =
-                                    pageAdjustmentSettingsSnapshot.addButtonMenuEnabledActions,
-                                passwordPageAggregateEnabled =
-                                    pageAdjustmentSettingsSnapshot.passwordPageAggregateEnabled,
-                                passwordPageVisibleContentTypes =
-                                    pageAdjustmentSettingsSnapshot.passwordPageVisibleContentTypes,
-                                categorySelectionUiMode =
-                                    pageAdjustmentSettingsSnapshot.categorySelectionUiMode,
-                                colorSettingsVersion =
-                                    pageAdjustmentSettingsSnapshot.colorSettingsVersion,
-                                oledPureBlackEnabled =
-                                    pageAdjustmentSettingsSnapshot.oledPureBlackEnabled,
-                                colorScheme = pageAdjustmentSettingsSnapshot.colorScheme,
-                                customPrimaryColor =
-                                    pageAdjustmentSettingsSnapshot.customPrimaryColor,
-                                customSecondaryColor =
-                                    pageAdjustmentSettingsSnapshot.customSecondaryColor,
-                                customTertiaryColor =
-                                    pageAdjustmentSettingsSnapshot.customTertiaryColor,
-                                customNeutralColor =
-                                    pageAdjustmentSettingsSnapshot.customNeutralColor,
-                                customNeutralVariantColor =
-                                    pageAdjustmentSettingsSnapshot.customNeutralVariantColor,
-                                bottomNavSettingsVersion =
-                                    pageAdjustmentSettingsSnapshot.bottomNavSettingsVersion,
-                                bottomNavOrder = pageAdjustmentSettingsSnapshot.bottomNavOrder,
-                                bottomNavVisibilityVaultV2 =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilityVaultV2,
-                                bottomNavVisibilityPasswords =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilityPasswords,
-                                bottomNavVisibilityAuthenticator =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilityAuthenticator,
-                                bottomNavVisibilityCardWallet =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilityCardWallet,
-                                bottomNavVisibilityGenerator =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilityGenerator,
-                                bottomNavVisibilityNotes =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilityNotes,
-                                bottomNavVisibilitySend =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilitySend,
-                                bottomNavVisibilityPasskey =
-                                    pageAdjustmentSettingsSnapshot.bottomNavVisibilityPasskey,
-                                useDraggableBottomNav =
-                                    pageAdjustmentSettingsSnapshot.useDraggableBottomNav,
-                                autoHideBottomNavWhenSingleTab =
-                                    pageAdjustmentSettingsSnapshot.autoHideBottomNavWhenSingleTab,
-                                passwordListQuickAccessEnabled = pageAdjustmentSettingsSnapshot.passwordListQuickAccessEnabled,
-                                passwordListTopModulesOrder = pageAdjustmentSettingsSnapshot.passwordListTopModulesOrder,
-                                passwordCardDisplayMode = pageAdjustmentSettingsSnapshot.passwordCardDisplayMode,
-                                passwordCardDisplayFields = pageAdjustmentSettingsSnapshot.passwordCardDisplayFields,
-                                passwordCardShowAuthenticator = pageAdjustmentSettingsSnapshot.passwordCardShowAuthenticator,
-                                passwordCardHideOtherContentWhenAuthenticator =
-                                    pageAdjustmentSettingsSnapshot.passwordCardHideOtherContentWhenAuthenticator,
-                                stackCardMode = pageAdjustmentSettingsSnapshot.stackCardMode,
-                                passwordGroupMode = pageAdjustmentSettingsSnapshot.passwordGroupMode,
-                                passwordWebsiteStackMatchMode =
-                                    pageAdjustmentSettingsSnapshot.passwordWebsiteStackMatchMode,
-                                authenticatorCardDisplayFields =
-                                    pageAdjustmentSettingsSnapshot.authenticatorCardDisplayFields,
-                                authenticatorCardHideCodeByDefault =
-                                    pageAdjustmentSettingsSnapshot.authenticatorCardHideCodeByDefault,
-                                validatorProgressBarStyle =
-                                    pageAdjustmentSettingsSnapshot.validatorProgressBarStyle,
-                                validatorUnifiedProgressBar =
-                                    pageAdjustmentSettingsSnapshot.validatorUnifiedProgressBar,
-                                validatorSmoothProgress =
-                                    pageAdjustmentSettingsSnapshot.validatorSmoothProgress,
-                                validatorVibrationEnabled =
-                                    pageAdjustmentSettingsSnapshot.validatorVibrationEnabled,
-                                copyNextCodeWhenExpiring =
-                                    pageAdjustmentSettingsSnapshot.copyNextCodeWhenExpiring,
-                                securityAnalysisAutoEnabled =
-                                    pageAdjustmentSettingsSnapshot.securityAnalysisAutoEnabled,
-                                passwordDetailSecurityAnalysisEnabled =
-                                    pageAdjustmentSettingsSnapshot.passwordDetailSecurityAnalysisEnabled,
-                                autofillAuthRequired =
-                                    pageAdjustmentSettingsSnapshot.autofillAuthRequired,
-                                iconCardsEnabled = pageAdjustmentSettingsSnapshot.iconCardsEnabled,
-                                appLauncherIcon = pageAdjustmentSettingsSnapshot.appLauncherIcon,
-                                appLauncherLabel = pageAdjustmentSettingsSnapshot.appLauncherLabel,
-                                passwordPageIconEnabled = pageAdjustmentSettingsSnapshot.passwordPageIconEnabled,
-                                authenticatorPageIconEnabled =
-                                    pageAdjustmentSettingsSnapshot.authenticatorPageIconEnabled,
-                                passkeyPageIconEnabled = pageAdjustmentSettingsSnapshot.passkeyPageIconEnabled,
-                                unmatchedIconHandlingStrategy =
-                                    pageAdjustmentSettingsSnapshot.unmatchedIconHandlingStrategy,
-                                passwordFieldSettingsVersion =
-                                    pageAdjustmentSettingsSnapshot.passwordFieldSettingsVersion,
-                                separateUsernameAccountEnabled =
-                                    pageAdjustmentSettingsSnapshot.separateUsernameAccountEnabled,
-                                presetCustomFieldsJson =
-                                    pageAdjustmentSettingsSnapshot.presetCustomFieldsJson,
-                                passwordFieldVisibility = PageAdjustmentPasswordFieldVisibilityBackupEntry(
-                                    securityVerification =
-                                        pageAdjustmentSettingsSnapshot.passwordFieldVisibility.securityVerification,
-                                    categoryAndNotes =
-                                        pageAdjustmentSettingsSnapshot.passwordFieldVisibility.categoryAndNotes,
-                                    appBinding =
-                                        pageAdjustmentSettingsSnapshot.passwordFieldVisibility.appBinding,
-                                    personalInfo =
-                                        pageAdjustmentSettingsSnapshot.passwordFieldVisibility.personalInfo,
-                                    addressInfo =
-                                        pageAdjustmentSettingsSnapshot.passwordFieldVisibility.addressInfo,
-                                    paymentInfo =
-                                        pageAdjustmentSettingsSnapshot.passwordFieldVisibility.paymentInfo,
-                                ),
-                            )
-
-                            val json = Json { prettyPrint = false }
-                            val monicaConfigDir = File(cacheBackupDir, "monica_config").apply { mkdirs() }
-                            val webDavConnectionFile = File(monicaConfigDir, "webdav_connection.json")
-                            webDavConnectionFile.writeText(
-                                json.encodeToString(WebDavConnectionBackupEntry.serializer(), webDavConnectionBackup),
-                                Charsets.UTF_8
-                            )
-                            addFileToZip(zipOut, webDavConnectionFile, "monica_config/${webDavConnectionFile.name}")
-                            webDavConnectionFile.delete()
-
-                            val autofillBlockedFieldsFile = File(monicaConfigDir, "autofill_blocked_fields.json")
-                            autofillBlockedFieldsFile.writeText(
-                                json.encodeToString(
-                                    AutofillBlockedFieldsBackupEntry.serializer(),
-                                    autofillBlockedFieldsBackup,
-                                ),
-                                Charsets.UTF_8
-                            )
-                            addFileToZip(
-                                zipOut,
-                                autofillBlockedFieldsFile,
-                                "monica_config/${autofillBlockedFieldsFile.name}"
-                            )
-                            autofillBlockedFieldsFile.delete()
-
-                            val autofillSaveBlockedTargetsFile =
-                                File(monicaConfigDir, "autofill_save_blocked_targets.json")
-                            autofillSaveBlockedTargetsFile.writeText(
-                                json.encodeToString(
-                                    AutofillSaveBlockedTargetsBackupEntry.serializer(),
-                                    autofillSaveBlockedTargetsBackup,
-                                ),
-                                Charsets.UTF_8
-                            )
-                            addFileToZip(
-                                zipOut,
-                                autofillSaveBlockedTargetsFile,
-                                "monica_config/${autofillSaveBlockedTargetsFile.name}"
-                            )
-                            autofillSaveBlockedTargetsFile.delete()
-
-                            val autofillBlacklistFile = File(monicaConfigDir, "autofill_blacklist.json")
-                            autofillBlacklistFile.writeText(
-                                json.encodeToString(
-                                    AutofillBlacklistBackupEntry.serializer(),
-                                    autofillBlacklistBackup,
-                                ),
-                                Charsets.UTF_8
-                            )
-                            addFileToZip(
-                                zipOut,
-                                autofillBlacklistFile,
-                                "monica_config/${autofillBlacklistFile.name}"
-                            )
-                            autofillBlacklistFile.delete()
-
-                            if (bitwardenVaultBackups.isNotEmpty()) {
-                                val bitwardenVaultsFile = File(monicaConfigDir, "bitwarden_vaults.json")
-                                bitwardenVaultsFile.writeText(
-                                    json.encodeToString(
-                                        BitwardenVaultsBackupEntry.serializer(),
-                                        bitwardenVaultsBackup,
-                                    ),
-                                    Charsets.UTF_8
-                                )
-                                addFileToZip(
-                                    zipOut,
-                                    bitwardenVaultsFile,
-                                    "monica_config/${bitwardenVaultsFile.name}"
-                                )
-                                bitwardenVaultsFile.delete()
-                            }
-                            val pageAdjustmentSettingsFile =
-                                File(monicaConfigDir, "page_adjustment_settings.json")
-                            pageAdjustmentSettingsFile.writeText(
-                                json.encodeToString(
-                                    PageAdjustmentSettingsBackupEntry.serializer(),
-                                    pageAdjustmentSettingsBackup,
-                                ),
-                                Charsets.UTF_8
-                            )
-                            addFileToZip(
-                                zipOut,
-                                pageAdjustmentSettingsFile,
-                                "monica_config/${pageAdjustmentSettingsFile.name}"
-                            )
-                            pageAdjustmentSettingsFile.delete()
-                            android.util.Log.d(
-                                "WebDavHelper",
-                                "Backup Monica config files (server: $serverUrl, blockedFields=${blockedFieldSignatures.size}, saveBlockedTargets=${saveBlockedTargets.size}, blacklistPackages=${autofillBlacklistPackages.size}, bitwardenVaults=${bitwardenVaultBackups.size}, pageAdjustmentSettings=true)"
-                            )
-                        } catch (e: Exception) {
-                            android.util.Log.w("WebDavHelper", "Failed to backup Monica config: ${e.message}")
-                            warnings.add("Monica配置备份失败: ${e.message}")
-                        }
+                        writeConnectionConfigBackup(
+                            zipOut = zipOut,
+                            cacheBackupDir = cacheBackupDir,
+                            backupEncryptPassword = backupEncryptPassword,
+                            warnings = warnings,
+                        )
                     }
                     
                     // KeePass WebDAV 已下线，不再备份 keepass_webdav_config.json。
@@ -3609,6 +3647,8 @@ class WebDavHelper(
                                                     pageAdjustmentBackup.bottomNavVisibilitySend,
                                                 bottomNavVisibilityPasskey =
                                                     pageAdjustmentBackup.bottomNavVisibilityPasskey,
+                                                bottomNavVisibilitySteam =
+                                                    pageAdjustmentBackup.bottomNavVisibilitySteam,
                                                 useDraggableBottomNav =
                                                     pageAdjustmentBackup.useDraggableBottomNav,
                                                 autoHideBottomNavWhenSingleTab =
@@ -3647,6 +3687,8 @@ class WebDavHelper(
                                                     pageAdjustmentBackup.securityAnalysisAutoEnabled,
                                                 passwordDetailSecurityAnalysisEnabled =
                                                     pageAdjustmentBackup.passwordDetailSecurityAnalysisEnabled,
+                                                steamMiniProfileBackgroundEnabled =
+                                                    pageAdjustmentBackup.steamMiniProfileBackgroundEnabled,
                                                 autofillAuthRequired =
                                                     pageAdjustmentBackup.autofillAuthRequired,
                                                 iconCardsEnabled = pageAdjustmentBackup.iconCardsEnabled,
@@ -3687,6 +3729,36 @@ class WebDavHelper(
                                     } catch (e: Exception) {
                                         android.util.Log.w("WebDavHelper", "Failed to restore page adjustment settings: ${e.message}")
                                         warnings.add("页面调整自定义恢复失败: ${e.message}")
+                                    }
+                                }
+                                normalizedEntryName == "monica_config/security_questions.json" -> {
+                                    try {
+                                        val securityQuestionsBackup = Json { ignoreUnknownKeys = true }
+                                            .decodeFromString<SecurityQuestionsBackupEntry>(
+                                                tempFile.readText(Charsets.UTF_8)
+                                            )
+                                        val restored = SecurityManager(context)
+                                            .restoreSecurityQuestionsFromBackup(
+                                                SecurityQuestionsBackupSnapshot(
+                                                    question1Id = securityQuestionsBackup.question1Id,
+                                                    question1Text = securityQuestionsBackup.question1Text,
+                                                    answer1Hash = securityQuestionsBackup.answer1Hash,
+                                                    question2Id = securityQuestionsBackup.question2Id,
+                                                    question2Text = securityQuestionsBackup.question2Text,
+                                                    answer2Hash = securityQuestionsBackup.answer2Hash,
+                                                )
+                                            )
+                                        if (restored) {
+                                            warnings.add("✓ 密保问题已恢复")
+                                        } else {
+                                            warnings.add("密保问题备份格式无效，已跳过恢复")
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.w(
+                                            "WebDavHelper",
+                                            "Failed to restore security questions: ${e.message}"
+                                        )
+                                        warnings.add("密保问题恢复失败: ${e.message}")
                                     }
                                 }
                                 // ✅ 恢复 Monica 旧版聚合配置（兼容 monica_config.json）

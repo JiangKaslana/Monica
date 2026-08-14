@@ -310,6 +310,17 @@ object PasswordCustomIconStore {
         return runCatching { file.delete() }.getOrDefault(false)
     }
 
+    suspend fun duplicateIconFile(context: Context, value: String?): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val source = resolveIconFile(context, value)
+                ?: throw IllegalStateException("Icon source is unavailable")
+            val extension = source.extension.takeIf { it.isNotBlank() } ?: "png"
+            val fileName = "icon_${System.currentTimeMillis()}_${Random.nextInt(1000, 9999)}.$extension"
+            source.copyTo(File(getIconDir(context), fileName), overwrite = false)
+            fileName
+        }
+    }
+
     suspend fun importAndCompress(context: Context, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val decoded = decodeBitmapCompat(context, uri)

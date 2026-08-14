@@ -3538,4 +3538,6 @@ Làm mới hoặc đồng bộ hóa cơ sở dữ liệu KeePass này, sau đó 
     <string name="extensions_steam_settings">Steam</string>
     <string name="steam_mini_profile_background_title">Nền hồ sơ thu nhỏ</string>
     <string name="steam_mini_profile_background_description">Hiển thị nền hồ sơ thu nhỏ Steam trên thẻ mã và chi tiết tài khoản. Nền động chỉ phát khi hiển thị; bộ nhớ đệm tối đa 64 MB.</string>
+    <string name="add_credential">Thêm thông tin đăng nhập</string>
+    <string name="credential_number">Thông tin đăng nhập %1$d</string>
 </resources>
