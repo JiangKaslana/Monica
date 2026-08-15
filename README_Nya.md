@@ -201,6 +201,12 @@ Monica 的设计、兼容性适配与部分功能方向，受到了这些优秀�
 
 ---
 
+## 社区和支持喵
+
+- Telegram 群组喵：[加入 Monica 社区](https://t.me/+IZUDLL-vWOA1Y2U1)
+
+---
+
 ## 许可证喵
 
 Copyright (c) 2025 JoyinJoester

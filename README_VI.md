@@ -189,6 +189,12 @@ Thiet ke, kha nang tuong thich va mot so dinh huong tinh nang cua Monica da nhan
 
 ---
 
+## Cong Dong Va Ho Tro
+
+- Nhom Telegram: [Tham gia cong dong Monica](https://t.me/+IZUDLL-vWOA1Y2U1)
+
+---
+
 ## Giay Phep
 
 Copyright (c) 2025 JoyinJoester

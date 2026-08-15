@@ -189,6 +189,12 @@ Monica の設計、互換性対応、そして一部の機能方針は、以下�
 
 ---
 
+## コミュニティとサポート
+
+- Telegram グループ: [Monica コミュニティに参加](https://t.me/+IZUDLL-vWOA1Y2U1)
+
+---
+
 ## ライセンス
 
 Copyright (c) 2025 JoyinJoester

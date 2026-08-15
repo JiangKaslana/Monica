@@ -189,6 +189,12 @@ Monica's design, compatibility work, and several feature directions have been in
 
 ---
 
+## Community and support
+
+- Telegram group: [Join the Monica community](https://t.me/+IZUDLL-vWOA1Y2U1)
+
+---
+
 ## License
 
 Copyright (c) 2025 JoyinJoester

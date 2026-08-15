@@ -189,6 +189,12 @@ Android:
 
 ---
 
+## Сообщество и поддержка
+
+- Группа Telegram: [войти в сообщество Monica](https://t.me/+IZUDLL-vWOA1Y2U1)
+
+---
+
 ## Лицензия
 
 Copyright (c) 2025 JoyinJoester
