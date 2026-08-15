@@ -1,0 +1,30 @@
+name: Send APK to Telegram
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  send-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download arm64 APK
+        uses: robinraju/release-downloader@v1.11
+        with:
+          repository: ${{ github.repository }}
+          tag: ${{ github.ref_name }}
+          fileName: "*arm64*.apk"
+          out-file-path: "assets"
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Send APK to Telegram
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🚀 新版本 ${{ github.ref_name }} 已发布！
+            架构：arm64
+            仓库：${{ github.repository }}
+            下载页面：${{ github.event.release.html_url }}
+          document: assets/*.apk
