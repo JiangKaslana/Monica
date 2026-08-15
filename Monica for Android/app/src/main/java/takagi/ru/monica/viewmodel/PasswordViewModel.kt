@@ -1,7 +1,9 @@
 package takagi.ru.monica.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import takagi.ru.monica.bitwarden.BitwardenMutationStateHelper
@@ -26,6 +28,9 @@ import takagi.ru.monica.data.Category
 import takagi.ru.monica.data.CustomField
 import takagi.ru.monica.data.CustomFieldDraft
 import takagi.ru.monica.data.LocalKeePassDatabaseDao
+import takagi.ru.monica.data.KeePassStorageLocation
+import takagi.ru.monica.data.resolvedActiveFilePath
+import takagi.ru.monica.data.resolvedActiveStorageLocation
 import takagi.ru.monica.data.PasswordOwnership
 import takagi.ru.monica.data.PasswordArchiveSyncMeta
 import takagi.ru.monica.data.PasswordEntry
@@ -53,6 +58,8 @@ import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.utils.KeePassCustomFieldData
 import takagi.ru.monica.utils.KeePassEntryData
 import takagi.ru.monica.utils.KeePassKdbxService
+import takagi.ru.monica.utils.KeePassUriPermissionState
+import takagi.ru.monica.utils.keePassUriPermissionState
 import takagi.ru.monica.utils.KeePassSecureItemData
 import takagi.ru.monica.utils.buildKeePassPathKey
 import takagi.ru.monica.data.model.StorageTarget
@@ -181,6 +188,11 @@ data class PasswordCredentialDraft(
     val customFields: List<CustomFieldDraft> = emptyList()
 )
 
+data class KeePassPermissionRepairRequest(
+    val databaseId: Long,
+    val entry: PasswordEntry
+)
+
 data class SavedPasswordCredential(
     val credentialIndex: Int,
     val firstPasswordId: Long,
@@ -275,6 +287,19 @@ class PasswordViewModel(
 ) : ViewModel() {
     private val decryptLock = Any()
     private val appContext: Context? = context?.applicationContext
+    private val _keepassPermissionRepairRequests = MutableSharedFlow<KeePassPermissionRepairRequest>(extraBufferCapacity = 1)
+    val keepassPermissionRepairRequests: SharedFlow<KeePassPermissionRepairRequest> =
+        _keepassPermissionRepairRequests.asSharedFlow()
+
+    private fun showKeePassWritePermissionError() {
+        appContext?.let { app ->
+            Toast.makeText(
+                app,
+                app.getString(takagi.ru.monica.R.string.keepass_write_permission_delete_error),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
     private val bitwardenSnapshotPreviewParser = BitwardenSyncSnapshotPreviewParser()
 
     companion object {
@@ -3153,6 +3178,16 @@ class PasswordViewModel(
                 )
                 return@launch
             }
+
+            if (keepassId != null && !canWriteKeePassDatabase(keepassId)) {
+                _keepassPermissionRepairRequests.tryEmit(
+                    KeePassPermissionRepairRequest(databaseId = keepassId, entry = entry)
+                )
+                if (_keepassPermissionRepairRequests.subscriptionCount.value == 0) {
+                    showKeePassWritePermissionError()
+                }
+                return@launch
+            }
               
             if (trashEnabled) {
                 moveEntryToTrash(
@@ -3245,6 +3280,7 @@ class PasswordViewModel(
                             useRecycleBin = trashEnabled
                         )
                         if (!remoteDeleted) {
+                            showKeePassWritePermissionError()
                             Log.e(
                                 "PasswordViewModel",
                                 "KeePass batch delete failed: trash=$trashEnabled, ids=${chunkEntries.map { it.id }}"
@@ -3401,6 +3437,7 @@ class PasswordViewModel(
             }
 
             Log.e("PasswordViewModel", "KeePass trash delete failed, reverting local trash state: id=${entry.id}")
+            showKeePassWritePermissionError()
             repository.updatePasswordEntry(
                 passwordCommandStateFactory.createTrashRevertedEntry(
                     entry = entry,
@@ -3411,7 +3448,10 @@ class PasswordViewModel(
     }
 
     private suspend fun permanentlyDeleteEntry(entry: PasswordEntry) {
-        if (!keepassPasswordDeleteExecutor.delete(entry, useRecycleBin = false)) return
+        if (!keepassPasswordDeleteExecutor.delete(entry, useRecycleBin = false)) {
+            showKeePassWritePermissionError()
+            return
+        }
 
         permanentlyDeleteEntryLocalOnly(entry)
     }
@@ -4775,14 +4815,20 @@ class PasswordViewModel(
         return targets.all { target ->
             val keepassTarget = target as? StorageTarget.KeePass ?: return@all true
             val database = dao.getDatabaseById(keepassTarget.databaseId) ?: return@all false
-            database.writeOperationAvailability().canOperate
+            database.canWriteExternally() && database.writeOperationAvailability().canOperate
         }
     }
 
     private suspend fun canWriteKeePassDatabase(databaseId: Long): Boolean {
         val dao = localKeePassDatabaseDao ?: return true
         val database = dao.getDatabaseById(databaseId) ?: return false
-        return database.writeOperationAvailability().canOperate
+        return database.canWriteExternally() && database.writeOperationAvailability().canOperate
+    }
+
+    private fun takagi.ru.monica.data.LocalKeePassDatabase.canWriteExternally(): Boolean {
+        if (resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) return true
+        val resolver = appContext?.contentResolver ?: return false
+        return resolver.keePassUriPermissionState(Uri.parse(resolvedActiveFilePath())) == KeePassUriPermissionState.READ_WRITE
     }
 
     private suspend fun saveGroupedPasswordsInternal(

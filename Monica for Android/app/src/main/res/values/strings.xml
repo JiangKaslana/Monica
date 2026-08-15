@@ -4256,4 +4256,14 @@
     <string name="mdbx_snapshot_create_full_anyway">Create full snapshot</string>
     <string name="add_credential">Add credential</string>
     <string name="credential_number">Credential %1$d</string>
+    <string name="keepass_file_permission_title">File access</string>
+    <string name="keepass_permission_read_write">Read and write access granted</string>
+    <string name="keepass_permission_read_only">Read-only access; changes cannot be saved</string>
+    <string name="keepass_permission_missing">File access is missing</string>
+    <string name="keepass_file_permission_repair_hint">Re-select this KDBX file to restore read and write access. The database will be verified before the link is updated.</string>
+    <string name="keepass_file_permission_repair">Restore access</string>
+    <string name="keepass_write_permission_delete_error">This KDBX file is missing write permission. Open database settings, restore access, then try deleting again.</string>
+    <string name="keepass_permission_repair_success">KDBX read and write access restored</string>
+    <string name="keepass_permission_repair_dialog_title">Write access required</string>
+    <string name="keepass_permission_repair_dialog_message">This KDBX file cannot save the deletion because Monica does not have write access. Re-select the original KDBX file to restore access and continue.</string>
 </resources>

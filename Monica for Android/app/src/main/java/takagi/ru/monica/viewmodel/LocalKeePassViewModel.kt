@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -38,6 +39,8 @@ import takagi.ru.monica.data.isRemoteSource
 import takagi.ru.monica.data.toSourceType
 import takagi.ru.monica.data.LocalKeePassDatabase
 import takagi.ru.monica.data.LocalKeePassDatabaseDao
+import takagi.ru.monica.data.resolvedActiveFilePath
+import takagi.ru.monica.data.resolvedActiveStorageLocation
 import takagi.ru.monica.data.OperationLogItemType
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.PasswordEntry
@@ -67,6 +70,8 @@ import takagi.ru.monica.utils.KeePassOperationException
 import takagi.ru.monica.utils.KeePassGroupInfo
 import takagi.ru.monica.utils.KeePassKdbxService
 import takagi.ru.monica.utils.KeePassFileNameResolver
+import takagi.ru.monica.utils.KeePassUriPermissionState
+import takagi.ru.monica.utils.keePassUriPermissionState
 import takagi.ru.monica.utils.OneDriveKeePassFileSource
 import takagi.ru.monica.utils.OneDriveKeePassSupport
 import takagi.ru.monica.utils.OperationLogger
@@ -141,6 +146,8 @@ class LocalKeePassViewModel(
     private val compatibilityBridge = KeePassCompatibilityBridge(workspaceRepository)
     private val verificationMutex = Mutex()
     private val verificationJobs = mutableMapOf<Long, Job>()
+    private val _uriPermissionStates = MutableStateFlow<Map<Long, KeePassUriPermissionState>>(emptyMap())
+    val uriPermissionStates: StateFlow<Map<Long, KeePassUriPermissionState>> = _uriPermissionStates.asStateFlow()
     private val appDatabase by lazy { PasswordDatabase.getDatabase(context) }
     private val remoteSyncService by lazy {
         RemoteKeePassSyncService(
@@ -300,6 +307,76 @@ class LocalKeePassViewModel(
             verificationJobs[databaseId] = job
         }
         job.start()
+    }
+
+    fun uriPermissionState(database: LocalKeePassDatabase): KeePassUriPermissionState {
+        if (database.resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) {
+            return KeePassUriPermissionState.READ_WRITE
+        }
+        return runCatching {
+            context.contentResolver.keePassUriPermissionState(Uri.parse(database.resolvedActiveFilePath()))
+        }.getOrDefault(KeePassUriPermissionState.MISSING)
+    }
+
+    fun refreshUriPermissionState(databaseId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val database = dao.getDatabaseById(databaseId) ?: return@launch
+            val state = uriPermissionState(database)
+            _uriPermissionStates.update { current -> current + (databaseId to state) }
+        }
+    }
+
+    /** Re-select and validate an external KDBX, restoring its persistent read/write grant. */
+    fun reauthorizeExternalDatabase(databaseId: Long, uri: Uri, onSuccess: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            _operationState.value = OperationState.Loading("正在检查数据库权限...")
+            try {
+                withContext(Dispatchers.IO) {
+                    val database = dao.getDatabaseById(databaseId)
+                        ?: throw IllegalArgumentException("数据库不存在")
+                    if (database.resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) {
+                        throw IllegalArgumentException("内部数据库不需要文件授权")
+                    }
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                    if (context.contentResolver.keePassUriPermissionState(uri) != KeePassUriPermissionState.READ_WRITE) {
+                        throw SecurityException("当前文件提供方未授予写权限")
+                    }
+                    val password = database.encryptedPassword?.let { securityManager.decryptData(it) } ?: ""
+                    workspaceRepository.inspectExternalDatabase(
+                        fileUri = uri,
+                        password = password,
+                        keyFileUri = database.keyFileUri?.let(Uri::parse)
+                    ).getOrThrow()
+                    dao.updateDatabase(
+                        database.copy(
+                            filePath = uri.toString(),
+                            storageLocation = KeePassStorageLocation.EXTERNAL,
+                            sourceType = KeePassDatabaseSourceType.LOCAL_DOCUMENT_URI,
+                            workingCopyPath = null,
+                            cacheCopyPath = null,
+                            isOfflineAvailable = false,
+                            lastAccessedAt = System.currentTimeMillis()
+                        )
+                    )
+                    _uriPermissionStates.update { current ->
+                        current + (databaseId to KeePassUriPermissionState.READ_WRITE)
+                    }
+                }
+                _operationState.value = OperationState.Success("数据库权限已恢复")
+                Toast.makeText(
+                    context,
+                    context.getString(takagi.ru.monica.R.string.keepass_permission_repair_success),
+                    Toast.LENGTH_SHORT
+                ).show()
+                onSuccess?.invoke()
+            } catch (error: Throwable) {
+                _operationState.value = OperationState.Error("权限恢复失败: ${formatOperationError(error)}")
+                refreshUriPermissionState(databaseId)
+            }
+        }
     }
 
     fun reverifyDatabasePassword(databaseId: Long, password: String, keyFileUri: Uri? = null) {
@@ -747,10 +824,10 @@ class LocalKeePassViewModel(
                     runCatching {
                         context.contentResolver.takePersistableUriPermission(
                             uri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
                     }.onFailure { error ->
-                        Log.w(TAG, "Persistable READ permission not granted for imported DB", error)
+                        Log.w(TAG, "Persistable READ/WRITE permission not granted for imported DB", error)
                     }
                     
                     if (keyFileUri != null) {

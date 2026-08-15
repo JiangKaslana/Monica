@@ -1,7 +1,11 @@
 package takagi.ru.monica.ui
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,6 +42,15 @@ import takagi.ru.monica.ui.password.PasswordBatchDeleteGlobalProgressState
 import takagi.ru.monica.ui.password.PasswordBatchDeleteProgressTracker
 import takagi.ru.monica.utils.BiometricHelper
 import takagi.ru.monica.viewmodel.PasswordViewModel
+import takagi.ru.monica.viewmodel.LocalKeePassViewModel
+
+private class PasswordDeleteKeePassDocumentContract : ActivityResultContracts.OpenDocument() {
+    override fun createIntent(context: Context, input: Array<String>): Intent {
+        return super.createIntent(context, input).addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+    }
+}
 
 internal enum class ManualStackDialogMode(
     val titleRes: Int,
@@ -107,10 +120,63 @@ internal fun PasswordListDialogs(
     singleItemPasswordInput: String,
     onSingleItemPasswordInputChange: (String) -> Unit,
     showSingleItemPasswordVerify: Boolean,
-    onShowSingleItemPasswordVerifyChange: (Boolean) -> Unit
+    onShowSingleItemPasswordVerifyChange: (Boolean) -> Unit,
+    localKeePassViewModel: LocalKeePassViewModel? = null
 ) {
     var batchDeleteProcessed by remember { mutableStateOf(0) }
     var batchDeleteTotal by remember { mutableStateOf(0) }
+    var pendingPermissionRepair by remember { mutableStateOf<takagi.ru.monica.viewmodel.KeePassPermissionRepairRequest?>(null) }
+    var showPermissionRepairDialog by remember { mutableStateOf(false) }
+    val permissionRepairLauncher = rememberLauncherForActivityResult(
+        contract = PasswordDeleteKeePassDocumentContract()
+    ) { uri: Uri? ->
+        val request = pendingPermissionRepair
+        pendingPermissionRepair = null
+        if (uri != null && request != null && localKeePassViewModel != null) {
+            localKeePassViewModel.reauthorizeExternalDatabase(request.databaseId, uri) {
+                viewModel.deletePasswordEntry(
+                    request.entry
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel, localKeePassViewModel) {
+        if (localKeePassViewModel == null) return@LaunchedEffect
+        viewModel.keepassPermissionRepairRequests.collect { request ->
+            pendingPermissionRepair = request
+            showPermissionRepairDialog = true
+        }
+    }
+
+    if (showPermissionRepairDialog && pendingPermissionRepair != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showPermissionRepairDialog = false
+                pendingPermissionRepair = null
+            },
+            title = { Text(stringResource(R.string.keepass_permission_repair_dialog_title)) },
+            text = { Text(stringResource(R.string.keepass_permission_repair_dialog_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionRepairDialog = false
+                    permissionRepairLauncher.launch(
+                        arrayOf("application/x-keepass", "application/octet-stream", "*/*")
+                    )
+                }) {
+                    Text(stringResource(R.string.keepass_file_permission_repair))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPermissionRepairDialog = false
+                    pendingPermissionRepair = null
+                }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
 
     if (showManualStackConfirmDialog) {
         AlertDialog(

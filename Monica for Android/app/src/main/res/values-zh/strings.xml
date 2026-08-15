@@ -4099,4 +4099,14 @@
     <string name="inline_totp_edit_unavailable">当前项目无法在此处编辑</string>
     <string name="add_credential">添加凭据</string>
     <string name="credential_number">凭据 %1$d</string>
+    <string name="keepass_file_permission_title">文件访问权限</string>
+    <string name="keepass_permission_read_write">读写权限已授予</string>
+    <string name="keepass_permission_read_only">仅有读取权限，无法保存修改</string>
+    <string name="keepass_permission_missing">缺少文件访问权限</string>
+    <string name="keepass_file_permission_repair_hint">重新选择此 KDBX 文件即可恢复读写权限。更新关联前会先验证数据库内容。</string>
+    <string name="keepass_file_permission_repair">重新授权</string>
+    <string name="keepass_write_permission_delete_error">此 KDBX 文件缺少写入权限，请先在数据库设置中重新授权，再重试删除。</string>
+    <string name="keepass_permission_repair_success">KDBX 读写权限已恢复</string>
+    <string name="keepass_permission_repair_dialog_title">需要 KDBX 写入权限</string>
+    <string name="keepass_permission_repair_dialog_message">当前 KDBX 缺少写入权限，无法保存删除操作。重新选择原 KDBX 文件即可恢复权限并继续删除。</string>
 </resources>

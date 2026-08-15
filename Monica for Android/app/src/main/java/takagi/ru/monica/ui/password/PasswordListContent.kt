@@ -1974,7 +1974,8 @@ fun PasswordListContent(
         singleItemPasswordInput = singleItemPasswordInput,
         onSingleItemPasswordInputChange = { singleItemPasswordInput = it },
         showSingleItemPasswordVerify = showSingleItemPasswordVerify,
-        onShowSingleItemPasswordVerifyChange = { showSingleItemPasswordVerify = it }
+        onShowSingleItemPasswordVerifyChange = { showSingleItemPasswordVerify = it },
+        localKeePassViewModel = localKeePassViewModel
     )
 }
 

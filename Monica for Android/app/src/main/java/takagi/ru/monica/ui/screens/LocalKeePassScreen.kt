@@ -1,5 +1,7 @@
 package takagi.ru.monica.ui.screens
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -51,6 +53,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import takagi.ru.monica.ui.components.OutlinedTextField
 import takagi.ru.monica.utils.KeePassFileNameResolver
+import takagi.ru.monica.utils.KeePassUriPermissionState
+
+private class KeePassOpenDocumentContract : ActivityResultContracts.OpenDocument() {
+    override fun createIntent(context: Context, input: Array<String>): Intent {
+        return super.createIntent(context, input).addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+    }
+}
 
 private const val GOOGLE_DRIVE_ENTRY_ENABLED = false
 
@@ -71,6 +82,7 @@ fun LocalKeePassScreen(
     val remoteDatabases by viewModel.remoteDatabases.collectAsState()
     val operationState by viewModel.operationState.collectAsState()
     val verificationStates by viewModel.verificationStates.collectAsState()
+    val uriPermissionStates by viewModel.uriPermissionStates.collectAsState()
     
     // 对话框状态
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -83,14 +95,25 @@ fun LocalKeePassScreen(
     var databaseToExport by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var databaseToTransferExternal by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var selectedExternalUri by remember { mutableStateOf<Uri?>(null) }
+    var permissionRepairDatabaseId by remember { mutableStateOf<Long?>(null) }
     
     // 文件选择器
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = KeePassOpenDocumentContract()
     ) { uri: Uri? ->
         uri?.let {
             selectedExternalUri = it
             showImportDialog = true
+        }
+    }
+
+    val permissionRepairLauncher = rememberLauncherForActivityResult(
+        contract = KeePassOpenDocumentContract()
+    ) { uri: Uri? ->
+        val databaseId = permissionRepairDatabaseId
+        permissionRepairDatabaseId = null
+        if (uri != null && databaseId != null) {
+            viewModel.reauthorizeExternalDatabase(databaseId, uri)
         }
     }
 
@@ -365,6 +388,8 @@ fun LocalKeePassScreen(
         DatabaseDetailBottomSheet(
             database = selectedDatabase!!,
             verificationState = verificationStates[selectedDatabase!!.id] ?: LocalKeePassViewModel.VerificationState.Unknown,
+            permissionState = uriPermissionStates[selectedDatabase!!.id]
+                ?: viewModel.uriPermissionState(selectedDatabase!!),
             onDismiss = { 
                 showDatabaseDetailSheet = false
                 selectedDatabase = null
@@ -395,6 +420,10 @@ fun LocalKeePassScreen(
                     "${db.name}.kdbx"
                 }
                 exportToExternalLauncher.launch(exportFileName)
+            },
+            onRepairPermission = { db ->
+                permissionRepairDatabaseId = db.id
+                permissionRepairLauncher.launch(arrayOf("application/x-keepass", "application/octet-stream", "*/*"))
             }
         )
     }
@@ -1627,6 +1656,7 @@ private fun ImportExternalDatabaseDialog(
             KeePassFileNameResolver.queryDisplayName(context.contentResolver, uri)
         }
     }
+
     var name by remember(uri) {
         mutableStateOf(
             KeePassFileNameResolver.databaseNameFromCandidates(
@@ -1867,6 +1897,7 @@ private fun StorageLocationOption(
 private fun DatabaseDetailBottomSheet(
     database: LocalKeePassDatabase,
     verificationState: LocalKeePassViewModel.VerificationState,
+    permissionState: KeePassUriPermissionState,
     onDismiss: () -> Unit,
     onSetDefault: (LocalKeePassDatabase) -> Unit,
     onDelete: (LocalKeePassDatabase) -> Unit,
@@ -1874,7 +1905,8 @@ private fun DatabaseDetailBottomSheet(
     onTransferToExternal: (LocalKeePassDatabase) -> Unit,
     onVerifyPassword: (LocalKeePassDatabase, String, Uri?) -> Unit,
     onSyncRemote: (LocalKeePassDatabase) -> Unit,
-    onExport: (LocalKeePassDatabase) -> Unit
+    onExport: (LocalKeePassDatabase) -> Unit,
+    onRepairPermission: (LocalKeePassDatabase) -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
     val creationOptions = database.toCreationOptions()
@@ -2168,6 +2200,62 @@ private fun DatabaseDetailBottomSheet(
             }
             
             Spacer(modifier = Modifier.height(24.dp))
+
+            if (!isRemoteDatabase && database.storageLocation == KeePassStorageLocation.EXTERNAL) {
+                val permissionLabel = when (permissionState) {
+                    KeePassUriPermissionState.READ_WRITE -> stringResource(R.string.keepass_permission_read_write)
+                    KeePassUriPermissionState.READ_ONLY -> stringResource(R.string.keepass_permission_read_only)
+                    KeePassUriPermissionState.MISSING -> stringResource(R.string.keepass_permission_missing)
+                }
+                val permissionHealthy = permissionState == KeePassUriPermissionState.READ_WRITE
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (permissionHealthy) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (permissionHealthy) Icons.Default.LockOpen else Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = if (permissionHealthy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.keepass_file_permission_title),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    permissionLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (permissionHealthy) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                        if (!permissionHealthy) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                stringResource(R.string.keepass_file_permission_repair_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(onClick = { onRepairPermission(database) }) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.keepass_file_permission_repair))
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
             
             // 操作按钮
             Text(

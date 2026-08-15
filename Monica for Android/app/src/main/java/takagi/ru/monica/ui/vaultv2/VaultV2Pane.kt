@@ -1423,7 +1423,7 @@ fun VaultV2Pane(
 		isSearchExpanded = false
 		searchQuery = ""
 	}
-	BackHandler(enabled = state.isArchiveView) {
+	BackHandler(enabled = state.isArchiveView || isSearchExpanded) {
 		when {
 			selectedKeys.isNotEmpty() -> selectedKeys.clear()
 			isSearchExpanded -> {

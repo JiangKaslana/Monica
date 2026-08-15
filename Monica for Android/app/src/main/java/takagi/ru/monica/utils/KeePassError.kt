@@ -34,7 +34,7 @@ fun Throwable.toKeePassOperationException(): KeePassOperationException {
     if (root is SecurityException || lowerMessage.contains("permission denied") || lowerMessage.contains("eacces")) {
         return wrap(
             code = KeePassErrorCode.URI_PERMISSION_DENIED,
-            userMessage = "文件权限不足，请重新授予数据库或密钥文件访问权限"
+            userMessage = "缺少 KDBX 文件写入权限，请在数据库设置中重新授权后再删除或保存"
         )
     }
 
