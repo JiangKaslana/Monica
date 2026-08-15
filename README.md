@@ -209,6 +209,12 @@ Monica 的设计、兼容性适配与部分功能方向，受到了以下优秀�
 
 ---
 
+## 社区与支持
+
+- Telegram 群组：[加入 Monica 社区](https://t.me/+IZUDLL-vWOA1Y2U1)
+
+---
+
 ## 许可证
 
 Copyright (c) 2025 JoyinJoester
