@@ -1130,14 +1130,11 @@ class DataExportImportViewModel(
             val passwordEntries = passwordRepository.getAllPasswordEntries().first()
             val secureItems = secureItemRepository.getAllItems().first()
             val exportedPasswords = passwordEntries.map { entry ->
-                val exportedPassword = runCatching { securityManager.decryptData(entry.password) }
-                    .getOrElse { error ->
-                        android.util.Log.w(
-                            "DataExport",
-                            "Failed to decrypt password for ZIP export: ${entry.title} (${error.message})"
-                        )
-                        entry.password
-                    }
+                val exportedPassword = takagi.ru.monica.utils.PortableSecretExportPolicy.resolve(
+                    storedValue = entry.password,
+                    entryTitle = entry.title,
+                    decryptIfNeeded = securityManager::decryptDataIfMonicaCiphertext
+                )
                 entry.copy(password = exportedPassword)
             }
             

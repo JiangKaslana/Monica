@@ -1473,11 +1473,15 @@ class WebDavHelper(
         securityManager: SecurityManager
     ): PasswordEntry {
         return entry.copy(
+            password = portableSensitiveBackupValue(
+                value = entry.password,
+                securityManager = securityManager,
+                entryTitle = entry.title
+            ),
             authenticatorKey = portableSensitiveBackupValue(
                 value = entry.authenticatorKey,
                 securityManager = securityManager,
-                fieldName = "password.authenticatorKey",
-                itemId = entry.id
+                entryTitle = entry.title
             )
         )
     }
@@ -1493,31 +1497,33 @@ class WebDavHelper(
             item.itemType != ItemType.BILLING_ADDRESS &&
             item.itemType != ItemType.PAYMENT_ACCOUNT
         ) return item
-        return item.copy(
-            itemData = portableSensitiveBackupValue(
+        val portableItemData = if (item.itemType == ItemType.TOTP) {
+            PortableTotpBackupCodec.encode(
+                storedItemData = item.itemData,
+                entryTitle = item.title,
+                decryptIfNeeded = securityManager::decryptDataIfMonicaCiphertext
+            )
+        } else {
+            portableSensitiveBackupValue(
                 value = item.itemData,
                 securityManager = securityManager,
-                fieldName = "secureItem.itemData",
-                itemId = item.id
+                entryTitle = item.title
             )
-        )
+        }
+        return item.copy(itemData = portableItemData)
     }
 
     private fun portableSensitiveBackupValue(
         value: String,
         securityManager: SecurityManager,
-        fieldName: String,
-        itemId: Long
+        entryTitle: String
     ): String {
-        if (value.isBlank() || !securityManager.looksLikeMonicaCiphertext(value)) {
-            return value
-        }
-        return runCatching { securityManager.decryptData(value) }.getOrElse { error ->
-            throw IllegalStateException(
-                "Cannot export encrypted $fieldName for backup item $itemId",
-                error
-            )
-        }
+        if (value.isBlank()) return value
+        return PortableSecretExportPolicy.resolve(
+            storedValue = value,
+            entryTitle = entryTitle,
+            decryptIfNeeded = securityManager::decryptDataIfMonicaCiphertext
+        )
     }
 
     /**
@@ -4713,11 +4719,15 @@ class WebDavHelper(
     private fun normalizePasswordHistoryForBackup(
         entry: PasswordHistoryEntry,
         securityManager: SecurityManager
-    ): PasswordHistoryBackupEntry? {
-        val decoded = decodePasswordHistoryForBackup(entry.password, securityManager) ?: return null
+    ): PasswordHistoryBackupEntry {
+        val decoded = decodePasswordHistoryForBackup(entry.password, securityManager)
+            ?: throw PortableSecretExportException(
+                entryTitle = "密码历史 #${entry.entryId}",
+                cause = IllegalStateException("Stored password history cannot be decrypted")
+            )
         return PasswordHistoryBackupEntry(
             entryId = entry.entryId,
-            password = securityManager.encryptDataLegacyCompat(decoded),
+            password = decoded,
             lastUsedAt = entry.lastUsedAt.time
         )
     }

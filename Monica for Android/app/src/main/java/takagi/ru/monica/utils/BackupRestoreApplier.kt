@@ -83,12 +83,17 @@ object BackupRestoreApplier {
                     localOnly = localOnlyDedup
                 )
                 val encryptedImportedPassword = encryptImportedPasswordForDisplay(password.password, securityManager, logTag)
+                val encryptedImportedAuthenticatorKey = encryptImportedAuthenticatorKey(
+                    value = password.authenticatorKey,
+                    securityManager = securityManager
+                )
 
                 if (existingEntry == null) {
                     val newId = passwordRepository.insertPasswordEntry(
                         password.copy(
                             id = 0,
-                            password = encryptedImportedPassword
+                            password = encryptedImportedPassword,
+                            authenticatorKey = encryptedImportedAuthenticatorKey
                         )
                     )
                     if (newId > 0) {
@@ -340,11 +345,19 @@ object BackupRestoreApplier {
                 )
 
                 if (existingItem == null) {
-                    var finalItemData = exportItem.itemData
+                    var finalItemData = if (itemType == ItemType.TOTP) {
+                        PortableTotpBackupCodec.encode(
+                            storedItemData = exportItem.itemData,
+                            entryTitle = exportItem.title,
+                            decryptIfNeeded = securityManager::decryptDataIfMonicaCiphertext
+                        )
+                    } else {
+                        exportItem.itemData
+                    }
                     if (itemType == ItemType.TOTP) {
                         try {
                             val totpData = TotpDataResolver.parseStoredItemData(
-                                itemData = exportItem.itemData,
+                                itemData = finalItemData,
                                 fallbackIssuer = exportItem.title,
                                 decryptIfNeeded = securityManager::decryptDataIfMonicaCiphertext
                             ) ?: throw IllegalArgumentException("Unable to parse TOTP data")
@@ -353,11 +366,7 @@ object BackupRestoreApplier {
                                 if (newBoundId != null) {
                                     val updatedTotpData = totpData.copy(boundPasswordId = newBoundId)
                                     val updatedJson = json.encodeToString(updatedTotpData)
-                                    finalItemData = if (securityManager.looksLikeMonicaCiphertext(exportItem.itemData)) {
-                                        securityManager.encryptDataLegacyCompat(updatedJson)
-                                    } else {
-                                        updatedJson
-                                    }
+                                    finalItemData = updatedJson
                                     android.util.Log.d(logTag, "Updated TOTP binding to Password ID $newBoundId")
                                 } else {
                                     android.util.Log.w(logTag, "Could not find new password ID for TOTP binding: oldId=${totpData.boundPasswordId}")
@@ -630,10 +639,11 @@ private fun encryptImportedPasswordForDisplay(
     securityManager: SecurityManager,
     logTag: String
 ): String {
-    val primaryEncrypted = securityManager.encryptData(plainPassword)
+    val portablePassword = securityManager.decryptDataIfMonicaCiphertext(plainPassword)
+    val primaryEncrypted = securityManager.encryptData(portablePassword)
     val primaryReadable = runCatching { securityManager.decryptData(primaryEncrypted) }
         .getOrNull()
-        ?.let { it == plainPassword }
+        ?.let { it == portablePassword }
         ?: false
     if (primaryReadable) {
         return primaryEncrypted
@@ -643,10 +653,10 @@ private fun encryptImportedPasswordForDisplay(
         logTag,
         "Imported password encrypted payload is not immediately readable; fallback to legacy V1"
     )
-    val legacyEncrypted = securityManager.encryptDataLegacyCompat(plainPassword)
+    val legacyEncrypted = securityManager.encryptDataLegacyCompat(portablePassword)
     val legacyReadable = runCatching { securityManager.decryptData(legacyEncrypted) }
         .getOrNull()
-        ?.let { it == plainPassword }
+        ?.let { it == portablePassword }
         ?: false
     return if (legacyReadable) {
         legacyEncrypted
@@ -657,4 +667,13 @@ private fun encryptImportedPasswordForDisplay(
         )
         primaryEncrypted
     }
+}
+
+private fun encryptImportedAuthenticatorKey(
+    value: String,
+    securityManager: SecurityManager
+): String {
+    if (value.isBlank()) return ""
+    val plainValue = securityManager.decryptDataIfMonicaCiphertext(value)
+    return securityManager.encryptDataLegacyCompat(plainValue)
 }
