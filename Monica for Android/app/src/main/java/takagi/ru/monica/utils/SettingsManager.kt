@@ -37,6 +37,7 @@ import takagi.ru.monica.data.ProgressBarStyle
 import takagi.ru.monica.data.ThemeMode
 import takagi.ru.monica.data.UnifiedProgressBarMode
 import takagi.ru.monica.data.AutofillSource
+import takagi.ru.monica.data.AuthenticatorLayoutMode
 
 private val Context.dataStore by preferencesDataStore("settings")
 
@@ -112,6 +113,7 @@ data class PageAdjustmentSettingsSnapshot(
     val passwordWebsiteStackMatchMode: String = "strict",
     val authenticatorCardDisplayFields: List<String> = emptyList(),
     val authenticatorCardHideCodeByDefault: Boolean = false,
+    val authenticatorLayoutMode: String = AuthenticatorLayoutMode.STANDARD.name,
     val validatorProgressBarStyle: String = ProgressBarStyle.LINEAR.name,
     val validatorUnifiedProgressBar: String = UnifiedProgressBarMode.ENABLED.name,
     val validatorSmoothProgress: Boolean = true,
@@ -218,6 +220,7 @@ class SettingsManager(private val context: Context) {
         private val PASSWORD_CARD_HIDE_OTHER_CONTENT_WHEN_AUTHENTICATOR_KEY = booleanPreferencesKey("password_card_hide_other_content_when_authenticator") // 显示验证器时隐藏其他内容
         private val AUTHENTICATOR_CARD_DISPLAY_FIELDS_KEY = stringPreferencesKey("authenticator_card_display_fields") // 验证器卡片显示字段
         private val AUTHENTICATOR_CARD_HIDE_CODE_BY_DEFAULT_KEY = booleanPreferencesKey("authenticator_card_hide_code_by_default") // 验证器卡片默认隐藏验证码
+        private val AUTHENTICATOR_LAYOUT_MODE_KEY = stringPreferencesKey("authenticator_layout_mode")
         private val PASSWORD_LIST_QUICK_FILTERS_ENABLED_KEY = booleanPreferencesKey("password_list_quick_filters_enabled") // 密码列表快捷筛选开关
         private val PASSWORD_LIST_QUICK_FILTER_ITEMS_KEY = stringPreferencesKey("password_list_quick_filter_items") // 密码列表快捷筛选显示内容
         private val PASSWORD_LIST_CATEGORY_QUICK_FILTERS_ENABLED_KEY = booleanPreferencesKey("password_list_category_quick_filters_enabled") // 密码列表分类快捷筛选开关
@@ -623,6 +626,9 @@ class SettingsManager(private val context: Context) {
                 ?: takagi.ru.monica.data.AuthenticatorCardDisplayField.DEFAULT_ORDER,
             authenticatorCardHideCodeByDefault =
                 preferences[AUTHENTICATOR_CARD_HIDE_CODE_BY_DEFAULT_KEY] ?: false,
+            authenticatorLayoutMode = AuthenticatorLayoutMode.fromStoredValue(
+                preferences[AUTHENTICATOR_LAYOUT_MODE_KEY]
+            ),
             passwordListQuickFiltersEnabled = preferences[PASSWORD_LIST_QUICK_FILTERS_ENABLED_KEY] ?: false,
             passwordListQuickFilterItems = parsedQuickFilterItems,
             passwordListCategoryQuickFiltersEnabled =
@@ -1083,6 +1089,12 @@ class SettingsManager(private val context: Context) {
         }
     }
 
+    suspend fun updateAuthenticatorLayoutMode(mode: AuthenticatorLayoutMode) {
+        dataStore.edit { preferences ->
+            preferences[AUTHENTICATOR_LAYOUT_MODE_KEY] = mode.name
+        }
+    }
+
     suspend fun updatePasswordListQuickFiltersEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PASSWORD_LIST_QUICK_FILTERS_ENABLED_KEY] = enabled
@@ -1277,6 +1289,7 @@ class SettingsManager(private val context: Context) {
             passwordWebsiteStackMatchMode = settings.passwordWebsiteStackMatchMode,
             authenticatorCardDisplayFields = settings.authenticatorCardDisplayFields.map { it.name },
             authenticatorCardHideCodeByDefault = settings.authenticatorCardHideCodeByDefault,
+            authenticatorLayoutMode = settings.authenticatorLayoutMode.name,
             validatorProgressBarStyle = settings.validatorProgressBarStyle.name,
             validatorUnifiedProgressBar = settings.validatorUnifiedProgressBar.name,
             validatorSmoothProgress = settings.validatorSmoothProgress,
@@ -1454,6 +1467,8 @@ class SettingsManager(private val context: Context) {
                 normalizedAuthenticatorCardFields.joinToString(",") { it.name }
             preferences[AUTHENTICATOR_CARD_HIDE_CODE_BY_DEFAULT_KEY] =
                 snapshot.authenticatorCardHideCodeByDefault
+            preferences[AUTHENTICATOR_LAYOUT_MODE_KEY] =
+                AuthenticatorLayoutMode.fromStoredValue(snapshot.authenticatorLayoutMode).name
             preferences[VALIDATOR_PROGRESS_BAR_STYLE_KEY] = parsedValidatorProgressBarStyle.name
             preferences[VALIDATOR_UNIFIED_PROGRESS_BAR_KEY] = parsedValidatorUnifiedProgressBar.name
             preferences[VALIDATOR_SMOOTH_PROGRESS_KEY] = snapshot.validatorSmoothProgress

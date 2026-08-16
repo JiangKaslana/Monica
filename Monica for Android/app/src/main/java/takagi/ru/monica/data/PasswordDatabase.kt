@@ -46,7 +46,7 @@ import takagi.ru.monica.keepass.KeePassPendingChangeDao
         // KeePass entry-level pending changes
         KeePassPendingChange::class
     ],
-    version = 77,
+    version = 78,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -2315,6 +2315,19 @@ abstract class PasswordDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration 77 → 78: optional encrypted Monica-owned KeePass key-file copies. */
+        internal val MIGRATION_77_78 = object : androidx.room.migration.Migration(77, 78) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                addColumnIfMissing(database, "local_keepass_databases", "key_file_internal_path", "TEXT")
+                addColumnIfMissing(database, "local_keepass_databases", "key_file_name", "TEXT")
+                addColumnIfMissing(database, "local_keepass_databases", "key_file_fingerprint", "TEXT")
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_local_keepass_databases_key_file_fingerprint " +
+                        "ON local_keepass_databases(key_file_fingerprint)"
+                )
+            }
+        }
+
         private fun addColumnIfMissing(
             database: androidx.sqlite.db.SupportSQLiteDatabase,
             tableName: String,
@@ -2420,7 +2433,8 @@ abstract class PasswordDatabase : RoomDatabase() {
                         MIGRATION_73_74,   // Per-database MDBX engine selection
                         MIGRATION_74_75,   // MDBX2 durable remote sync cursors
                         MIGRATION_75_76,   // MDBX2 external SAF tree metadata
-                        MIGRATION_76_77    // Attachments for PasswordEntry and SecureItem
+                        MIGRATION_76_77,   // Attachments for PasswordEntry and SecureItem
+                        MIGRATION_77_78    // Monica-owned KeePass key-file copies
                     )
                     // 启用多进程失效通知：IME 跑在 :ime 独立进程，主进程需要
                     // 感知 IME 进程对数据库的修改（例如最近填充时间戳等）。

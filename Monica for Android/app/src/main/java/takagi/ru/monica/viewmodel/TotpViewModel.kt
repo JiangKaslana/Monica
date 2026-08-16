@@ -1,6 +1,7 @@
 package takagi.ru.monica.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -51,6 +52,8 @@ import takagi.ru.monica.sync.SyncTrigger
 import takagi.ru.monica.utils.OperationLogger
 import takagi.ru.monica.utils.FieldChange
 import takagi.ru.monica.utils.KeePassKdbxService
+import takagi.ru.monica.utils.readKeePassKeyFileBytes
+import takagi.ru.monica.utils.toKeePassOperationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import java.util.Date
@@ -109,6 +112,8 @@ class TotpViewModel(
     private val localKeePassDatabaseDao: LocalKeePassDatabaseDao? = null,
     private val securityManager: SecurityManager? = null
 ) : ViewModel() {
+    private val applicationContext = context?.applicationContext
+
     private data class KeePassMutationIdentity(
         val groupPath: String?,
         val entryUuid: String?,
@@ -1123,6 +1128,7 @@ class TotpViewModel(
         totpData: TotpData,
         isFavorite: Boolean = false,
         targets: List<StorageTarget>,
+        onFailure: (String) -> Unit = {},
         onComplete: (Boolean) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -1130,8 +1136,10 @@ class TotpViewModel(
                 val distinctTargets = targets.distinctBy(StorageTarget::stableKey)
                 if (distinctTargets.isEmpty()) {
                     Log.w("TotpViewModel", "saveTotpAcrossTargets blocked because target list is empty id=$id")
+                    onFailure("未选择保存位置")
                     false
                 } else {
+                    requireKeePassKeyFilesAvailable(distinctTargets)
                     val existingItem = id?.let { repository.getItemById(it) }?.takeIf { it.itemType == ItemType.TOTP }
                     val selectedTargetKeys = distinctTargets.map(StorageTarget::stableKey).toSet()
                     val currentTarget = existingItem
@@ -1229,6 +1237,7 @@ class TotpViewModel(
                             "TotpViewModel",
                             "saveTotpAcrossTargets failed current target=${currentTarget.stableKey} id=$id targets=${distinctTargets.map(StorageTarget::stableKey)}"
                         )
+                        onFailure("无法保存到所选存储位置")
                         false
                     } else {
                         var allTargetsSaved = true
@@ -1255,14 +1264,42 @@ class TotpViewModel(
                     }
                 }
             } catch (e: Exception) {
+                val failureMessage = e.toKeePassOperationException().message
                 Log.e(
                     "TotpViewModel",
                     "saveTotpAcrossTargets crashed id=$id targets=${targets.map(StorageTarget::stableKey)} error=${e::class.java.simpleName}: ${e.message}",
                     e
                 )
+                onFailure(failureMessage)
                 false
             }
             onComplete(saved)
+        }
+    }
+
+    private suspend fun requireKeePassKeyFilesAvailable(targets: List<StorageTarget>) {
+        val dao = localKeePassDatabaseDao ?: return
+        val appContext = applicationContext ?: return
+        val resolver = appContext.contentResolver
+        val databaseIds = targets
+            .filterIsInstance<StorageTarget.KeePass>()
+            .map(StorageTarget.KeePass::databaseId)
+            .distinct()
+        if (databaseIds.isEmpty()) return
+
+        withContext(Dispatchers.IO) {
+            databaseIds.forEach { databaseId ->
+                val keyFileUri = dao.getDatabaseById(databaseId)
+                    ?.keyFileUri
+                    ?.takeIf { it.isNotBlank() }
+                    ?: return@forEach
+                resolver.readKeePassKeyFileBytes(
+                    uri = Uri.parse(keyFileUri),
+                    unavailableMessage = appContext.getString(
+                        takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
+                    )
+                )
+            }
         }
     }
 

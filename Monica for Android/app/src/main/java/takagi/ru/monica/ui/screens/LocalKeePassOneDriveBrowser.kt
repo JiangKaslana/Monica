@@ -135,6 +135,12 @@ fun KeepassOneDriveBrowserBottomSheet(
             }
     }
 
+    LaunchedEffect(session?.accountId) {
+        selectedDatabaseEntry = null
+        showCreateFolderDialog = false
+        showCreateDatabaseDialog = false
+    }
+
     fun signInOrSwitchAccount() {
         if (activity == null) {
             browserError = context.getString(R.string.keepass_onedrive_activity_missing)
@@ -223,7 +229,7 @@ fun KeepassOneDriveBrowserBottomSheet(
             ) {
                 Button(
                     onClick = { showCreateDatabaseDialog = true },
-                    enabled = !isLoadingEntries,
+                    enabled = session != null && !isLoadingEntries,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null)
@@ -265,7 +271,7 @@ fun KeepassOneDriveBrowserBottomSheet(
             AttachExistingOneDriveDatabaseDialog(
                 entry = entry,
                 onDismiss = { selectedDatabaseEntry = null },
-                onAttach = { displayName, databasePassword, keyFileUri, description ->
+                onAttach = { displayName, databasePassword, keyFileUri, description, keepKeyFileCopy ->
                     viewModel.addOneDriveDatabase(
                         name = displayName,
                         accountId = activeSession.accountId,
@@ -273,7 +279,8 @@ fun KeepassOneDriveBrowserBottomSheet(
                         remotePath = entry.path,
                         databasePassword = databasePassword,
                         keyFileUri = keyFileUri,
-                        description = description
+                        description = description,
+                        keepKeyFileCopy = keepKeyFileCopy
                     )
                     selectedDatabaseEntry = null
                     onDismiss()
@@ -282,26 +289,30 @@ fun KeepassOneDriveBrowserBottomSheet(
         }
     }
 
-    if (showCreateDatabaseDialog && session != null) {
-        CreateOneDriveDatabaseDialog(
-            currentPath = currentPath,
-            onDismiss = { showCreateDatabaseDialog = false },
-            onGenerateKeyFile = { uri -> viewModel.generateKeyFile(uri) },
-            onCreate = { name, password, keyFileUri, options, description ->
-                viewModel.createOneDriveDatabase(
-                    directoryPath = currentPath,
-                    name = name,
-                    accountId = session!!.accountId,
-                    accountLabel = session!!.username.ifBlank { session!!.displayName },
-                    databasePassword = password,
-                    keyFileUri = keyFileUri,
-                    creationOptions = options,
-                    description = description
-                )
-                showCreateDatabaseDialog = false
-                onDismiss()
-            }
-        )
+    if (showCreateDatabaseDialog) {
+        val activeSession = session
+        if (activeSession != null) {
+            CreateOneDriveDatabaseDialog(
+                currentPath = currentPath,
+                onDismiss = { showCreateDatabaseDialog = false },
+                onGenerateKeyFile = { uri -> viewModel.generateKeyFile(uri) },
+                onCreate = { name, password, keyFileUri, options, description, keepKeyFileCopy ->
+                    viewModel.createOneDriveDatabase(
+                        directoryPath = currentPath,
+                        name = name,
+                        accountId = activeSession.accountId,
+                        accountLabel = activeSession.username.ifBlank { activeSession.displayName },
+                        databasePassword = password,
+                        keyFileUri = keyFileUri,
+                        creationOptions = options,
+                        description = description,
+                        keepKeyFileCopy = keepKeyFileCopy
+                    )
+                    showCreateDatabaseDialog = false
+                    onDismiss()
+                }
+            )
+        }
     }
 }
 
@@ -342,14 +353,15 @@ private fun CreateOneDriveFolderDialog(
 private fun AttachExistingOneDriveDatabaseDialog(
     entry: FileSourceEntry,
     onDismiss: () -> Unit,
-    onAttach: (displayName: String, databasePassword: String, keyFileUri: Uri?, description: String?) -> Unit
+    onAttach: (displayName: String, databasePassword: String, keyFileUri: Uri?, description: String?, keepKeyFileCopy: Boolean) -> Unit
 ) {
-    var displayName by remember { mutableStateOf(entry.name.removeSuffix(".kdbx")) }
-    var databasePassword by remember { mutableStateOf("") }
-    var showDatabasePassword by remember { mutableStateOf(false) }
-    var description by remember { mutableStateOf("") }
-    var keyFileUri by remember { mutableStateOf<Uri?>(null) }
-    var keyFileName by remember { mutableStateOf("") }
+    var displayName by remember(entry.path) { mutableStateOf(entry.name.removeSuffix(".kdbx")) }
+    var databasePassword by remember(entry.path) { mutableStateOf("") }
+    var showDatabasePassword by remember(entry.path) { mutableStateOf(false) }
+    var description by remember(entry.path) { mutableStateOf("") }
+    var keyFileUri by remember(entry.path) { mutableStateOf<Uri?>(null) }
+    var keyFileName by remember(entry.path) { mutableStateOf("") }
+    var keepKeyFileCopy by remember(entry.path) { mutableStateOf(false) }
 
     val keyFilePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
@@ -407,6 +419,27 @@ private fun AttachExistingOneDriveDatabaseDialog(
                         }
                     }
                 )
+                if (keyFileUri != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { keepKeyFileCopy = !keepKeyFileCopy },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = keepKeyFileCopy,
+                            onCheckedChange = { keepKeyFileCopy = it },
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.local_keepass_keep_key_file_copy))
+                            Text(
+                                stringResource(R.string.local_keepass_keep_key_file_copy_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
@@ -420,7 +453,13 @@ private fun AttachExistingOneDriveDatabaseDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    onAttach(displayName.trim(), databasePassword, keyFileUri, description.takeIf { it.isNotBlank() })
+                    onAttach(
+                        displayName.trim(),
+                        databasePassword,
+                        keyFileUri,
+                        description.takeIf { it.isNotBlank() },
+                        keyFileUri != null && keepKeyFileCopy,
+                    )
                 },
                 enabled = displayName.isNotBlank() && (databasePassword.isNotBlank() || keyFileUri != null)
             ) {
@@ -443,7 +482,8 @@ private fun CreateOneDriveDatabaseDialog(
         password: String,
         keyFileUri: Uri?,
         options: KeePassDatabaseCreationOptions,
-        description: String?
+        description: String?,
+        keepKeyFileCopy: Boolean
     ) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
@@ -454,6 +494,7 @@ private fun CreateOneDriveDatabaseDialog(
     var useKeyFile by remember { mutableStateOf(false) }
     var keyFileUri by remember { mutableStateOf<Uri?>(null) }
     var keyFileName by remember { mutableStateOf("") }
+    var keepKeyFileCopy by remember { mutableStateOf(false) }
     val defaultOptions = remember { KeePassDatabaseCreationOptions.remoteCompatibilityDefaults() }
     var formatVersion by remember { mutableStateOf(defaultOptions.formatVersion) }
     var cipherAlgorithm by remember { mutableStateOf(defaultOptions.cipherAlgorithm) }
@@ -464,6 +505,11 @@ private fun CreateOneDriveDatabaseDialog(
     }
     var parallelism by remember { mutableStateOf(defaultOptions.parallelism.toString()) }
     var showAdvancedCryptoOptions by remember { mutableStateOf(false) }
+
+    fun setUseKeyFile(enabled: Boolean) {
+        useKeyFile = enabled
+        if (!enabled) keepKeyFileCopy = false
+    }
 
     val keyFilePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
@@ -573,7 +619,7 @@ private fun CreateOneDriveDatabaseDialog(
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceContainer,
-                    onClick = { useKeyFile = !useKeyFile }
+                    onClick = { setUseKeyFile(!useKeyFile) }
                 ) {
                     Row(
                         modifier = Modifier
@@ -591,30 +637,53 @@ private fun CreateOneDriveDatabaseDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(checked = useKeyFile, onCheckedChange = { useKeyFile = it })
+                        Switch(checked = useKeyFile, onCheckedChange = ::setUseKeyFile)
                     }
                 }
                 AnimatedVisibility(visible = useKeyFile) {
-                    OutlinedTextField(
-                        value = keyFileName,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text(stringResource(R.string.local_keepass_key_file)) },
-                        placeholder = { Text(stringResource(R.string.local_keepass_key_file_pick_or_generate)) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { keyFilePickerLauncher.launch(arrayOf("*/*")) },
-                        trailingIcon = {
-                            Row {
-                                IconButton(onClick = { createKeyFileLauncher.launch("monica.key") }) {
-                                    Icon(Icons.Default.Add, contentDescription = null)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = keyFileName,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(stringResource(R.string.local_keepass_key_file)) },
+                            placeholder = { Text(stringResource(R.string.local_keepass_key_file_pick_or_generate)) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { keyFilePickerLauncher.launch(arrayOf("*/*")) },
+                            trailingIcon = {
+                                Row {
+                                    IconButton(onClick = { createKeyFileLauncher.launch("monica.key") }) {
+                                        Icon(Icons.Default.Add, contentDescription = null)
+                                    }
+                                    IconButton(onClick = { keyFilePickerLauncher.launch(arrayOf("*/*")) }) {
+                                        Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                    }
                                 }
-                                IconButton(onClick = { keyFilePickerLauncher.launch(arrayOf("*/*")) }) {
-                                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                            }
+                        )
+                        if (keyFileUri != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { keepKeyFileCopy = !keepKeyFileCopy },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = keepKeyFileCopy,
+                                    onCheckedChange = { keepKeyFileCopy = it },
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.local_keepass_keep_key_file_copy))
+                                    Text(
+                                        stringResource(R.string.local_keepass_keep_key_file_copy_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                         }
-                    )
+                    }
                 }
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -733,7 +802,14 @@ private fun CreateOneDriveDatabaseDialog(
                         memoryBytes = ((memoryMbValue ?: (defaultOptions.memoryBytes / 1024L / 1024L)) * 1024L * 1024L),
                         parallelism = parallelismValue ?: defaultOptions.parallelism
                     ).normalized()
-                    onCreate(name.trim(), password, if (useKeyFile) keyFileUri else null, options, description.takeIf { it.isNotBlank() })
+                    onCreate(
+                        name.trim(),
+                        password,
+                        if (useKeyFile) keyFileUri else null,
+                        options,
+                        description.takeIf { it.isNotBlank() },
+                        useKeyFile && keepKeyFileCopy,
+                    )
                 },
                 enabled = name.isNotBlank() &&
                     ((password.isNotBlank() && password == confirmPassword) || (useKeyFile && keyFileUri != null)) &&

@@ -54,6 +54,17 @@ class SteamExternalMaFileContractTest {
     }
 
     @Test
+    fun pendingMarkerRemainsRecoverableWithoutBeingTreatedAsReady() {
+        val fields = listOf(
+            SteamExternalMaFileContract.MARKER_FIELD to
+                SteamExternalMaFileContract.PENDING_MARKER_VALUE
+        )
+
+        assertTrue(SteamExternalMaFileContract.isPending(fields))
+        assertFalse(SteamExternalMaFileContract.isMarked(fields))
+    }
+
+    @Test
     fun generatedAttachmentNameIsSafeAndKeepsMaFileExtension() {
         val account = SteamAccount(
             id = 1,

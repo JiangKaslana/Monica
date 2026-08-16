@@ -556,6 +556,7 @@ data class AppSettings(
     val passwordCardHideOtherContentWhenAuthenticator: Boolean = true, // 显示验证器时隐藏其他卡片内容（默认开启）
     val authenticatorCardDisplayFields: List<AuthenticatorCardDisplayField> = AuthenticatorCardDisplayField.DEFAULT_ORDER, // 验证器卡片显示字段（顺序即展示顺序）
     val authenticatorCardHideCodeByDefault: Boolean = false, // 验证器卡片默认隐藏验证码
+    val authenticatorLayoutMode: AuthenticatorLayoutMode = AuthenticatorLayoutMode.STANDARD,
     val passwordListQuickFiltersEnabled: Boolean = true, // 密码列表快捷筛选开关（默认开启）
     val passwordListQuickFilterItems: List<PasswordListQuickFilterItem> = PasswordListQuickFilterItem.DEFAULT_ORDER, // 密码列表快捷筛选显示内容
     val passwordListCategoryQuickFiltersEnabled: Boolean = true, // 密码列表分类快捷筛选开关（默认开启）
@@ -638,6 +639,16 @@ enum class AuthenticatorCardDisplayField {
         val DEFAULT_ORDER: List<AuthenticatorCardDisplayField> = listOf(
             ACCOUNT_NAME
         )
+    }
+}
+
+enum class AuthenticatorLayoutMode {
+    STANDARD,
+    TILE;
+
+    companion object {
+        fun fromStoredValue(value: String?): AuthenticatorLayoutMode =
+            entries.firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: STANDARD
     }
 }
 

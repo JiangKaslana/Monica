@@ -83,6 +83,7 @@ fun LocalKeePassScreen(
     val operationState by viewModel.operationState.collectAsState()
     val verificationStates by viewModel.verificationStates.collectAsState()
     val uriPermissionStates by viewModel.uriPermissionStates.collectAsState()
+    val keyFileAccessStates by viewModel.keyFileAccessStates.collectAsState()
     
     // 对话框状态
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -94,6 +95,8 @@ fun LocalKeePassScreen(
     var showDatabaseDetailSheet by remember { mutableStateOf(false) }
     var databaseToExport by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var databaseToTransferExternal by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
+    var keyFileCopyDatabaseId by remember { mutableStateOf<Long?>(null) }
+    var keyFileExportDatabase by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var selectedExternalUri by remember { mutableStateOf<Uri?>(null) }
     var permissionRepairDatabaseId by remember { mutableStateOf<Long?>(null) }
     
@@ -114,6 +117,26 @@ fun LocalKeePassScreen(
         permissionRepairDatabaseId = null
         if (uri != null && databaseId != null) {
             viewModel.reauthorizeExternalDatabase(databaseId, uri)
+        }
+    }
+
+    val keyFileCopyLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        val databaseId = keyFileCopyDatabaseId
+        keyFileCopyDatabaseId = null
+        if (uri != null && databaseId != null) {
+            viewModel.keepKeyFileCopy(databaseId, uri)
+        }
+    }
+
+    val keyFileExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
+        val database = keyFileExportDatabase
+        keyFileExportDatabase = null
+        if (uri != null && database != null) {
+            viewModel.exportKeyFileCopy(database.id, uri)
         }
     }
 
@@ -161,6 +184,7 @@ fun LocalKeePassScreen(
         selectedDatabase = database
         showDatabaseDetailSheet = true
         viewModel.verifyDatabaseCredentials(database.id, force = false)
+        viewModel.refreshKeyFileAccessState(database.id)
     }
 
     LaunchedEffect(allDatabases.map { it.id }) {
@@ -339,8 +363,17 @@ fun LocalKeePassScreen(
         CreateKeePassDatabaseBottomSheet(
             onDismiss = { showCreateDialog = false },
             onGenerateKeyFile = { uri -> viewModel.generateKeyFile(uri) },
-            onCreate = { name, password, location, externalUri, keyFileUri, options ->
-                viewModel.createDatabase(name, password, location, externalUri, keyFileUri, options, null)
+            onCreate = { name, password, location, externalUri, keyFileUri, options, keepKeyFileCopy ->
+                viewModel.createDatabase(
+                    name,
+                    password,
+                    location,
+                    externalUri,
+                    keyFileUri,
+                    options,
+                    null,
+                    keepKeyFileCopy,
+                )
                 showCreateDialog = false
             }
         )
@@ -354,8 +387,15 @@ fun LocalKeePassScreen(
                 showImportDialog = false
                 selectedExternalUri = null
             },
-            onImport = { name, password, keyFileUri ->
-                viewModel.importExternalDatabase(name, selectedExternalUri!!, password, keyFileUri, null)
+            onImport = { name, password, keyFileUri, keepKeyFileCopy ->
+                viewModel.importExternalDatabase(
+                    name,
+                    selectedExternalUri!!,
+                    password,
+                    keyFileUri,
+                    null,
+                    keepKeyFileCopy,
+                )
                 showImportDialog = false
                 selectedExternalUri = null
             }
@@ -390,6 +430,8 @@ fun LocalKeePassScreen(
             verificationState = verificationStates[selectedDatabase!!.id] ?: LocalKeePassViewModel.VerificationState.Unknown,
             permissionState = uriPermissionStates[selectedDatabase!!.id]
                 ?: viewModel.uriPermissionState(selectedDatabase!!),
+            keyFileAccessState = keyFileAccessStates[selectedDatabase!!.id]
+                ?: LocalKeePassViewModel.KeyFileAccessState.CHECKING,
             onDismiss = { 
                 showDatabaseDetailSheet = false
                 selectedDatabase = null
@@ -424,7 +466,16 @@ fun LocalKeePassScreen(
             onRepairPermission = { db ->
                 permissionRepairDatabaseId = db.id
                 permissionRepairLauncher.launch(arrayOf("application/x-keepass", "application/octet-stream", "*/*"))
-            }
+            },
+            onKeepKeyFileCopy = { db ->
+                keyFileCopyDatabaseId = db.id
+                keyFileCopyLauncher.launch(arrayOf("*/*"))
+            },
+            onExportKeyFileCopy = { db ->
+                keyFileExportDatabase = db
+                keyFileExportLauncher.launch(db.keyFileName ?: "${db.name}.key")
+            },
+            onDeleteKeyFileCopy = { db -> viewModel.deleteKeyFileCopy(db.id) }
         )
     }
 }
@@ -986,7 +1037,8 @@ private fun CreateKeePassDatabaseBottomSheet(
         location: KeePassStorageLocation,
         externalUri: Uri?,
         keyFileUri: Uri?,
-        options: KeePassDatabaseCreationOptions
+        options: KeePassDatabaseCreationOptions,
+        keepKeyFileCopy: Boolean,
     ) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
@@ -1010,6 +1062,7 @@ private fun CreateKeePassDatabaseBottomSheet(
     var useKeyFile by remember { mutableStateOf(false) }
     var keyFileUri by remember { mutableStateOf<Uri?>(null) }
     var keyFileName by remember { mutableStateOf("") }
+    var keepKeyFileCopy by remember { mutableStateOf(false) }
     
     // 外部存储选择器
     val directoryPickerLauncher = rememberLauncherForActivityResult(
@@ -1253,6 +1306,32 @@ private fun CreateKeePassDatabaseBottomSheet(
                                 .fillMaxWidth()
                                 .clickable { keyFilePickerLauncher.launch(arrayOf("*/*")) }
                         )
+                        if (keyFileUri != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { keepKeyFileCopy = !keepKeyFileCopy }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = keepKeyFileCopy,
+                                    onCheckedChange = { keepKeyFileCopy = it },
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        stringResource(R.string.local_keepass_keep_key_file_copy),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    Text(
+                                        stringResource(R.string.local_keepass_keep_key_file_copy_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1468,7 +1547,8 @@ private fun CreateKeePassDatabaseBottomSheet(
                         storageLocation,
                         externalUri,
                         if (useKeyFile) keyFileUri else null,
-                        options
+                        options,
+                        useKeyFile && keepKeyFileCopy,
                     )
                 },
                 enabled = isValid,
@@ -1648,7 +1728,7 @@ private fun StorageCard(
 private fun ImportExternalDatabaseDialog(
     uri: Uri,
     onDismiss: () -> Unit,
-    onImport: (name: String, password: String, keyFileUri: Uri?) -> Unit
+    onImport: (name: String, password: String, keyFileUri: Uri?, keepKeyFileCopy: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val providerDisplayName by produceState<String?>(initialValue = null, uri) {
@@ -1670,6 +1750,7 @@ private fun ImportExternalDatabaseDialog(
     var showPassword by remember { mutableStateOf(false) }
     var keyFileUri by remember { mutableStateOf<Uri?>(null) }
     var keyFileName by remember { mutableStateOf("") }
+    var keepKeyFileCopy by remember { mutableStateOf(false) }
 
     // URI 的末段可能只是 document:数字；拿到 DISPLAY_NAME 后再补上真实文件名，
     // 但不能覆盖用户已经手动修改过的名称。
@@ -1806,12 +1887,36 @@ private fun ImportExternalDatabaseDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp)
                 )
+                if (keyFileUri != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { keepKeyFileCopy = !keepKeyFileCopy },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = keepKeyFileCopy,
+                            onCheckedChange = { keepKeyFileCopy = it },
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.local_keepass_keep_key_file_copy),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.local_keepass_keep_key_file_copy_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    onImport(name, password, keyFileUri)
+                    onImport(name, password, keyFileUri, keepKeyFileCopy)
                 },
                 enabled = isValid
             ) {
@@ -1898,6 +2003,7 @@ private fun DatabaseDetailBottomSheet(
     database: LocalKeePassDatabase,
     verificationState: LocalKeePassViewModel.VerificationState,
     permissionState: KeePassUriPermissionState,
+    keyFileAccessState: LocalKeePassViewModel.KeyFileAccessState,
     onDismiss: () -> Unit,
     onSetDefault: (LocalKeePassDatabase) -> Unit,
     onDelete: (LocalKeePassDatabase) -> Unit,
@@ -1906,7 +2012,10 @@ private fun DatabaseDetailBottomSheet(
     onVerifyPassword: (LocalKeePassDatabase, String, Uri?) -> Unit,
     onSyncRemote: (LocalKeePassDatabase) -> Unit,
     onExport: (LocalKeePassDatabase) -> Unit,
-    onRepairPermission: (LocalKeePassDatabase) -> Unit
+    onRepairPermission: (LocalKeePassDatabase) -> Unit,
+    onKeepKeyFileCopy: (LocalKeePassDatabase) -> Unit,
+    onExportKeyFileCopy: (LocalKeePassDatabase) -> Unit,
+    onDeleteKeyFileCopy: (LocalKeePassDatabase) -> Unit,
 ) {
     val dateFormat = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
     val creationOptions = database.toCreationOptions()
@@ -1928,6 +2037,7 @@ private fun DatabaseDetailBottomSheet(
         KeePassDatabaseSourceType.REMOTE_GOOGLE_DRIVE -> MaterialTheme.colorScheme.tertiary
     }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteKeyFileCopyConfirm by remember { mutableStateOf(false) }
     var showVerifyDialog by remember { mutableStateOf(false) }
     var verifyPassword by remember { mutableStateOf("") }
     var showVerifyPassword by remember { mutableStateOf(false) }
@@ -2183,6 +2293,17 @@ private fun DatabaseDetailBottomSheet(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
+                        if (keyFileAccessState != LocalKeePassViewModel.KeyFileAccessState.UNAVAILABLE) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { showVerifyDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.local_keepass_repair_credentials))
+                            }
+                        }
                     }
                     
                     if (database.description != null) {
@@ -2250,6 +2371,127 @@ private fun DatabaseDetailBottomSheet(
                                 Icon(Icons.Default.FolderOpen, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(stringResource(R.string.keepass_file_permission_repair))
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            if (!database.keyFileUri.isNullOrBlank() || !database.keyFileInternalPath.isNullOrBlank()) {
+                val hasInternalKeyFile = !database.keyFileInternalPath.isNullOrBlank()
+                val keyFileAvailable = keyFileAccessState == LocalKeePassViewModel.KeyFileAccessState.AVAILABLE
+                val keyFileUnavailable = keyFileAccessState == LocalKeePassViewModel.KeyFileAccessState.UNAVAILABLE
+                val keyFileStatus = when (keyFileAccessState) {
+                    LocalKeePassViewModel.KeyFileAccessState.CHECKING ->
+                        stringResource(R.string.local_keepass_key_file_access_checking)
+                    LocalKeePassViewModel.KeyFileAccessState.AVAILABLE ->
+                        stringResource(R.string.local_keepass_key_file_access_available)
+                    LocalKeePassViewModel.KeyFileAccessState.UNAVAILABLE ->
+                        stringResource(R.string.local_keepass_key_file_access_unavailable)
+                }
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = when {
+                        keyFileUnavailable -> MaterialTheme.colorScheme.errorContainer
+                        keyFileAvailable -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (keyFileAvailable) Icons.Default.LockOpen else Icons.Default.Key,
+                                contentDescription = null,
+                                tint = when {
+                                    keyFileUnavailable -> MaterialTheme.colorScheme.error
+                                    keyFileAvailable -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.local_keepass_key_file_access_title),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    keyFileStatus,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = when {
+                                        keyFileUnavailable -> MaterialTheme.colorScheme.onErrorContainer
+                                        keyFileAvailable -> MaterialTheme.colorScheme.onSecondaryContainer
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                        Text(
+                            text = listOfNotNull(
+                                database.keyFileName?.takeIf { it.isNotBlank() },
+                                if (hasInternalKeyFile) {
+                                    stringResource(R.string.local_keepass_key_file_private_copy)
+                                } else {
+                                    stringResource(R.string.local_keepass_key_file_external_source)
+                                },
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (keyFileUnavailable) {
+                                MaterialTheme.colorScheme.onErrorContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        if (!hasInternalKeyFile && !database.keyFileUri.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedButton(
+                                onClick = { onKeepKeyFileCopy(database) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.local_keepass_keep_key_file_copy_action))
+                            }
+                        }
+                        if (hasInternalKeyFile) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onExportKeyFileCopy(database) },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(Icons.Default.FileDownload, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(stringResource(R.string.local_keepass_export_key_file_copy))
+                                }
+                                OutlinedButton(
+                                    onClick = { showDeleteKeyFileCopyConfirm = true },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(stringResource(R.string.local_keepass_delete_key_file_copy))
+                                }
+                            }
+                        }
+                        if (keyFileUnavailable) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                stringResource(R.string.local_keepass_key_file_repair_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(onClick = { showVerifyDialog = true }) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.local_keepass_repair_credentials))
                             }
                         }
                     }
@@ -2342,7 +2584,7 @@ private fun DatabaseDetailBottomSheet(
             Spacer(modifier = Modifier.height(8.dp))
             ActionButton(
                 icon = Icons.Default.VerifiedUser,
-                text = stringResource(R.string.local_keepass_reverify_password),
+                text = stringResource(R.string.local_keepass_repair_credentials),
                 onClick = { showVerifyDialog = true }
             )
         }
@@ -2387,6 +2629,31 @@ private fun DatabaseDetailBottomSheet(
         )
     }
 
+    if (showDeleteKeyFileCopyConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteKeyFileCopyConfirm = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null) },
+            title = { Text(stringResource(R.string.local_keepass_delete_key_file_copy)) },
+            text = { Text(stringResource(R.string.local_keepass_delete_key_file_copy_confirm)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteKeyFileCopyConfirm = false
+                        onDeleteKeyFileCopy(database)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) {
+                    Text(stringResource(R.string.remove))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteKeyFileCopyConfirm = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
     if (showVerifyDialog) {
         AlertDialog(
             onDismissRequest = { showVerifyDialog = false },
@@ -2394,6 +2661,13 @@ private fun DatabaseDetailBottomSheet(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.local_keepass_reverify_dialog_desc))
+                    if (!database.keyFileUri.isNullOrBlank()) {
+                        Text(
+                            text = stringResource(R.string.local_keepass_key_file_repair_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     OutlinedTextField(
                         value = verifyPassword,
                         onValueChange = { verifyPassword = it },

@@ -52,6 +52,9 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -96,10 +99,13 @@ import androidx.compose.ui.zIndex
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.fragment.app.FragmentActivity
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
@@ -126,6 +132,7 @@ import takagi.ru.monica.viewmodel.SettingsViewModel
 import takagi.ru.monica.viewmodel.TotpViewModel
 import takagi.ru.monica.viewmodel.CategoryFilter
 import takagi.ru.monica.data.Category
+import takagi.ru.monica.data.AuthenticatorLayoutMode
 import takagi.ru.monica.viewmodel.BankCardViewModel
 import takagi.ru.monica.viewmodel.DocumentViewModel
 import takagi.ru.monica.viewmodel.GeneratorViewModel
@@ -199,6 +206,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import sh.calvin.reorderable.rememberReorderableLazyGridState
 import takagi.ru.monica.ui.screens.AddEditPasswordScreen
 import takagi.ru.monica.ui.screens.AddEditTotpScreen
 import takagi.ru.monica.ui.screens.AddEditBankCardScreen
@@ -207,6 +215,9 @@ import takagi.ru.monica.ui.screens.AddEditNoteScreen
 import takagi.ru.monica.ui.screens.AddEditSendScreen
 import takagi.ru.monica.ui.theme.MonicaTheme
 import takagi.ru.monica.util.TotpDataResolver
+import takagi.ru.monica.util.TotpGenerator
+import takagi.ru.monica.util.VibrationPatterns
+import takagi.ru.monica.data.model.OtpType
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -415,6 +426,74 @@ fun TotpListContent(
     // 过滤掉待删除的项
     val filteredTotpItems = remember(totpItems, deletedItemIds) {
         totpItems.filter { it.id !in deletedItemIds }
+    }
+
+    val vibrationGate = remember { TotpCountdownVibrationGate() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isScreenResumed by remember {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    val vibrator = remember(context) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val manager = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+            manager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+        }
+    }
+    DisposableEffect(lifecycleOwner, vibrator) {
+        val lifecycle = lifecycleOwner.lifecycle
+        val observer = LifecycleEventObserver { _, _ ->
+            isScreenResumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            if (!isScreenResumed) vibrator?.cancel()
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            vibrator?.cancel()
+        }
+    }
+    val expiringRemainingSeconds = remember(
+        sharedTickSeconds,
+        filteredTotpItems,
+        totpDataById,
+        appSettings.totpTimeOffset
+    ) {
+        filteredTotpItems.mapNotNull { item ->
+            val data = totpDataById[item.id] ?: return@mapNotNull null
+            if (data.otpType == OtpType.HOTP) return@mapNotNull null
+            TotpGenerator.getRemainingSeconds(
+                period = data.period,
+                timeOffset = appSettings.totpTimeOffset,
+                currentSeconds = sharedTickSeconds
+            )
+        }
+    }
+    LaunchedEffect(
+        sharedTickSeconds,
+        expiringRemainingSeconds,
+        isScreenResumed,
+        appSettings.isPlusActivated,
+        appSettings.validatorVibrationEnabled
+    ) {
+        if (
+            isScreenResumed &&
+            appSettings.isPlusActivated &&
+            appSettings.validatorVibrationEnabled &&
+            vibrationGate.shouldVibrate(sharedTickSeconds, expiringRemainingSeconds)
+        ) {
+            vibrator?.let { activeVibrator ->
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    activeVibrator.vibrate(
+                        android.os.VibrationEffect.createWaveform(VibrationPatterns.TICK, -1)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    activeVibrator.vibrate(VibrationPatterns.TICK, -1)
+                }
+            }
+        }
     }
 
     fun boundPasswordIdFor(item: SecureItem): Long? {
@@ -949,7 +1028,104 @@ fun TotpListContent(
             LaunchedEffect(filteredTotpItems) {
                 localTotpItems = filteredTotpItems
             }
-            
+
+            if (appSettings.authenticatorLayoutMode == AuthenticatorLayoutMode.TILE) {
+                val lazyGridState = rememberLazyGridState()
+                val reorderableLazyGridState = rememberReorderableLazyGridState(lazyGridState) { from, to ->
+                    if (isSelectionMode) {
+                        localTotpItems = localTotpItems.toMutableList().apply {
+                            add(to.index, removeAt(from.index))
+                        }
+                    }
+                }
+                var gridWasDragging by remember { mutableStateOf(false) }
+                LaunchedEffect(reorderableLazyGridState.isAnyItemDragging) {
+                    if (reorderableLazyGridState.isAnyItemDragging) {
+                        gridWasDragging = true
+                    } else if (gridWasDragging && isSelectionMode) {
+                        gridWasDragging = false
+                        val newOrders = localTotpItems.mapIndexed { index, item -> item.id to index }
+                        if (newOrders.isNotEmpty()) viewModel.updateSortOrders(newOrders)
+                    }
+                }
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    state = lazyGridState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { androidx.compose.ui.unit.IntOffset(0, contentPullOffset) }
+                        .nestedScroll(pullAction.nestedScrollConnection),
+                    contentPadding = PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(
+                        items = localTotpItems,
+                        key = { it.id }
+                    ) { item ->
+                        ReorderableItem(
+                            reorderableLazyGridState,
+                            key = item.id,
+                            enabled = isSelectionMode
+                        ) { isDragging ->
+                            val elevation by animateDpAsState(
+                                if (isDragging) 8.dp else 0.dp,
+                                label = "tile_drag_elevation"
+                            )
+                            val dragModifier = if (isSelectionMode) {
+                                Modifier.longPressDraggableHandle(
+                                    onDragStarted = { haptic.performLongPress() },
+                                    onDragStopped = { haptic.performSuccess() }
+                                )
+                            } else {
+                                Modifier
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .graphicsLayer { shadowElevation = elevation.toPx() }
+                                    .then(dragModifier)
+                            ) {
+                                TotpItemCard(
+                                    item = item,
+                                    onEdit = { onTotpClick(item.id) },
+                                    onToggleSelect = {
+                                        selectedItems = if (selectedItems.contains(item.id)) {
+                                            selectedItems - item.id
+                                        } else {
+                                            selectedItems + item.id
+                                        }
+                                    },
+                                    onDelete = {
+                                        haptic.performWarning()
+                                        requestDeleteItem(item)
+                                    },
+                                    onToggleFavorite = { id, isFavorite ->
+                                        viewModel.toggleFavorite(id, isFavorite)
+                                    },
+                                    onGenerateNext = { id -> viewModel.incrementHotpCounter(id) },
+                                    onShowQrCode = { itemToShowQr = item },
+                                    onLongClick = {
+                                        haptic.performLongPress()
+                                        if (!isSelectionMode) {
+                                            isSelectionMode = true
+                                            selectedItems = setOf(item.id)
+                                        }
+                                    },
+                                    isSelectionMode = isSelectionMode,
+                                    isSelected = selectedItems.contains(item.id),
+                                    sharedTickSeconds = sharedTickSeconds,
+                                    appSettings = totpCardSettings,
+                                    parsedTotpData = totpDataById[item.id],
+                                    compactTile = true
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+            // Standard authenticator layout
             val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
                 // 只在多选模式下允许排序
                 if (isSelectionMode) {
@@ -1089,6 +1265,7 @@ fun TotpListContent(
                 item {
                     Spacer(modifier = Modifier.height(80.dp))
                 }
+            }
             }
         }
     }

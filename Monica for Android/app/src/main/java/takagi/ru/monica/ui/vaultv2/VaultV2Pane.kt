@@ -156,6 +156,7 @@ import takagi.ru.monica.ui.icons.rememberUploadedPasswordIcon
 import takagi.ru.monica.ui.icons.shouldShowFallbackSlot
 import takagi.ru.monica.ui.PasswordQuickFolderBreadcrumb
 import takagi.ru.monica.ui.PasswordQuickFolderBreadcrumbPath
+import takagi.ru.monica.ui.PasswordQuickFolderBreadcrumbBanner
 import takagi.ru.monica.ui.PasswordQuickFolderChipRow
 import takagi.ru.monica.ui.PasswordQuickFolderChipRowParams
 import takagi.ru.monica.ui.PasswordQuickFolderShortcut
@@ -192,6 +193,10 @@ import takagi.ru.monica.ui.password.MdbxCreateSnapshotTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxSyncTopActionsMenuItem
 import takagi.ru.monica.ui.password.PasswordTopActionsDropdownMenu
 import takagi.ru.monica.ui.password.StackCardMode
+import takagi.ru.monica.ui.password.PasswordBatchTransferProgressTracker
+import takagi.ru.monica.ui.password.PasswordBatchDeleteProgressTracker
+import takagi.ru.monica.ui.password.PasswordBatchTransferGlobalProgressState
+import takagi.ru.monica.ui.password.PasswordBatchDeleteGlobalProgressState
 import takagi.ru.monica.ui.password.appendAggregateContentQuickFilterItems
 import takagi.ru.monica.ui.password.resolvePasswordPageDisplayedTypes
 import takagi.ru.monica.ui.password.resolvePasswordPageVisibleTypes
@@ -1438,6 +1443,8 @@ fun VaultV2Pane(
 		initialFirstVisibleItemScrollOffset = state.scrollOffset
 	)
 	val context = LocalContext.current
+	val quickStatusTransferState by PasswordBatchTransferProgressTracker.progress.collectAsState()
+	val quickStatusDeleteState by PasswordBatchDeleteProgressTracker.progress.collectAsState()
 	val database = remember(context) { PasswordDatabase.getDatabase(context) }
 	val isAuthenticated by passwordViewModel.isAuthenticated.collectAsState()
 	val attachmentParentIds by database.attachmentDao()
@@ -2935,6 +2942,8 @@ fun VaultV2Pane(
 					breadcrumbs = pathBreadcrumbs,
 					currentFilter = categoryMenuFilter,
 					mdbxSyncState = mdbxQuickStatusSyncState,
+					transferState = quickStatusTransferState,
+					deleteState = quickStatusDeleteState,
 					onNavigateFilter = navigateCategoryFilter,
 				)
 			}
@@ -3779,8 +3788,21 @@ private fun VaultV2QuickStatusBar(
 	breadcrumbs: List<PasswordQuickFolderBreadcrumb>,
 	currentFilter: CategoryFilter,
 	mdbxSyncState: MdbxPathSyncState?,
+	transferState: PasswordBatchTransferGlobalProgressState?,
+	deleteState: PasswordBatchDeleteGlobalProgressState?,
 	onNavigateFilter: (CategoryFilter) -> Unit,
 ) {
+	if (transferState != null || deleteState != null) {
+		PasswordQuickFolderBreadcrumbBanner(
+			breadcrumbs = breadcrumbs,
+			currentFilter = currentFilter,
+			onNavigate = onNavigateFilter,
+			mdbxSyncState = mdbxSyncState,
+			transferState = transferState,
+			deleteState = deleteState,
+		)
+		return
+	}
 	QuickStatusBar(
 		indicator = {
 			VaultV2QuickStatusIndicator(currentSectionLabel = currentSectionLabel)

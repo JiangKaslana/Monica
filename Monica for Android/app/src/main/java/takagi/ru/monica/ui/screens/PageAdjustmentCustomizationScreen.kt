@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LinearScale
@@ -106,6 +107,7 @@ import takagi.ru.monica.data.AddButtonBehaviorMode
 import takagi.ru.monica.data.AddButtonMenuAction
 import takagi.ru.monica.data.AppLauncherIcon
 import takagi.ru.monica.data.AuthenticatorCardDisplayField
+import takagi.ru.monica.data.AuthenticatorLayoutMode
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.PasswordCardDisplayField
 import takagi.ru.monica.data.PasswordEntry
@@ -1980,6 +1982,7 @@ fun AuthenticatorCardAdjustmentScreen(
                     TotpCodeCard(
                         item = previewItem,
                         onCopyCode = {},
+                        compactTile = settings.authenticatorLayoutMode == AuthenticatorLayoutMode.TILE,
                         appSettings = settings.copy(
                             authenticatorCardDisplayFields = selectedFields.toList(),
                             iconCardsEnabled = settings.iconCardsEnabled && settings.authenticatorPageIconEnabled
@@ -2001,6 +2004,38 @@ fun AuthenticatorCardAdjustmentScreen(
                     Text(
                         text = stringResource(R.string.validator_settings_section),
                         style = MaterialTheme.typography.titleMedium
+                    )
+
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.authenticator_layout_title)) },
+                        supportingContent = { Text(stringResource(R.string.authenticator_layout_description)) },
+                        leadingContent = { Icon(Icons.Default.GridView, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    )
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        listOf(
+                            AuthenticatorLayoutMode.STANDARD to stringResource(R.string.authenticator_layout_standard),
+                            AuthenticatorLayoutMode.TILE to stringResource(R.string.authenticator_layout_tile)
+                        ).forEachIndexed { index, (mode, label) ->
+                            SegmentedButton(
+                                selected = settings.authenticatorLayoutMode == mode,
+                                onClick = { viewModel.updateAuthenticatorLayoutMode(mode) },
+                                shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = 2
+                                ),
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                     )
 
                     ListItem(

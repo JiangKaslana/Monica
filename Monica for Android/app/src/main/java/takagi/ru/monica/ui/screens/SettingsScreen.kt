@@ -88,6 +88,25 @@ import takagi.ru.monica.ui.components.OutlinedTextField
 import java.io.File
 import java.util.Locale
 
+@Composable
+private fun VersionLinkButton(
+    title: String,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun SettingsScreen(
@@ -1357,7 +1376,7 @@ fun SettingsScreen(
             },
             title = { Text(stringResource(R.string.version_info_dialog_title)) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val githubUrl = "https://github.com/Monica-Pass/Monica"
                     val websiteUrl = "https://joyinjoester.github.io/Monica/"
                     val iconSourceUrl = "https://github.com/stratumauth/app/tree/v1.4.0/icons"
@@ -1374,56 +1393,24 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = stringResource(R.string.version_info_github_label),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
+                    Spacer(modifier = Modifier.height(4.dp))
+                    VersionLinkButton(
+                        title = stringResource(R.string.version_info_github_label),
+                        onClick = { openExternalLink(githubUrl) }
                     )
-                    Text(
-                        text = githubUrl,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { openExternalLink(githubUrl) }
+                    VersionLinkButton(
+                        title = stringResource(R.string.version_info_website_label),
+                        onClick = { openExternalLink(websiteUrl) }
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.version_info_website_label),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
+                    VersionLinkButton(
+                        title = stringResource(R.string.version_info_icon_source_label),
+                        onClick = { openExternalLink(iconSourceUrl) }
                     )
-                    Text(
-                        text = websiteUrl,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { openExternalLink(websiteUrl) }
+                    VersionLinkButton(
+                        title = stringResource(R.string.version_info_icon_release_label),
+                        onClick = { openExternalLink(iconReleaseUrl) }
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.version_info_icon_source_label),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = iconSourceUrl,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { openExternalLink(iconSourceUrl) }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.version_info_icon_release_label),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = iconReleaseUrl,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { openExternalLink(iconReleaseUrl) }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = stringResource(R.string.version_info_simple_icons_note),
                         style = MaterialTheme.typography.bodySmall,

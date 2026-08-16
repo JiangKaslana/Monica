@@ -10,6 +10,8 @@ enum class KeePassErrorCode {
     LEGACY_KDB_UNSUPPORTED,
     FORMAT_UNSUPPORTED,
     INVALID_CREDENTIAL,
+    KEY_FILE_UNAVAILABLE,
+    ONEDRIVE_REDIRECT_CONFLICT,
     URI_PERMISSION_DENIED,
     KDF_MEMORY_INSUFFICIENT,
     IO_READ_WRITE_FAILED
@@ -29,6 +31,13 @@ fun Throwable.toKeePassOperationException(): KeePassOperationException {
 
     fun wrap(code: KeePassErrorCode, userMessage: String): KeePassOperationException {
         return KeePassOperationException(code = code, message = userMessage, cause = this)
+    }
+
+    if (isOneDriveRedirectHandlerConflict()) {
+        return wrap(
+            code = KeePassErrorCode.ONEDRIVE_REDIRECT_CONFLICT,
+            userMessage = ONEDRIVE_REDIRECT_CONFLICT_USER_MESSAGE
+        )
     }
 
     if (root is SecurityException || lowerMessage.contains("permission denied") || lowerMessage.contains("eacces")) {

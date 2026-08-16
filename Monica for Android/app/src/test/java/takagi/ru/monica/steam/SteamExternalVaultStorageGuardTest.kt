@@ -39,9 +39,17 @@ class SteamExternalVaultStorageGuardTest {
         assertTrue(bitwarden.contains("AttachmentSource.BITWARDEN"))
         assertTrue(bitwarden.contains("SteamExternalMaFileContract.candidateFileNames"))
         assertTrue(bitwarden.contains("LOGIN_TYPE_STEAM_MAFILE"))
-        assertTrue(bitwarden.contains("if (!hasMarker && !entry.isExternalSteamMaFileEntry()) return null"))
+        assertTrue(bitwarden.contains("if (!hasMarker && !entry.isExternalSteamMaFileEntry())"))
         assertTrue(bitwarden.contains("fetchAttachmentCipherSnapshot("))
         assertTrue(bitwarden.contains("reconcileBitwardenAttachments("))
+        val bitwardenUpsertBody = bitwarden
+            .substringAfter("suspend fun upsertAccount(")
+            .substringBefore("suspend fun deleteAccount(")
+        assertTrue(bitwardenUpsertBody.contains("PENDING_MARKER_VALUE"))
+        assertTrue(bitwardenUpsertBody.contains("fetchAttachmentCipherSnapshot("))
+        assertTrue(bitwardenUpsertBody.contains("requireSteamBitwardenSyncSuccess("))
+        assertFalse(bitwardenUpsertBody.contains("getAttachmentBitwardenContext("))
+        assertFalse(bitwardenUpsertBody.contains("requestLocalMutationSync("))
         val repository = projectFile(
             "app/src/main/java/takagi/ru/monica/bitwarden/repository/BitwardenRepository.kt"
         ).readText()

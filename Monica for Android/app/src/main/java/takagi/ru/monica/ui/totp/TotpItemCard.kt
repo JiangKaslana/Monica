@@ -31,7 +31,8 @@ internal fun TotpItemCard(
     sharedProgressTimeMillis: Long? = null,
     appSettings: AppSettings? = null,
     parsedTotpData: TotpData? = null,
-    decryptStoredValue: ((String) -> String)? = null
+    decryptStoredValue: ((String) -> String)? = null,
+    compactTile: Boolean = false
 ) {
     val context = LocalContext.current
 
@@ -55,7 +56,7 @@ internal fun TotpItemCard(
         onLongClick = onLongClick,
         isSelectionMode = isSelectionMode,
         isSelected = isSelected,
-        allowVibration = true,
+        compactTile = compactTile,
         sharedTickSeconds = sharedTickSeconds,
         sharedProgressTimeMillis = sharedProgressTimeMillis,
         appSettings = appSettings,

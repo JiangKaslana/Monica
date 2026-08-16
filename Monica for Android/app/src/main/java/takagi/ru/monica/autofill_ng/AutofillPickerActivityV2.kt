@@ -92,6 +92,9 @@ import takagi.ru.monica.autofill_ng.core.AutofillLogger
 import takagi.ru.monica.autofill_ng.ui.*
 import takagi.ru.monica.autofill_ng.utils.SmartCopyNotificationHelper
 import takagi.ru.monica.data.LocalKeePassDatabase
+import takagi.ru.monica.data.GeneratorPreferences
+import takagi.ru.monica.data.toSymbolPasswordGeneratorOptions
+import takagi.ru.monica.data.GeneratorPreferencesManager
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.isLocalPasswordOwnership
 import takagi.ru.monica.data.PasswordDatabase
@@ -401,6 +404,7 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
         val securityManager = SecurityManager(applicationContext)
         // settingsManager 已由 BaseMonicaActivity 初始化
         val localSettingsManager = settingsManager
+        val generatorPreferencesManager = GeneratorPreferencesManager(applicationContext)
 
         runCatching {
             val autoLockMinutes = runBlocking {
@@ -422,6 +426,9 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
         )
         
         setContent {
+            val generatorPreferences by produceState<GeneratorPreferences?>(initialValue = null) {
+                value = withContext(Dispatchers.IO) { generatorPreferencesManager.load() }
+            }
             // 读取截图保护设置（截图保护已由 BaseMonicaActivity 统一处理）
             val settings by localSettingsManager.settingsFlow.collectAsState(
                 initial = takagi.ru.monica.data.AppSettings()
@@ -451,6 +458,7 @@ class AutofillPickerActivityV2 : BaseMonicaActivity() {
                     repository = repository,
                     securityManager = securityManager,
                     keepassDatabases = keepassDatabases,
+                    generatorPreferences = generatorPreferences,
                     canSkipVerification = canOpenPicker,
                     requireAuthentication = settings.autofillAuthRequired,
                     biometricEnabled = settings.biometricEnabled,
@@ -1677,6 +1685,7 @@ private fun AutofillPickerContent(
     repository: PasswordRepository,
     securityManager: SecurityManager,
     keepassDatabases: List<LocalKeePassDatabase>,
+    generatorPreferences: GeneratorPreferences? = null,
     canSkipVerification: Boolean = false,
     requireAuthentication: Boolean = true,
     biometricEnabled: Boolean = false,
@@ -1711,21 +1720,54 @@ private fun AutofillPickerContent(
     var showMarkAsNonAutofillDialog by remember { mutableStateOf(false) }
     var structuredCopyDialog by remember { mutableStateOf<StructuredAutofillCopyDialogState?>(null) }
     var showGeneratedPasswordSheet by rememberSaveable { mutableStateOf(false) }
-    var generatedPasswordLength by rememberSaveable { mutableIntStateOf(20) }
-    var generatedIncludeUppercase by rememberSaveable { mutableStateOf(true) }
-    var generatedIncludeLowercase by rememberSaveable { mutableStateOf(true) }
-    var generatedIncludeNumbers by rememberSaveable { mutableStateOf(true) }
-    var generatedIncludeSymbols by rememberSaveable { mutableStateOf(true) }
-    var generatedReadableMode by rememberSaveable { mutableStateOf(true) }
+    val defaultGeneratedPasswordOptions = remember { AutofillPasswordGeneratorOptions() }
+    var generatedPasswordLength by rememberSaveable { mutableIntStateOf(defaultGeneratedPasswordOptions.length) }
+    var generatedIncludeUppercase by rememberSaveable { mutableStateOf(defaultGeneratedPasswordOptions.includeUppercase) }
+    var generatedIncludeLowercase by rememberSaveable { mutableStateOf(defaultGeneratedPasswordOptions.includeLowercase) }
+    var generatedIncludeNumbers by rememberSaveable { mutableStateOf(defaultGeneratedPasswordOptions.includeNumbers) }
+    var generatedIncludeSymbols by rememberSaveable { mutableStateOf(defaultGeneratedPasswordOptions.includeSymbols) }
+    var generatedAllowedSymbols by rememberSaveable { mutableStateOf(defaultGeneratedPasswordOptions.allowedSymbols) }
+    var generatedExcludeSimilar by rememberSaveable { mutableStateOf(defaultGeneratedPasswordOptions.excludeSimilar) }
+    var generatedExcludeAmbiguous by rememberSaveable { mutableStateOf(defaultGeneratedPasswordOptions.excludeAmbiguous) }
+    var generatedUppercaseMin by rememberSaveable { mutableIntStateOf(defaultGeneratedPasswordOptions.uppercaseMin) }
+    var generatedLowercaseMin by rememberSaveable { mutableIntStateOf(defaultGeneratedPasswordOptions.lowercaseMin) }
+    var generatedNumbersMin by rememberSaveable { mutableIntStateOf(defaultGeneratedPasswordOptions.numbersMin) }
+    var generatedSymbolsMin by rememberSaveable { mutableIntStateOf(defaultGeneratedPasswordOptions.symbolsMin) }
+    var generatorPreferencesApplied by rememberSaveable { mutableStateOf(false) }
     val generatedPasswordOptions = AutofillPasswordGeneratorOptions(
         length = generatedPasswordLength,
         includeUppercase = generatedIncludeUppercase,
         includeLowercase = generatedIncludeLowercase,
         includeNumbers = generatedIncludeNumbers,
         includeSymbols = generatedIncludeSymbols,
-        readableMode = generatedReadableMode,
+        allowedSymbols = generatedAllowedSymbols,
+        excludeSimilar = generatedExcludeSimilar,
+        excludeAmbiguous = generatedExcludeAmbiguous,
+        uppercaseMin = generatedUppercaseMin,
+        lowercaseMin = generatedLowercaseMin,
+        numbersMin = generatedNumbersMin,
+        symbolsMin = generatedSymbolsMin,
     )
     var generatedPassword by rememberSaveable { mutableStateOf(generateAutofillPassword(generatedPasswordOptions)) }
+    LaunchedEffect(generatorPreferences) {
+        val preferences = generatorPreferences ?: return@LaunchedEffect
+        if (generatorPreferencesApplied) return@LaunchedEffect
+        val options = preferences.toAutofillPasswordGeneratorOptions()
+        generatedPasswordLength = options.length
+        generatedIncludeUppercase = options.includeUppercase
+        generatedIncludeLowercase = options.includeLowercase
+        generatedIncludeNumbers = options.includeNumbers
+        generatedIncludeSymbols = options.includeSymbols
+        generatedAllowedSymbols = options.allowedSymbols
+        generatedExcludeSimilar = options.excludeSimilar
+        generatedExcludeAmbiguous = options.excludeAmbiguous
+        generatedUppercaseMin = options.uppercaseMin
+        generatedLowercaseMin = options.lowercaseMin
+        generatedNumbersMin = options.numbersMin
+        generatedSymbolsMin = options.symbolsMin
+        generatedPassword = generateAutofillPassword(options)
+        generatorPreferencesApplied = true
+    }
     var useGeneratedPasswordForNextAdd by rememberSaveable { mutableStateOf(false) }
     var sourceFilter by remember { mutableStateOf(AutofillStorageSourceFilter.ALL) }
     var selectedKeePassDatabaseId by remember { mutableStateOf<Long?>(null) }
@@ -2610,8 +2652,14 @@ private fun AutofillPickerContent(
                 generatedPassword = generateAutofillPassword(generatedPasswordOptions.copy(includeSymbols = enabled))
             },
             onReadableModeChange = { enabled ->
-                generatedReadableMode = enabled
-                generatedPassword = generateAutofillPassword(generatedPasswordOptions.copy(readableMode = enabled))
+                generatedExcludeSimilar = enabled
+                generatedExcludeAmbiguous = enabled
+                generatedPassword = generateAutofillPassword(
+                    generatedPasswordOptions.copy(
+                        excludeSimilar = enabled,
+                        excludeAmbiguous = enabled
+                    )
+                )
             },
             onCopy = {
                 onCopy(autofillPasswordLabel, generatedPassword, true)
@@ -3524,14 +3572,41 @@ private data class AutofillFabMenuAction(
     val onClick: () -> Unit,
 )
 
-private data class AutofillPasswordGeneratorOptions(
-    val length: Int = 20,
+internal data class AutofillPasswordGeneratorOptions(
+    val length: Int = 12,
     val includeUppercase: Boolean = true,
     val includeLowercase: Boolean = true,
     val includeNumbers: Boolean = true,
     val includeSymbols: Boolean = true,
-    val readableMode: Boolean = true,
-)
+    val allowedSymbols: String? = null,
+    val excludeSimilar: Boolean = false,
+    val excludeAmbiguous: Boolean = false,
+    val uppercaseMin: Int = 0,
+    val lowercaseMin: Int = 0,
+    val numbersMin: Int = 0,
+    val symbolsMin: Int = 0,
+) {
+    val readableMode: Boolean
+        get() = excludeSimilar || excludeAmbiguous
+}
+
+internal fun GeneratorPreferences.toAutofillPasswordGeneratorOptions(): AutofillPasswordGeneratorOptions {
+    val sharedOptions = toSymbolPasswordGeneratorOptions()
+    return AutofillPasswordGeneratorOptions(
+        length = sharedOptions.length,
+        includeUppercase = sharedOptions.includeUppercase,
+        includeLowercase = sharedOptions.includeLowercase,
+        includeNumbers = sharedOptions.includeNumbers,
+        includeSymbols = sharedOptions.includeSymbols,
+        allowedSymbols = sharedOptions.allowedSymbols,
+        excludeSimilar = sharedOptions.excludeSimilar,
+        excludeAmbiguous = sharedOptions.excludeAmbiguous,
+        uppercaseMin = sharedOptions.uppercaseMin,
+        lowercaseMin = sharedOptions.lowercaseMin,
+        numbersMin = sharedOptions.numbersMin,
+        symbolsMin = sharedOptions.symbolsMin,
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -3808,12 +3883,13 @@ private fun generateAutofillPassword(options: AutofillPasswordGeneratorOptions):
         includeLowercase = options.includeLowercase,
         includeNumbers = options.includeNumbers,
         includeSymbols = options.includeSymbols,
-        excludeSimilar = options.readableMode,
-        excludeAmbiguous = options.readableMode,
-        uppercaseMin = if (options.includeUppercase) 1 else 0,
-        lowercaseMin = if (options.includeLowercase) 1 else 0,
-        numbersMin = if (options.includeNumbers) 1 else 0,
-        symbolsMin = if (options.includeSymbols) 1 else 0
+        allowedSymbols = options.allowedSymbols,
+        excludeSimilar = options.excludeSimilar,
+        excludeAmbiguous = options.excludeAmbiguous,
+        uppercaseMin = if (options.includeUppercase) options.uppercaseMin else 0,
+        lowercaseMin = if (options.includeLowercase) options.lowercaseMin else 0,
+        numbersMin = if (options.includeNumbers) options.numbersMin else 0,
+        symbolsMin = if (options.includeSymbols) options.symbolsMin else 0
     )
 }
 

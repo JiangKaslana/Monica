@@ -6,6 +6,7 @@ import java.util.Locale
 object SteamExternalMaFileContract {
     const val MARKER_FIELD = "Monica.Type"
     const val MARKER_VALUE = "steam_mafile_v1"
+    const val PENDING_MARKER_VALUE = "steam_mafile_pending_v1"
     const val MIME_TYPE = "application/json"
     const val MAX_MAFILE_BYTES = 1024 * 1024
 
@@ -24,6 +25,13 @@ object SteamExternalMaFileContract {
 
     fun selectMaFile(fileNames: Iterable<String>): String? {
         return fileNames.filter(::isMaFile).distinct().singleOrNull()
+    }
+
+    fun isPending(fields: Iterable<Pair<String, String>>): Boolean {
+        return fields.any { (name, value) ->
+            name.trim().equals(MARKER_FIELD, ignoreCase = true) &&
+                value.trim().equals(PENDING_MARKER_VALUE, ignoreCase = true)
+        }
     }
 
     /**

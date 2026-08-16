@@ -154,8 +154,11 @@ fun keepassImportSuggestion(context: Context, code: KeePassErrorCode): String {
             context.getString(R.string.import_data_keepass_tip_legacy_kdb)
         KeePassErrorCode.INVALID_CREDENTIAL ->
             context.getString(R.string.import_data_keepass_tip_invalid_credential)
+        KeePassErrorCode.KEY_FILE_UNAVAILABLE,
         KeePassErrorCode.URI_PERMISSION_DENIED ->
             context.getString(R.string.import_data_keepass_tip_permission)
+        KeePassErrorCode.ONEDRIVE_REDIRECT_CONFLICT ->
+            context.getString(R.string.import_data_keepass_tip_io_failed)
         KeePassErrorCode.KDF_MEMORY_INSUFFICIENT ->
             context.getString(R.string.import_data_keepass_tip_kdf_memory)
         KeePassErrorCode.FORMAT_UNSUPPORTED ->

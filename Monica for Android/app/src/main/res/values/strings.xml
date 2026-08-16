@@ -2556,6 +2556,13 @@
     <string name="local_keepass_reverify_password">Re-verify database password</string>
     <string name="local_keepass_reverify_dialog_title">Verify KeePass password</string>
     <string name="local_keepass_reverify_dialog_desc">Enter password and/or select key file to verify and update saved credentials.</string>
+    <string name="local_keepass_repair_credentials">Update password or key file</string>
+    <string name="local_keepass_key_file_repair_hint">This database uses a key file. If the original file was moved or access expired, select the same key file again.</string>
+    <string name="local_keepass_key_file_access_title">Key file access</string>
+    <string name="local_keepass_key_file_access_checking">Checking access…</string>
+    <string name="local_keepass_key_file_access_available">Key file is readable</string>
+    <string name="local_keepass_key_file_access_unavailable">Key file cannot be read</string>
+    <string name="local_keepass_key_file_unavailable_error">The key file cannot be read. Open Settings &gt; Database &amp; backup &gt; Local KeePass database, then select the original key file again.</string>
     <string name="no_keepass_database">No KeePass Database</string>
     <string name="no_keepass_database_description">Create a new database or open an existing one</string>
     <string name="create_database">Create Database</string>
@@ -3802,6 +3809,14 @@
     <string name="local_keepass_select_key_file">Select key file</string>
     <string name="local_keepass_no_key_file_selected">No key file selected</string>
     <string name="local_keepass_key_file_selected">Key file selected</string>
+    <string name="local_keepass_keep_key_file_copy">Keep a private Monica copy</string>
+    <string name="local_keepass_keep_key_file_copy_desc">The original file is kept unchanged. The encrypted copy can be included in encrypted full backups.</string>
+    <string name="local_keepass_key_file_private_copy">Monica private copy</string>
+    <string name="local_keepass_key_file_external_source">Original external file</string>
+    <string name="local_keepass_keep_key_file_copy_action">Keep a private copy</string>
+    <string name="local_keepass_export_key_file_copy">Export copy</string>
+    <string name="local_keepass_delete_key_file_copy">Delete copy</string>
+    <string name="local_keepass_delete_key_file_copy_confirm">Only Monica\'s private copy will be deleted. The original external key file remains unchanged.</string>
     <string name="plus_feature_premium_themes_title">Premium themes</string>
     <string name="plus_feature_premium_themes_desc">Unlock exclusive theme palettes such as Monet.</string>
     <string name="plus_feature_notification_validator_title">Notification authenticator</string>
@@ -4266,4 +4281,8 @@
     <string name="keepass_permission_repair_success">KDBX read and write access restored</string>
     <string name="keepass_permission_repair_dialog_title">Write access required</string>
     <string name="keepass_permission_repair_dialog_message">This KDBX file cannot save the deletion because Monica does not have write access. Re-select the original KDBX file to restore access and continue.</string>
+    <string name="authenticator_layout_title">Layout style</string>
+    <string name="authenticator_layout_description">Choose the existing card list or a compact two-column tile view</string>
+    <string name="authenticator_layout_standard">Standard</string>
+    <string name="authenticator_layout_tile">Tiles</string>
 </resources>

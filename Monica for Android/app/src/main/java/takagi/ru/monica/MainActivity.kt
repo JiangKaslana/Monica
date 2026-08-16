@@ -2490,8 +2490,9 @@ fun MonicaContent(
                     fun saveScannedTotp(
                         title: String,
                         totpData: takagi.ru.monica.data.model.TotpData,
-                        onComplete: (Boolean) -> Unit
+                        onComplete: (Boolean, String?) -> Unit
                     ) {
+                        var failureMessage: String? = null
                         totpViewModel.saveTotpAcrossTargets(
                             id = null,
                             title = title,
@@ -2499,7 +2500,8 @@ fun MonicaContent(
                             totpData = totpData,
                             isFavorite = false,
                             targets = quickScanTargetsForCurrentFilter(),
-                            onComplete = onComplete
+                            onFailure = { message -> failureMessage = message },
+                            onComplete = { saved -> onComplete(saved, failureMessage) }
                         )
                     }
 
@@ -2514,13 +2516,14 @@ fun MonicaContent(
                                     Toast.LENGTH_SHORT
                                 ).show()
                             } else {
-                                saveScannedTotp(title, scanResult.item.totpData) { saved ->
+                                saveScannedTotp(title, scanResult.item.totpData) { saved, failureMessage ->
                                     Toast.makeText(
                                         context,
                                         if (saved) {
                                             context.getString(R.string.qr_authenticator_added, title)
                                         } else {
-                                            context.getString(R.string.save_failed_with_error, title)
+                                            failureMessage
+                                                ?: context.getString(R.string.save_failed_with_error, title)
                                         },
                                         Toast.LENGTH_SHORT
                                     ).show()

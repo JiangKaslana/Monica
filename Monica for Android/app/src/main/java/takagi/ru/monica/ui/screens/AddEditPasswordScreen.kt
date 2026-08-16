@@ -76,6 +76,9 @@ import kotlinx.serialization.json.Json
 import takagi.ru.monica.R
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.CustomFieldDraft
+import takagi.ru.monica.data.GeneratorPreferences
+import takagi.ru.monica.data.GeneratorPreferencesManager
+import takagi.ru.monica.data.toSymbolPasswordGeneratorOptions
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.LinkedAppBinding
 import takagi.ru.monica.data.PasswordDatabase
@@ -134,7 +137,7 @@ import takagi.ru.monica.ui.password.UsernameSuggestionPanel
 import takagi.ru.monica.ui.password.UsernameSuggestionState
 import takagi.ru.monica.ui.password.buildUsernameSuggestionState
 import takagi.ru.monica.util.TotpDataResolver
-import takagi.ru.monica.utils.PasswordGenerator
+import takagi.ru.monica.util.PasswordGenerator as AdvancedPasswordGenerator
 import takagi.ru.monica.utils.PasswordWebsiteCodec
 import takagi.ru.monica.utils.PasswordStrengthAnalyzer
 import takagi.ru.monica.utils.ClipboardUtils
@@ -277,6 +280,15 @@ fun AddEditPasswordScreen(
     // 获取设置以读取进度条样式
     val settingsManager = remember { takagi.ru.monica.utils.SettingsManager(context) }
     val settings by settingsManager.settingsFlow.collectAsState(initial = takagi.ru.monica.data.AppSettings())
+    val generatorPreferencesManager = remember {
+        GeneratorPreferencesManager(context.applicationContext)
+    }
+    val generatorPreferences by generatorPreferencesManager.preferencesFlow.collectAsState(
+        initial = GeneratorPreferences()
+    )
+    val generatorPasswordOptions = remember(generatorPreferences) {
+        generatorPreferences.toSymbolPasswordGeneratorOptions()
+    }
     
     // 获取预设自定义字段列表
     val presetCustomFields by settingsManager.presetCustomFieldsFlow.collectAsState(initial = emptyList())
@@ -558,7 +570,6 @@ fun AddEditPasswordScreen(
     var customFieldsExpanded by remember { mutableStateOf(false) }
     var separatedUsername by rememberSaveable { mutableStateOf("") }
     val inlineGeneratedPasswords = remember { mutableStateMapOf<Int, String>() }
-    val inlinePasswordGenerator = remember { PasswordGenerator() }
     val selectedAuthenticatorOtpType = remember(selectedAuthenticatorOtpTypeName) {
         runCatching { OtpType.valueOf(selectedAuthenticatorOtpTypeName) }.getOrDefault(OtpType.TOTP)
     }
@@ -1129,7 +1140,20 @@ fun AddEditPasswordScreen(
     }
 
     fun generateInlinePasswordSuggestion(): String {
-        return inlinePasswordGenerator.generatePassword()
+        return AdvancedPasswordGenerator.generatePassword(
+            length = generatorPasswordOptions.length,
+            includeUppercase = generatorPasswordOptions.includeUppercase,
+            includeLowercase = generatorPasswordOptions.includeLowercase,
+            includeNumbers = generatorPasswordOptions.includeNumbers,
+            includeSymbols = generatorPasswordOptions.includeSymbols,
+            allowedSymbols = generatorPasswordOptions.allowedSymbols,
+            excludeSimilar = generatorPasswordOptions.excludeSimilar,
+            excludeAmbiguous = generatorPasswordOptions.excludeAmbiguous,
+            uppercaseMin = generatorPasswordOptions.uppercaseMin,
+            lowercaseMin = generatorPasswordOptions.lowercaseMin,
+            numbersMin = generatorPasswordOptions.numbersMin,
+            symbolsMin = generatorPasswordOptions.symbolsMin
+        )
     }
 
     fun ensureInlinePasswordSuggestion(index: Int) {
@@ -4390,6 +4414,7 @@ fun AddEditPasswordScreen(
     if (showPasswordGenerator) {
         PasswordGeneratorDialog(
             commonPasswordOptions = buildCommonAccountOptions("password"),
+            generatorPreferences = generatorPreferences,
             onDismiss = { showPasswordGenerator = false },
             onPasswordGenerated = { generatedPassword ->
                 if (currentPasswordIndexForGenerator >= 0 && currentPasswordIndexForGenerator < passwords.size) {
@@ -5516,34 +5541,48 @@ private fun CollapsibleCard(
 @Composable
 private fun PasswordGeneratorDialog(
     commonPasswordOptions: List<CommonAccountFillOption>,
+    generatorPreferences: GeneratorPreferences,
     onDismiss: () -> Unit,
     onPasswordGenerated: (String) -> Unit
 ) {
-    val passwordGenerator = remember { PasswordGenerator() }
+    val defaultOptions = remember(generatorPreferences) {
+        generatorPreferences.toSymbolPasswordGeneratorOptions()
+    }
     val configuration = LocalConfiguration.current
     val contentViewportHeight = remember(configuration.screenHeightDp) {
         (configuration.screenHeightDp.dp * 0.46f).coerceIn(280.dp, 420.dp)
     }
     val generatorScrollState = rememberScrollState()
-    var length by remember { mutableStateOf(16) }
-    var includeUppercase by remember { mutableStateOf(true) }
-    var includeLowercase by remember { mutableStateOf(true) }
-    var includeNumbers by remember { mutableStateOf(true) }
-    var includeSymbols by remember { mutableStateOf(true) }
-    var excludeSimilar by remember { mutableStateOf(true) }
+    var length by remember(defaultOptions) { mutableIntStateOf(defaultOptions.length) }
+    var includeUppercase by remember(defaultOptions) { mutableStateOf(defaultOptions.includeUppercase) }
+    var includeLowercase by remember(defaultOptions) { mutableStateOf(defaultOptions.includeLowercase) }
+    var includeNumbers by remember(defaultOptions) { mutableStateOf(defaultOptions.includeNumbers) }
+    var includeSymbols by remember(defaultOptions) { mutableStateOf(defaultOptions.includeSymbols) }
+    var excludeSimilar by remember(defaultOptions) { mutableStateOf(defaultOptions.excludeSimilar) }
     var generatedPassword by remember { mutableStateOf("") }
     var fillMode by remember { mutableStateOf(PasswordFillMode.GENERATOR) }
     
     // Helper to generate
     fun generate() {
         try {
-            generatedPassword = passwordGenerator.generatePassword(
-                PasswordGenerator.PasswordOptions(length, includeUppercase, includeLowercase, includeNumbers, includeSymbols, excludeSimilar)
+            generatedPassword = AdvancedPasswordGenerator.generatePassword(
+                length = length,
+                includeUppercase = includeUppercase,
+                includeLowercase = includeLowercase,
+                includeNumbers = includeNumbers,
+                includeSymbols = includeSymbols,
+                allowedSymbols = defaultOptions.allowedSymbols,
+                excludeSimilar = excludeSimilar,
+                excludeAmbiguous = defaultOptions.excludeAmbiguous,
+                uppercaseMin = defaultOptions.uppercaseMin,
+                lowercaseMin = defaultOptions.lowercaseMin,
+                numbersMin = defaultOptions.numbersMin,
+                symbolsMin = defaultOptions.symbolsMin
             )
         } catch (e: Exception) {}
     }
 
-    LaunchedEffect(Unit) { generate() }
+    LaunchedEffect(defaultOptions) { generate() }
 
     Dialog(
         onDismissRequest = onDismiss,

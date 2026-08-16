@@ -69,11 +69,15 @@ import takagi.ru.monica.utils.KeePassCodecSupport
 import takagi.ru.monica.utils.KeePassOperationException
 import takagi.ru.monica.utils.KeePassGroupInfo
 import takagi.ru.monica.utils.KeePassKdbxService
+import takagi.ru.monica.utils.KeePassKeyFileStore
 import takagi.ru.monica.utils.KeePassFileNameResolver
 import takagi.ru.monica.utils.KeePassUriPermissionState
 import takagi.ru.monica.utils.keePassUriPermissionState
+import takagi.ru.monica.utils.persistKeePassKeyFileReadPermission
+import takagi.ru.monica.utils.readKeePassKeyFileBytes
 import takagi.ru.monica.utils.OneDriveKeePassFileSource
 import takagi.ru.monica.utils.OneDriveKeePassSupport
+import takagi.ru.monica.utils.toOneDriveUserMessage
 import takagi.ru.monica.utils.OperationLogger
 import takagi.ru.monica.utils.RemoteKeePassSyncService
 import takagi.ru.monica.utils.WebDavKeePassFileSource
@@ -140,8 +144,11 @@ class LocalKeePassViewModel(
     private val _groupsByDatabase = MutableStateFlow<Map<Long, List<KeePassGroupInfo>>>(emptyMap())
     private val _verificationStates = MutableStateFlow<Map<Long, VerificationState>>(emptyMap())
     val verificationStates: StateFlow<Map<Long, VerificationState>> = _verificationStates.asStateFlow()
+    private val _keyFileAccessStates = MutableStateFlow<Map<Long, KeyFileAccessState>>(emptyMap())
+    val keyFileAccessStates: StateFlow<Map<Long, KeyFileAccessState>> = _keyFileAccessStates.asStateFlow()
 
     private val kdbxService = KeePassKdbxService(context, dao, securityManager)
+    private val keyFileStore by lazy { KeePassKeyFileStore(context) }
     private val workspaceRepository = KeePassWorkspaceRepository(kdbxService)
     private val compatibilityBridge = KeePassCompatibilityBridge(workspaceRepository)
     private val verificationMutex = Mutex()
@@ -251,6 +258,169 @@ class LocalKeePassViewModel(
     fun pruneVerificationStates(databaseIds: List<Long>) {
         val idSet = databaseIds.toSet()
         _verificationStates.update { current -> current.filterKeys { it in idSet } }
+        _keyFileAccessStates.update { current -> current.filterKeys { it in idSet } }
+    }
+
+    fun refreshKeyFileAccessState(databaseId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val database = dao.getDatabaseById(databaseId) ?: return@launch
+            val hasKeyFile = !database.keyFileInternalPath.isNullOrBlank() ||
+                !database.keyFileUri.isNullOrBlank()
+            if (!hasKeyFile) {
+                _keyFileAccessStates.update { current -> current - databaseId }
+                return@launch
+            }
+
+            _keyFileAccessStates.update { current ->
+                current + (databaseId to KeyFileAccessState.CHECKING)
+            }
+            val accessResult = runCatching {
+                keyFileStore.read(database) ?: error("密钥文件不可用")
+            }
+            _keyFileAccessStates.update { current ->
+                current + (
+                    databaseId to if (accessResult.isSuccess) {
+                        KeyFileAccessState.AVAILABLE
+                    } else {
+                        KeyFileAccessState.UNAVAILABLE
+                    }
+                )
+            }
+            accessResult.exceptionOrNull()?.let { error ->
+                _verificationStates.update { current ->
+                    current + (
+                        databaseId to VerificationState.Failed(
+                            error.message ?: context.getString(
+                                takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
+                            )
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun keepKeyFileCopy(databaseId: Long, sourceUri: Uri) {
+        viewModelScope.launch {
+            _operationState.value = OperationState.Loading("正在保存密钥文件副本...")
+            try {
+                withContext(Dispatchers.IO) {
+                    val database = dao.getDatabaseById(databaseId)
+                        ?: throw IllegalArgumentException("数据库不存在")
+                    workspaceRepository.inspectDatabase(
+                        databaseId = databaseId,
+                        keyFileUriOverride = sourceUri,
+                    ).getOrElse { throw it }
+
+                    context.contentResolver.persistKeePassKeyFileReadPermission(sourceUri)
+                    val stored = keyFileStore.copyFromUri(sourceUri, sourceUri.lastPathSegment)
+                    dao.updateDatabase(
+                        database.copy(
+                            keyFileUri = sourceUri.toString(),
+                            keyFileInternalPath = stored.relativePath,
+                            keyFileName = stored.fileName,
+                            keyFileFingerprint = stored.fingerprint,
+                            lastAccessedAt = System.currentTimeMillis(),
+                        )
+                    )
+                    KeePassKdbxService.invalidateProcessCache(databaseId)
+                }
+                refreshKeyFileAccessState(databaseId)
+                _operationState.value = OperationState.Success("已在 Monica 中保留密钥文件副本，原文件未被修改")
+            } catch (error: Exception) {
+                _operationState.value = OperationState.Error("保存密钥文件副本失败: ${formatOperationError(error)}")
+            }
+        }
+    }
+
+    fun exportKeyFileCopy(databaseId: Long, targetUri: Uri) {
+        viewModelScope.launch {
+            _operationState.value = OperationState.Loading("正在导出密钥文件...")
+            try {
+                withContext(Dispatchers.IO) {
+                    val database = dao.getDatabaseById(databaseId)
+                        ?: throw IllegalArgumentException("数据库不存在")
+                    val relativePath = database.keyFileInternalPath
+                        ?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalStateException("没有可导出的内部密钥文件副本")
+                    keyFileStore.exportInternal(relativePath, targetUri)
+                    context.contentResolver.persistKeePassKeyFileReadPermission(targetUri)
+                    val exportedName = KeePassFileNameResolver.queryDisplayName(
+                        context.contentResolver,
+                        targetUri,
+                    )?.takeIf { it.isNotBlank() }
+                    dao.updateDatabase(
+                        database.copy(
+                            // The exported file becomes a verified external fallback.
+                            // This also lets users safely remove the Monica copy later.
+                            keyFileUri = targetUri.toString(),
+                            keyFileName = exportedName ?: database.keyFileName,
+                            lastAccessedAt = System.currentTimeMillis(),
+                        )
+                    )
+                    KeePassKdbxService.invalidateProcessCache(databaseId)
+                }
+                refreshKeyFileAccessState(databaseId)
+                _operationState.value = OperationState.Success("密钥文件已导出，并保留为外部来源")
+            } catch (error: Exception) {
+                _operationState.value = OperationState.Error("导出密钥文件失败: ${formatOperationError(error)}")
+            }
+        }
+    }
+
+    fun deleteKeyFileCopy(databaseId: Long) {
+        viewModelScope.launch {
+            _operationState.value = OperationState.Loading("正在删除内部密钥文件副本...")
+            try {
+                withContext(Dispatchers.IO) {
+                    val database = dao.getDatabaseById(databaseId)
+                        ?: throw IllegalArgumentException("数据库不存在")
+                    val relativePath = database.keyFileInternalPath
+                        ?.takeIf { it.isNotBlank() }
+                        ?: return@withContext
+                    val externalUri = database.keyFileUri
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let(Uri::parse)
+                        ?: throw IllegalStateException("请先导出并重新选择外部密钥文件，再删除内部副本")
+                    val externalBytes = context.contentResolver.readKeePassKeyFileBytes(
+                        uri = externalUri,
+                        unavailableMessage = "原密钥文件不可用，请先导出内部副本",
+                    )
+                    val internalFingerprint = KeePassKeyFileStore.fingerprint(
+                        keyFileStore.readInternal(relativePath)
+                    )
+                    if (
+                        !database.keyFileFingerprint.isNullOrBlank() &&
+                        !internalFingerprint.equals(database.keyFileFingerprint, ignoreCase = true)
+                    ) {
+                        throw IllegalStateException("内部密钥文件校验失败，已取消删除")
+                    }
+                    val externalFingerprint = KeePassKeyFileStore.fingerprint(externalBytes)
+                    if (!externalFingerprint.equals(internalFingerprint, ignoreCase = true)) {
+                        throw IllegalStateException("外部密钥文件与内部副本不一致，已取消删除")
+                    }
+
+                    dao.updateDatabase(
+                        database.copy(
+                            keyFileInternalPath = null,
+                            keyFileFingerprint = internalFingerprint,
+                            lastAccessedAt = System.currentTimeMillis(),
+                        )
+                    )
+                    KeePassKdbxService.invalidateProcessCache(databaseId)
+                    val stillReferenced = dao.getAllDatabasesSync().any { other ->
+                        other.id != databaseId && other.keyFileInternalPath == relativePath
+                    }
+                    if (!stillReferenced && !keyFileStore.deleteInternal(relativePath)) {
+                        throw IllegalStateException("内部副本记录已移除，但文件清理失败")
+                    }
+                }
+                refreshKeyFileAccessState(databaseId)
+                _operationState.value = OperationState.Success("内部副本已删除，原密钥文件仍保留")
+            } catch (error: Exception) {
+                _operationState.value = OperationState.Error("删除内部副本失败: ${formatOperationError(error)}")
+            }
+        }
     }
 
     fun verifyDatabaseCredentials(databaseId: Long, force: Boolean = true) {
@@ -394,6 +564,20 @@ class LocalKeePassViewModel(
                     } else {
                         database.encryptedPassword?.let { securityManager.decryptData(it) } ?: ""
                     }
+
+                    // Read the newly selected key before verification so that we can
+                    // compare its content (rather than only its URI) with the
+                    // optional Monica-private copy.  The private copy must never
+                    // remain the preferred credential after the user selects a
+                    // different key file.
+                    val selectedKeyFileFingerprint = keyFileUri?.let { uri ->
+                        context.contentResolver.readKeePassKeyFileBytes(
+                            uri = uri,
+                            unavailableMessage = context.getString(
+                                takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
+                            ),
+                        ).let(KeePassKeyFileStore::fingerprint)
+                    }
                     val verifyStart = SystemClock.elapsedRealtime()
                     val verifyResult = workspaceRepository.inspectDatabase(
                         databaseId = databaseId,
@@ -406,17 +590,45 @@ class LocalKeePassViewModel(
                     val options = diagnostics.creationOptions
                     val encryptedPassword = securityManager.encryptData(passwordToUse)
                     if (keyFileUri != null) {
+                        context.contentResolver.persistKeePassKeyFileReadPermission(keyFileUri)
+                    }
+
+                    val previousInternalPath = database.keyFileInternalPath
+                        ?.takeIf { it.isNotBlank() }
+                    val previousInternalFingerprint = previousInternalPath?.let { relativePath ->
+                        // Verify the bytes on disk instead of trusting the cached
+                        // metadata.  A damaged or missing copy must be detached
+                        // when a replacement key is selected.
                         runCatching {
-                            context.contentResolver.takePersistableUriPermission(
-                                keyFileUri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            )
-                        }
+                            KeePassKeyFileStore.fingerprint(keyFileStore.readInternal(relativePath))
+                        }.getOrNull()
+                    }
+                    val shouldClearPreviousInternalCopy = keyFileUri != null &&
+                        previousInternalPath != null &&
+                        !selectedKeyFileFingerprint.equals(
+                            previousInternalFingerprint,
+                            ignoreCase = true,
+                        )
+                    val keyFileName = keyFileUri?.lastPathSegment
+                        ?.substringAfterLast('/')
+                        ?.takeIf { it.isNotBlank() }
+                    val updatedInternalPath = if (shouldClearPreviousInternalCopy) {
+                        null
+                    } else {
+                        database.keyFileInternalPath
+                    }
+                    val updatedKeyFileFingerprint = if (keyFileUri != null) {
+                        selectedKeyFileFingerprint
+                    } else {
+                        database.keyFileFingerprint
                     }
                     dao.updateDatabase(
                         database.copy(
                             encryptedPassword = encryptedPassword,
                             keyFileUri = keyFileUri?.toString() ?: database.keyFileUri,
+                            keyFileInternalPath = updatedInternalPath,
+                            keyFileName = if (keyFileUri != null) keyFileName else database.keyFileName,
+                            keyFileFingerprint = updatedKeyFileFingerprint,
                             entryCount = count,
                             kdbxMajorVersion = options.formatVersion.majorVersion,
                             cipherAlgorithm = options.cipherAlgorithm.name,
@@ -427,6 +639,39 @@ class LocalKeePassViewModel(
                             lastAccessedAt = System.currentTimeMillis()
                         )
                     )
+                    KeePassKdbxService.invalidateProcessCache(databaseId)
+
+                    // The database now points at the newly selected external URI
+                    // (or at the existing internal copy when the key was not
+                    // changed).  Clean up the superseded private copy only when
+                    // no other database record references it.  Cleanup failure
+                    // must not invalidate an otherwise successful credential
+                    // update; it is safe to leave an orphaned encrypted file.
+                    if (shouldClearPreviousInternalCopy) {
+                        val obsoleteInternalPath = checkNotNull(previousInternalPath)
+                        val stillReferenced = dao.getAllDatabasesSync().any { other ->
+                            other.id != databaseId &&
+                                other.keyFileInternalPath == obsoleteInternalPath
+                        }
+                        if (!stillReferenced) {
+                            runCatching { keyFileStore.deleteInternal(obsoleteInternalPath) }
+                                .onSuccess { deleted ->
+                                    if (!deleted) {
+                                        Log.w(
+                                            TAG,
+                                            "Superseded KeePass key-file copy could not be removed",
+                                        )
+                                    }
+                                }
+                                .onFailure { error ->
+                                    Log.w(
+                                        TAG,
+                                        "Unable to remove superseded KeePass key-file copy",
+                                        error,
+                                    )
+                                }
+                        }
+                    }
                     _verificationStates.update { current ->
                         current + (
                             databaseId to VerificationState.Verified(
@@ -437,11 +682,13 @@ class LocalKeePassViewModel(
                     }
                 }
                 _operationState.value = OperationState.Success("密码验证成功（${verifyElapsedMs}ms）")
+                refreshKeyFileAccessState(databaseId)
             } catch (e: Exception) {
                 _verificationStates.update { current ->
                     current + (databaseId to VerificationState.Failed(e.message ?: "验证失败"))
                 }
                 _operationState.value = OperationState.Error("验证失败: ${formatOperationError(e)}")
+                refreshKeyFileAccessState(databaseId)
             }
         }
     }
@@ -606,7 +853,8 @@ class LocalKeePassViewModel(
         externalUri: Uri? = null,
         keyFileUri: Uri? = null,
         creationOptions: KeePassDatabaseCreationOptions = KeePassDatabaseCreationOptions(),
-        description: String? = null
+        description: String? = null,
+        keepKeyFileCopy: Boolean = false
     ) {
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("正在创建数据库...")
@@ -617,19 +865,10 @@ class LocalKeePassViewModel(
                 withContext(Dispatchers.IO) {
                     val encryptedPassword = if (password.isNotBlank()) securityManager.encryptData(password) else null
                     
-                    // 读取密钥文件
-                    val keyFileBytes = keyFileUri?.let { uri ->
-                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                            ?: throw Exception("无法读取密钥文件")
-                    }
-                    
-                    if (keyFileUri != null) {
-                        runCatching {
-                            context.contentResolver.takePersistableUriPermission(
-                                keyFileUri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            )
-                        }
+                    // 密钥文件只需要持久读取权限，部分提供器不会授予写权限。
+                    val keyFileBytes = readKeyFileBytes(keyFileUri)
+                    val storedKeyFile = keyFileUri?.takeIf { keepKeyFileCopy }?.let { uri ->
+                        keyFileStore.copyFromUri(uri, uri.lastPathSegment)
                     }
                     
                     // 生成文件名
@@ -688,6 +927,10 @@ class LocalKeePassViewModel(
                         name = name,
                         filePath = filePath,
                         keyFileUri = keyFileUri?.toString(),
+                        keyFileInternalPath = storedKeyFile?.relativePath,
+                        keyFileName = storedKeyFile?.fileName
+                            ?: keyFileUri?.lastPathSegment?.substringAfterLast('/'),
+                        keyFileFingerprint = storedKeyFile?.fingerprint,
                         storageLocation = storageLocation,
                         encryptedPassword = encryptedPassword,
                         description = description,
@@ -780,7 +1023,8 @@ class LocalKeePassViewModel(
         uri: Uri,
         password: String,
         keyFileUri: Uri? = null,
-        description: String? = null
+        description: String? = null,
+        keepKeyFileCopy: Boolean = false
     ) {
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("正在添加数据库...")
@@ -840,13 +1084,32 @@ class LocalKeePassViewModel(
                         context.contentResolver.openInputStream(keyFileUri)?.close()
                             ?: throw Exception("无法访问密钥文件")
                     }
-                    
                     val uriPath = uri.toString()
                     val existing = dao.getAllDatabasesSync().firstOrNull { it.filePath == uriPath }
+                    val storedKeyFile = keyFileUri?.takeIf { keepKeyFileCopy }?.let { selectedUri ->
+                        keyFileStore.copyFromUri(selectedUri, selectedUri.lastPathSegment)
+                    }
                     if (existing != null) {
+                        val keyFileChanged = keyFileUri != null &&
+                            keyFileUri.toString() != existing.keyFileUri
                         val updated = existing.copy(
                             name = importedDatabaseName,
                             keyFileUri = keyFileUri?.toString() ?: existing.keyFileUri,
+                            keyFileInternalPath = when {
+                                storedKeyFile != null -> storedKeyFile.relativePath
+                                keyFileChanged -> null
+                                else -> existing.keyFileInternalPath
+                            },
+                            keyFileName = when {
+                                storedKeyFile != null -> storedKeyFile.fileName
+                                keyFileChanged -> keyFileUri?.lastPathSegment?.substringAfterLast('/')
+                                else -> existing.keyFileName
+                            },
+                            keyFileFingerprint = when {
+                                storedKeyFile != null -> storedKeyFile.fingerprint
+                                keyFileChanged -> null
+                                else -> existing.keyFileFingerprint
+                            },
                             storageLocation = KeePassStorageLocation.EXTERNAL,
                             encryptedPassword = encryptedPassword,
                             description = description ?: existing.description,
@@ -890,6 +1153,10 @@ class LocalKeePassViewModel(
                             name = importedDatabaseName,
                             filePath = uriPath,
                             keyFileUri = keyFileUri?.toString(),
+                            keyFileInternalPath = storedKeyFile?.relativePath,
+                            keyFileName = storedKeyFile?.fileName
+                                ?: keyFileUri?.lastPathSegment?.substringAfterLast('/'),
+                            keyFileFingerprint = storedKeyFile?.fingerprint,
                             storageLocation = KeePassStorageLocation.EXTERNAL,
                             encryptedPassword = encryptedPassword,
                             description = description,
@@ -949,7 +1216,8 @@ class LocalKeePassViewModel(
         remotePath: String,
         databasePassword: String,
         keyFileUri: Uri? = null,
-        description: String? = null
+        description: String? = null,
+        keepKeyFileCopy: Boolean = false
     ) {
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("正在接入 WebDAV 数据库...")
@@ -964,7 +1232,8 @@ class LocalKeePassViewModel(
                         remotePath = remotePath,
                         databasePassword = databasePassword,
                         keyFileUri = keyFileUri,
-                        description = description
+                        description = description,
+                        keepKeyFileCopy = keepKeyFileCopy
                     )
                 }
 
@@ -993,7 +1262,8 @@ class LocalKeePassViewModel(
         databasePassword: String,
         keyFileUri: Uri? = null,
         creationOptions: KeePassDatabaseCreationOptions = KeePassDatabaseCreationOptions(),
-        description: String? = null
+        description: String? = null,
+        keepKeyFileCopy: Boolean = false
     ) {
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("正在创建远端数据库...")
@@ -1036,7 +1306,8 @@ class LocalKeePassViewModel(
                         remotePath = createdFile.path,
                         databasePassword = databasePassword,
                         keyFileUri = keyFileUri,
-                        description = description
+                        description = description,
+                        keepKeyFileCopy = keepKeyFileCopy
                     )
                 }
 
@@ -1063,7 +1334,8 @@ class LocalKeePassViewModel(
         remotePath: String,
         databasePassword: String,
         keyFileUri: Uri? = null,
-        description: String? = null
+        description: String? = null,
+        keepKeyFileCopy: Boolean = false
     ) {
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("正在接入 OneDrive 数据库...")
@@ -1077,7 +1349,8 @@ class LocalKeePassViewModel(
                         remotePath = remotePath,
                         databasePassword = databasePassword,
                         keyFileUri = keyFileUri,
-                        description = description
+                        description = description,
+                        keepKeyFileCopy = keepKeyFileCopy
                     )
                 }
 
@@ -1105,7 +1378,8 @@ class LocalKeePassViewModel(
         databasePassword: String,
         keyFileUri: Uri? = null,
         creationOptions: KeePassDatabaseCreationOptions = KeePassDatabaseCreationOptions(),
-        description: String? = null
+        description: String? = null,
+        keepKeyFileCopy: Boolean = false
     ) {
         viewModelScope.launch {
             _operationState.value = OperationState.Loading("正在创建 OneDrive 远端数据库...")
@@ -1146,7 +1420,8 @@ class LocalKeePassViewModel(
                         remotePath = createdFile.path,
                         databasePassword = databasePassword,
                         keyFileUri = keyFileUri,
-                        description = description
+                        description = description,
+                        keepKeyFileCopy = keepKeyFileCopy
                     )
                 }
 
@@ -1988,6 +2263,14 @@ class LocalKeePassViewModel(
                     KeePassKdbxService.invalidateProcessCache(databaseId)
                     
                     dao.deleteDatabaseById(databaseId)
+                    database.keyFileInternalPath?.takeIf { it.isNotBlank() }?.let { relativePath ->
+                        val stillReferenced = dao.getAllDatabasesSync().any { other ->
+                            other.keyFileInternalPath == relativePath
+                        }
+                        if (!stillReferenced) {
+                            keyFileStore.deleteInternal(relativePath)
+                        }
+                    }
                 }
 
                 _groupsByDatabase.update { current -> current - databaseId }
@@ -2540,15 +2823,12 @@ class LocalKeePassViewModel(
         if (keyFileUri == null) {
             return null
         }
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                keyFileUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
+        return context.contentResolver.readKeePassKeyFileBytes(
+            uri = keyFileUri,
+            unavailableMessage = context.getString(
+                takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
             )
-        }
-        return context.contentResolver.openInputStream(keyFileUri)?.use { input ->
-            input.readBytes()
-        } ?: throw Exception("无法访问密钥文件")
+        )
     }
 
     private suspend fun attachOneDriveDatabaseBlocking(
@@ -2558,7 +2838,8 @@ class LocalKeePassViewModel(
         remotePath: String,
         databasePassword: String,
         keyFileUri: Uri?,
-        description: String?
+        description: String?,
+        keepKeyFileCopy: Boolean
     ): OneDriveAttachResult {
         val normalizedRemotePath = OneDriveKeePassFileSource.normalizeRemotePath(remotePath)
         val displayName = name.ifBlank {
@@ -2643,6 +2924,12 @@ class LocalKeePassViewModel(
             OneDriveKeePassSupport.writeRelativeFile(context, mirrorPaths.workingCopyPath, remoteBytes)
             OneDriveKeePassSupport.writeRelativeFile(context, mirrorPaths.cacheCopyPath, remoteBytes)
 
+            // Delay the private copy until duplicate/network checks have passed,
+            // so failed attachment attempts do not leave needless secret files.
+            val storedKeyFile = keyFileUri?.takeIf { keepKeyFileCopy }?.let { uri ->
+                keyFileStore.copyFromUri(uri, uri.lastPathSegment)
+            }
+
             val encryptedPassword = if (databasePassword.isNotBlank()) {
                 securityManager.encryptData(databasePassword)
             } else {
@@ -2653,6 +2940,10 @@ class LocalKeePassViewModel(
                 name = displayName,
                 filePath = normalizedRemotePath,
                 keyFileUri = keyFileUri?.toString(),
+                keyFileInternalPath = storedKeyFile?.relativePath,
+                keyFileName = storedKeyFile?.fileName
+                    ?: keyFileUri?.lastPathSegment?.substringAfterLast('/'),
+                keyFileFingerprint = storedKeyFile?.fingerprint,
                 storageLocation = KeePassStorageLocation.INTERNAL,
                 sourceType = KeePassDatabaseSourceType.REMOTE_ONEDRIVE,
                 sourceId = remoteSourceId,
@@ -2894,7 +3185,8 @@ class LocalKeePassViewModel(
         remotePath: String,
         databasePassword: String,
         keyFileUri: Uri?,
-        description: String?
+        description: String?,
+        keepKeyFileCopy: Boolean
     ): WebDavAttachResult {
         val normalizedBaseUrl = serverUrl.trim().trimEnd('/')
         val normalizedRemotePath = WebDavKeePassFileSource.normalizeRemotePath(remotePath)
@@ -2971,6 +3263,12 @@ class LocalKeePassViewModel(
             WebDavKeePassSupport.writeRelativeFile(context, mirrorPaths.workingCopyPath, remoteBytes)
             WebDavKeePassSupport.writeRelativeFile(context, mirrorPaths.cacheCopyPath, remoteBytes)
 
+            // Delay the private copy until duplicate/network checks have passed,
+            // so failed attachment attempts do not leave needless secret files.
+            val storedKeyFile = keyFileUri?.takeIf { keepKeyFileCopy }?.let { uri ->
+                keyFileStore.copyFromUri(uri, uri.lastPathSegment)
+            }
+
             val encryptedPassword = if (databasePassword.isNotBlank()) {
                 securityManager.encryptData(databasePassword)
             } else {
@@ -2981,6 +3279,10 @@ class LocalKeePassViewModel(
                 name = displayName,
                 filePath = normalizedRemotePath,
                 keyFileUri = keyFileUri?.toString(),
+                keyFileInternalPath = storedKeyFile?.relativePath,
+                keyFileName = storedKeyFile?.fileName
+                    ?: keyFileUri?.lastPathSegment?.substringAfterLast('/'),
+                keyFileFingerprint = storedKeyFile?.fingerprint,
                 storageLocation = KeePassStorageLocation.INTERNAL,
                 sourceType = KeePassDatabaseSourceType.REMOTE_WEBDAV,
                 sourceId = remoteSourceId,
@@ -3059,9 +3361,13 @@ class LocalKeePassViewModel(
 
     private fun formatOperationError(error: Throwable): String {
         return if (error is KeePassOperationException) {
-            "[${error.code.name}] ${error.message}"
+            if (error.code == takagi.ru.monica.utils.KeePassErrorCode.ONEDRIVE_REDIRECT_CONFLICT) {
+                error.message
+            } else {
+                "[${error.code.name}] ${error.message}"
+            }
         } else {
-            error.message ?: "未知错误"
+            error.toOneDriveUserMessage(error.message ?: "未知错误")
         }
     }
     
@@ -3224,5 +3530,11 @@ class LocalKeePassViewModel(
             val decryptTimeMs: Long
         ) : VerificationState()
         data class Failed(val message: String) : VerificationState()
+    }
+
+    enum class KeyFileAccessState {
+        CHECKING,
+        AVAILABLE,
+        UNAVAILABLE
     }
 }

@@ -7,6 +7,59 @@ import takagi.ru.monica.attachments.model.AttachmentSource
 import takagi.ru.monica.attachments.repository.AttachmentRepository
 import takagi.ru.monica.attachments.storage.AttachmentStorage
 import takagi.ru.monica.bitwarden.api.CipherAttachmentApiData
+import java.net.URLConnection
+
+internal data class BitwardenAttachmentMetadataUpdate(
+    val attachment: Attachment,
+    val invalidateCache: Boolean
+)
+
+/**
+ * Bitwarden `/sync` reports the encrypted attachment size, while [Attachment.sizeBytes]
+ * stores the plaintext size. Size alone therefore cannot be used as a content-change signal.
+ */
+internal fun planBitwardenAttachmentMetadataUpdate(
+    local: Attachment,
+    remote: CipherAttachmentApiData,
+    now: Long
+): BitwardenAttachmentMetadataUpdate? {
+    val remoteFileName = remote.fileName?.takeIf { it.isNotBlank() }
+    val remoteFileKey = remote.key?.takeIf { it.isNotBlank() }
+    val remoteUrl = remote.url?.takeIf { it.isNotBlank() }
+    val contentChanged =
+        (remoteFileName != null && remoteFileName != local.fileName) ||
+            (remoteFileKey != null && remoteFileKey != local.bitwardenFileKeyEnc)
+
+    if (contentChanged) {
+        val resolvedFileName = remoteFileName ?: local.fileName
+        return BitwardenAttachmentMetadataUpdate(
+            attachment = local.copy(
+                fileName = resolvedFileName,
+                mimeType = guessBitwardenAttachmentMimeType(resolvedFileName),
+                sizeBytes = 0L,
+                bitwardenUrl = remoteUrl ?: local.bitwardenUrl,
+                bitwardenFileKeyEnc = remoteFileKey ?: local.bitwardenFileKeyEnc,
+                localPath = null,
+                wrappedCek = null,
+                sha256Hex = null,
+                downloadState = AttachmentDownloadState.PENDING.name,
+                updatedAt = now
+            ),
+            invalidateCache = true
+        )
+    }
+
+    if (remoteUrl != null && remoteUrl != local.bitwardenUrl) {
+        return BitwardenAttachmentMetadataUpdate(
+            attachment = local.copy(
+                bitwardenUrl = remoteUrl,
+                updatedAt = now
+            ),
+            invalidateCache = false
+        )
+    }
+    return null
+}
 
 /**
  * Bitwarden 附件元数据对齐器。
@@ -17,8 +70,8 @@ import takagi.ru.monica.bitwarden.api.CipherAttachmentApiData
  * - 否则按 `bitwardenAttachmentId` 做差异合并：
  *   - 新增：`PENDING` 写入，`downloadState = PENDING`；
  *   - 移除：删除本地记录与缓存；
- *   - 更新：若服务端 `size`/`fileName`/`url`/`key` 有变化则 `update`，同时把 `downloadState`
- *     回退到 `PENDING`（原缓存需要重新下载），并清理旧的本地密文。
+ *   - 更新：文件名或附件密钥变化时清理缓存；仅下载地址变化时保留缓存。
+ *   - 服务端 `size` 是密文大小，本地 `sizeBytes` 是明文大小，两者不参与变更判断。
  *
  * 本类不做任何网络调用，也不下载字节。字节下载走 [BitwardenAttachmentExecutor.download]。
  * 对应 requirements.md Requirement 5.1 / 5.2 / 9.3 / 9.4。
@@ -78,7 +131,7 @@ class BitwardenAttachmentReconciler(
                         source = AttachmentSource.BITWARDEN.name,
                         fileName = remote.fileName ?: DEFAULT_FILE_NAME,
                         mimeType = guessMimeType(remote.fileName),
-                        sizeBytes = remote.size.toLongOrNull() ?: 0L,
+                        sizeBytes = 0L,
                         bitwardenAttachmentId = attachmentId,
                         bitwardenUrl = remote.url,
                         bitwardenFileKeyEnc = remote.key,
@@ -88,45 +141,31 @@ class BitwardenAttachmentReconciler(
                     )
                 )
                 inserted++
-            } else if (needsUpdate(localAttach, remote)) {
-                localAttach.localPath?.let { storage.delete(it) }
-                repository.update(
-                    localAttach.copy(
-                        fileName = remote.fileName ?: localAttach.fileName,
-                        sizeBytes = remote.size.toLongOrNull() ?: localAttach.sizeBytes,
-                        bitwardenUrl = remote.url ?: localAttach.bitwardenUrl,
-                        bitwardenFileKeyEnc = remote.key ?: localAttach.bitwardenFileKeyEnc,
-                        localPath = null,
-                        wrappedCek = null,
-                        sha256Hex = null,
-                        downloadState = AttachmentDownloadState.PENDING.name,
-                        updatedAt = now
-                    )
-                )
-                updated++
+            } else {
+                val update = planBitwardenAttachmentMetadataUpdate(localAttach, remote, now)
+                if (update != null) {
+                    if (update.invalidateCache) {
+                        localAttach.localPath?.let { storage.delete(it) }
+                    }
+                    repository.update(update.attachment)
+                    updated++
+                }
             }
         }
 
         return Report(inserted = inserted, removed = removed, updated = updated)
     }
 
-    private fun needsUpdate(local: Attachment, remote: CipherAttachmentApiData): Boolean {
-        val remoteSize = remote.size.toLongOrNull() ?: -1L
-        if (remoteSize >= 0 && remoteSize != local.sizeBytes) return true
-        if ((remote.fileName ?: "") != local.fileName) return true
-        // key 不变但 url 变更时也要保留（短期签名 URL 过期），但不强制触发重新下载。
-        return false
-    }
-
     private fun guessMimeType(fileName: String?): String {
-        if (fileName.isNullOrBlank()) return "application/octet-stream"
-        val ext = fileName.substringAfterLast('.', missingDelimiterValue = "").lowercase()
-        if (ext.isBlank()) return "application/octet-stream"
-        return android.webkit.MimeTypeMap.getSingleton()
-            .getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+        return guessBitwardenAttachmentMimeType(fileName)
     }
 
     companion object {
         private const val DEFAULT_FILE_NAME = "attachment"
     }
+}
+
+private fun guessBitwardenAttachmentMimeType(fileName: String?): String {
+    if (fileName.isNullOrBlank()) return "application/octet-stream"
+    return URLConnection.guessContentTypeFromName(fileName) ?: "application/octet-stream"
 }

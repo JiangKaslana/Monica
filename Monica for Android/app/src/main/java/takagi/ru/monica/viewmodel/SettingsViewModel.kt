@@ -390,6 +390,12 @@ class SettingsViewModel(
         }
     }
 
+    fun updateAuthenticatorLayoutMode(mode: takagi.ru.monica.data.AuthenticatorLayoutMode) {
+        viewModelScope.launch {
+            settingsManager.updateAuthenticatorLayoutMode(mode)
+        }
+    }
+
     fun updatePasswordListQuickFiltersEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsManager.updatePasswordListQuickFiltersEnabled(enabled)

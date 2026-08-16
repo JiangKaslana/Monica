@@ -35,15 +35,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import takagi.ru.monica.R
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.ProgressBarStyle
@@ -55,7 +52,6 @@ import takagi.ru.monica.util.TotpGenerator
 import takagi.ru.monica.util.TotpDataResolver
 import kotlin.math.PI
 import kotlin.math.sin
-import takagi.ru.monica.util.VibrationPatterns
 import takagi.ru.monica.bitwarden.sync.SyncStatus
 import takagi.ru.monica.ui.icons.UnmatchedIconFallback
 import takagi.ru.monica.ui.icons.shouldShowFallbackSlot
@@ -86,7 +82,7 @@ fun TotpCodeCard(
     leadingContent: (@Composable () -> Unit)? = null,
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
-    allowVibration: Boolean = false,
+    compactTile: Boolean = false,
     boundPasswordSummary: String? = null,
     sharedTickSeconds: Long? = null,
     sharedProgressTimeMillis: Long? = null,
@@ -97,7 +93,6 @@ fun TotpCodeCard(
     immersiveBackgroundVisible: Boolean = backgroundContent != null
 ) {
     val context = LocalContext.current
-    val screenLifecycleOwner = LocalLifecycleOwner.current
     
     // 使用传入的设置或默认值，避免创建多个 SettingsManager 实例
     val settings = appSettings ?: AppSettings()
@@ -132,34 +127,6 @@ fun TotpCodeCard(
         generationSeconds * 1000L
     }
 
-    var isScreenStarted by remember {
-        mutableStateOf(screenLifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
-    }
-    var isScreenResumed by remember {
-        mutableStateOf(screenLifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
-    }
-
-    DisposableEffect(screenLifecycleOwner) {
-        val lifecycle = screenLifecycleOwner.lifecycle
-        val observer = LifecycleEventObserver { _, _ ->
-            isScreenStarted = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            isScreenResumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
-    
-    // 震动服务
-    val vibrator = remember {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            val vibratorManager = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
-            vibratorManager?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-        }
-    }
-    
     // 同一个验证码周期内复用 HMAC 结果，倒计时仍按秒更新。
     val generationWindow = remember(
         generationSeconds,
@@ -237,36 +204,6 @@ fun TotpCodeCard(
         }
     }
 
-    // 倒计时<=5秒时每秒触发震动（使用改进的双击模式）
-    LaunchedEffect(remainingSeconds, totpData.otpType, settings.validatorVibrationEnabled, allowVibration, isScreenStarted, isScreenResumed) {
-        if (allowVibration &&
-            isScreenStarted &&
-            isScreenResumed &&
-            settings.isPlusActivated &&
-            settings.validatorVibrationEnabled && 
-            totpData.otpType != OtpType.HOTP && 
-            remainingSeconds in 1..5) {
-            
-            android.util.Log.d("TotpCodeCard", "Triggering vibration at ${remainingSeconds}s")
-            
-            vibrator?.let { vib ->
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    // 使用双击模式震动（比单次100ms更有节奏感）
-                    val effect = android.os.VibrationEffect.createWaveform(
-                        VibrationPatterns.TICK,
-                        -1  // 不重复
-                    )
-                    vib.vibrate(effect)
-                } else {
-                    // 旧版本使用简单震动
-                    @Suppress("DEPRECATION")
-                    vib.vibrate(VibrationPatterns.TICK, -1)
-                }
-                android.util.Log.d("TotpCodeCard", "Tick vibration executed at ${remainingSeconds}s")
-            } ?: android.util.Log.w("TotpCodeCard", "Vibrator is null")
-        }
-    }
-    
     // 判断是否复制下一个验证码
     val codeToCopy = remember(currentCode, nextCode, remainingSeconds, settings.copyNextCodeWhenExpiring, totpData.otpType) {
         if (settings.isPlusActivated &&
@@ -374,6 +311,205 @@ fun TotpCodeCard(
     val immersiveAccentColor = Color.White.copy(alpha = 0.92f)
     val immersiveTertiaryColor = Color.White.copy(alpha = 0.96f)
     val immersiveErrorColor = Color.White
+
+    if (compactTile) {
+        Card(
+            modifier = cardInteractionModifier.heightIn(min = 142.dp),
+            shape = RoundedCornerShape(8.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isSelected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainer
+                }
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (settings.iconCardsEnabled) {
+                        when {
+                            selectedSimpleIconBitmap != null -> Image(
+                                bitmap = selectedSimpleIconBitmap,
+                                contentDescription = null,
+                                modifier = Modifier.size(30.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                            selectedUploadedIconBitmap != null -> Image(
+                                bitmap = selectedUploadedIconBitmap,
+                                contentDescription = null,
+                                modifier = Modifier.size(30.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                            autoMatchedSimpleIcon.bitmap != null -> Image(
+                                bitmap = autoMatchedSimpleIcon.bitmap,
+                                contentDescription = null,
+                                modifier = Modifier.size(30.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                            favicon != null -> Image(
+                                bitmap = favicon,
+                                contentDescription = null,
+                                modifier = Modifier.size(30.dp).clip(CircleShape)
+                            )
+                            appIcon != null -> Image(
+                                bitmap = appIcon,
+                                contentDescription = null,
+                                modifier = Modifier.size(30.dp).clip(CircleShape)
+                            )
+                            shouldShowFallbackSlot(settings.unmatchedIconHandlingStrategy) ->
+                                UnmatchedIconFallback(
+                                    strategy = settings.unmatchedIconHandlingStrategy,
+                                    primaryText = iconWebsite,
+                                    secondaryText = iconTitle,
+                                    defaultIcon = Icons.Default.Security,
+                                    iconSize = 30.dp
+                                )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                        infoLines.firstOrNull()?.let { line ->
+                            Text(
+                                text = line,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (isSelectionMode) {
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { onToggleSelect?.invoke() },
+                            modifier = Modifier.size(30.dp)
+                        )
+                    } else {
+                        var expanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(
+                                onClick = { expanded = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = stringResource(R.string.more_options),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                onToggleFavorite?.let { toggleFavorite ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(if (item.isFavorite) R.string.remove_from_favorites else R.string.add_to_favorites)) },
+                                        onClick = {
+                                            expanded = false
+                                            toggleFavorite(item.id, !item.isFavorite)
+                                        },
+                                        leadingIcon = { Icon(Icons.Default.Favorite, contentDescription = null) }
+                                    )
+                                }
+                                onEdit?.let { edit ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.edit)) },
+                                        onClick = { expanded = false; edit() },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
+                                    )
+                                }
+                                onShowQrCode?.let { showQr ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.show_qr_code)) },
+                                        onClick = { expanded = false; showQr(item) },
+                                        leadingIcon = { Icon(Icons.Default.QrCode, contentDescription = null) }
+                                    )
+                                }
+                                onDelete?.let { delete ->
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.delete)) },
+                                        onClick = { expanded = false; delete() },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val shouldBlink = remainingSeconds in 1..5 && totpData.otpType != OtpType.HOTP
+                val expiryAlpha by if (shouldBlink) {
+                    rememberInfiniteTransition(label = "totp_tile_expiry_blink").animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.5f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 500, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "totp_tile_expiry_alpha"
+                    )
+                } else {
+                    remember { mutableFloatStateOf(1f) }
+                }
+
+                Text(
+                    text = if (showOtpCode) formatOtpCode(currentCode, totpData.otpType)
+                    else formatMaskedOtpCode(currentCode, totpData),
+                    modifier = Modifier.graphicsLayer { alpha = expiryAlpha },
+                    color = if (remainingSeconds in 1..5) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = if (totpData.otpType == OtpType.STEAM) 24.sp else 28.sp,
+                    maxLines = 1
+                )
+
+                if (totpData.otpType == OtpType.HOTP) {
+                    TextButton(
+                        onClick = { onGenerateNext?.invoke(item.id) },
+                        enabled = onGenerateNext != null,
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(stringResource(R.string.generate_next))
+                    }
+                } else {
+                    Text(
+                        text = formatOtpCode(nextCode, totpData.otpType),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+        return
+    }
 
     Card(
         modifier = cardInteractionModifier,

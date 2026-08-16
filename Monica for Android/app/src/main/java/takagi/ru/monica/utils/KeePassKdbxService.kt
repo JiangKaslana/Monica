@@ -306,6 +306,7 @@ class KeePassKdbxService(
     private val securityManager: SecurityManager
 ) {
     private val imageManager by lazy { ImageManager(context.applicationContext) }
+    private val keyFileStore by lazy { KeePassKeyFileStore(context.applicationContext) }
 
     companion object {
         private const val TAG = "KeePassKdbxService"
@@ -5376,8 +5377,14 @@ class KeePassKdbxService(
         val kdbxPassword = passwordOverride ?: (encryptedDbPassword?.let { securityManager.decryptData(it) } ?: "")
         val keyFileBytes = keyFileUriOverride?.let { uri ->
             readKeyFileBytes(uri)
-        } ?: database.keyFileUri?.takeIf { it.isNotBlank() }?.let { uriString ->
-            readKeyFileBytes(Uri.parse(uriString))
+        } ?: runCatching { keyFileStore.read(database) }.getOrElse { error ->
+            throw KeePassOperationException(
+                code = KeePassErrorCode.KEY_FILE_UNAVAILABLE,
+                message = context.getString(
+                    takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
+                ),
+                cause = error,
+            )
         }
         return resolveCredentials(kdbxPassword, keyFileBytes)
     }
@@ -5390,7 +5397,12 @@ class KeePassKdbxService(
     }
 
     private fun readKeyFileBytes(uri: Uri): ByteArray {
-        return readBytesFromUri(uri, "无法读取密钥文件")
+        return context.contentResolver.readKeePassKeyFileBytes(
+            uri = uri,
+            unavailableMessage = context.getString(
+                takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
+            )
+        )
     }
 
     private fun readBytesFromUri(uri: Uri, missingMessage: String): ByteArray {
@@ -6139,6 +6151,8 @@ class KeePassKdbxService(
                 latestDatabase.workingCopyPath != previous.workingCopyPath ||
                 latestDatabase.cacheCopyPath != previous.cacheCopyPath ||
                 latestDatabase.keyFileUri != previous.keyFileUri ||
+                latestDatabase.keyFileInternalPath != previous.keyFileInternalPath ||
+                latestDatabase.keyFileFingerprint != previous.keyFileFingerprint ||
                 latestDatabase.encryptedPassword != previous.encryptedPassword
         if (configChanged) {
             invalidateLoadedDatabaseCache(databaseId)

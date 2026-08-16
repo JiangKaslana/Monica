@@ -2411,6 +2411,13 @@
     <string name="local_keepass_reverify_password">重新验证数据库密码</string>
     <string name="local_keepass_reverify_dialog_title">验证 KeePass 密码</string>
     <string name="local_keepass_reverify_dialog_desc">输入密码和/或选择密钥文件进行验证，并更新已保存的凭据。</string>
+    <string name="local_keepass_repair_credentials">更新密码或密钥文件</string>
+    <string name="local_keepass_key_file_repair_hint">此数据库使用了密钥文件。如果原文件被移动或访问权限失效，请重新选择创建数据库时使用的同一个密钥文件。</string>
+    <string name="local_keepass_key_file_access_title">密钥文件访问</string>
+    <string name="local_keepass_key_file_access_checking">正在检查访问状态…</string>
+    <string name="local_keepass_key_file_access_available">密钥文件可正常读取</string>
+    <string name="local_keepass_key_file_access_unavailable">密钥文件无法读取</string>
+    <string name="local_keepass_key_file_unavailable_error">密钥文件无法读取。请前往“设置 &gt; 数据库与备份 &gt; 本地 KeePass 数据库”，打开对应数据库并重新选择原密钥文件。</string>
     <string name="no_keepass_database">暂无 KeePass 数据库</string>
     <string name="no_keepass_database_description">创建新数据库或打开已有数据库</string>
     <string name="create_database">创建数据库</string>
@@ -3562,6 +3569,14 @@
     <string name="local_keepass_select_key_file">选择密钥文件</string>
     <string name="local_keepass_no_key_file_selected">未选择密钥文件</string>
     <string name="local_keepass_key_file_selected">已选择密钥文件</string>
+    <string name="local_keepass_keep_key_file_copy">在 Monica 中保留副本</string>
+    <string name="local_keepass_keep_key_file_copy_desc">原文件不会被修改或删除；加密全量备份可以包含此副本。</string>
+    <string name="local_keepass_key_file_private_copy">Monica 内部副本</string>
+    <string name="local_keepass_key_file_external_source">原始外部文件</string>
+    <string name="local_keepass_keep_key_file_copy_action">保留内部副本</string>
+    <string name="local_keepass_export_key_file_copy">导出副本</string>
+    <string name="local_keepass_delete_key_file_copy">删除副本</string>
+    <string name="local_keepass_delete_key_file_copy_confirm">只会删除 Monica 内部副本，原始外部密钥文件不会被修改或删除。</string>
     <string name="plus_feature_premium_themes_title">会员专属主题</string>
     <string name="plus_feature_premium_themes_desc">解锁莫奈等专属主题配色。</string>
     <string name="plus_feature_notification_validator_title">通知栏验证器</string>
@@ -4109,4 +4124,8 @@
     <string name="keepass_permission_repair_success">KDBX 读写权限已恢复</string>
     <string name="keepass_permission_repair_dialog_title">需要 KDBX 写入权限</string>
     <string name="keepass_permission_repair_dialog_message">当前 KDBX 缺少写入权限，无法保存删除操作。重新选择原 KDBX 文件即可恢复权限并继续删除。</string>
+    <string name="authenticator_layout_title">布局样式</string>
+    <string name="authenticator_layout_description">选择现有卡片列表或紧凑的双列磁贴视图</string>
+    <string name="authenticator_layout_standard">标准</string>
+    <string name="authenticator_layout_tile">磁贴</string>
 </resources>
