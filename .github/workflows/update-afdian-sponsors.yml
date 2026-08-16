@@ -13,10 +13,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Normalize documentation repository
+        id: docs_repo
+        shell: bash
+        env:
+          CONFIGURED_DOCS_REPOSITORY: ${{ vars.DOCS_REPOSITORY }}
+        run: |
+          repository="$(node -e 'const value=(process.env.CONFIGURED_DOCS_REPOSITORY || "").trim(); process.stdout.write(value.replace(/[\u2010-\u2015\u2212]/g, "-"));')"
+          if [[ -z "$repository" || ! "$repository" =~ ^[^/]+/[^/]+$ ]]; then
+            echo "::error title=Invalid DOCS_REPOSITORY::Set DOCS_REPOSITORY to owner/repo, for example Monica-Pass/MonicaDocs."
+            exit 1
+          fi
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
       - name: Checkout documentation repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.DOCS_REPOSITORY }}
+          repository: ${{ steps.docs_repo.outputs.repository }}
           token: ${{ secrets.DOCS_REPO_TOKEN }}
           path: docs-repo
       - uses: actions/setup-python@v5

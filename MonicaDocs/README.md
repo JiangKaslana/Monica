@@ -57,7 +57,7 @@ npm run docs:preview
 | 类型 | 名称 | 用途 |
 | --- | --- | --- |
 | Secret | `AFDIAN_TOKEN` | 调用爱发电开放 API。 |
-| Variable | `DOCS_REPOSITORY` | 新文档仓库，格式为 `owner/repo`。 |
+| Variable | `DOCS_REPOSITORY` | 新文档仓库，格式为 `owner/repo`，例如 `Monica-Pass/MonicaDocs`；请使用 ASCII 连字符 `-`。 |
 | Secret | `DOCS_REPO_TOKEN` | 对新文档仓库具有 `Contents: Read and write` 权限的 fine-grained PAT 或 GitHub App Token。 |
 
 ### 新文档仓库

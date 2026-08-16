@@ -17,26 +17,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify documentation repository
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           DOCS_REPOSITORY: ${{ vars.DOCS_REPOSITORY }}
         with:
           github-token: ${{ secrets.DOCS_REPO_TOKEN }}
           script: |
-            const repository = process.env.DOCS_REPOSITORY?.trim();
+            const configuredRepository = process.env.DOCS_REPOSITORY?.trim();
+            const repository = configuredRepository?.replace(/[\u2010-\u2015\u2212]/g, "-");
+            if (repository && repository !== configuredRepository) {
+              core.warning(`Normalized DOCS_REPOSITORY from '${configuredRepository}' to '${repository}'.`);
+            }
             if (!repository || !/^[^/]+\/[^/]+$/.test(repository)) {
-              core.setFailed("DOCS_REPOSITORY must be configured as owner/repository");
+              core.setFailed("DOCS_REPOSITORY must be configured as owner/repo using ASCII '-' (for example Monica-Pass/MonicaDocs)");
               return;
             }
 
             const [owner, repo] = repository.split("/", 2);
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "monica-main-updated",
-              client_payload: {
-                source_repository: `${context.repo.owner}/${context.repo.repo}`,
-                source_sha: context.sha,
-                source_ref: context.ref,
-              },
-            });
+            try {
+              await github.rest.repos.get({ owner, repo });
+              await github.rest.repos.createDispatchEvent({
+                owner,
+                repo,
+                event_type: "monica-main-updated",
+                client_payload: {
+                  source_repository: `${context.repo.owner}/${context.repo.repo}`,
+                  source_sha: context.sha,
+                  source_ref: context.ref,
+                },
+              });
+            } catch (error) {
+              core.setFailed(`Cannot access DOCS_REPOSITORY '${repository}'. Check the repository name and DOCS_REPO_TOKEN permissions (HTTP ${error.status ?? "unknown"}).`);
+            }
