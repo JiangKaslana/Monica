@@ -41,6 +41,8 @@ import takagi.ru.monica.utils.KeePassFieldReferenceResolver
 import takagi.ru.monica.utils.KeePassOperationException
 import takagi.ru.monica.utils.KeePassFormatInspector
 import takagi.ru.monica.utils.KeePassKdbxService
+import takagi.ru.monica.utils.KeePassPortableSecretExportException
+import takagi.ru.monica.utils.KeePassPortableSecretExportPolicy
 import takagi.ru.monica.utils.toKeePassOperationException
 import java.io.InputStream
 import java.io.OutputStream
@@ -248,13 +250,11 @@ class KeePassKdbxViewModel {
         
         // 3. 创建密码 KeePass 条目列表
         val passwordEntries = passwords.map { password ->
-            // 解密密码 - 数据库中存储的是加密后的密码
-            val decryptedPassword = try {
-                securityManager.decryptData(password.password)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to decrypt password during KDBX export: ${e.message}")
-                password.password // 如果解密失败，使用原始值
-            }
+            val decryptedPassword = KeePassPortableSecretExportPolicy.resolve(
+                storedValue = password.password,
+                entryTitle = password.title,
+                decrypt = securityManager::decryptData
+            )
             
             Entry(
                 uuid = UUID.randomUUID(),
@@ -292,12 +292,11 @@ class KeePassKdbxViewModel {
                 ) ?: return@mapNotNull null
                 
                 // 解密 secret
-                val decryptedSecret = try {
-                    securityManager.decryptDataIfMonicaCiphertext(totpData.secret)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to decrypt TOTP secret during KDBX export: ${e.message}")
-                    totpData.secret
-                }
+                val decryptedSecret = KeePassPortableSecretExportPolicy.resolve(
+                    storedValue = totpData.secret,
+                    entryTitle = item.title,
+                    decrypt = securityManager::decryptDataIfMonicaCiphertext
+                )
                 
                 // 构建 otpauth:// URI (KeePass 标准 TOTP 格式)
                 val otpUri = buildOtpAuthUri(
@@ -326,6 +325,8 @@ class KeePassKdbxViewModel {
                         "TOTP Settings" to EntryValue.Plain("${totpData.period};${totpData.digits}")
                     )
                 )
+            } catch (e: KeePassPortableSecretExportException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to parse TOTP data during KDBX export: ${e.message}")
                 null
