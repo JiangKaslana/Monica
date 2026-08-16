@@ -45,6 +45,10 @@ npm run docs:preview
 | --- | --- |
 | `deploy-website.yml` | 构建 `.vitepress/dist/` 并部署到 GitHub Pages。 |
 | `update-github-commits.yml` | 获取 `Monica-Pass/Monica` 的提交数据，更新 `public/github-commits.json`。 |
+| `update-github-releases.yml` | 获取主仓库 Android、Browser 及其他生态仓库的 Release 数据，更新 `public/github-releases.json`。 |
+
+主仓库 `Monica` 中的 `notify-docs-website.yml` 会在 `main` 更新时向文档仓库发送
+`repository_dispatch`，触发即时提交数据同步。
 
 ## 所需变量与密钥
 
