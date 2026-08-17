@@ -13,10 +13,11 @@ on:
         required: false
         type: string
 
-  # 自动触发：GitHub Release 创建后自动运行。Android.yml 已不再直接发送 Telegram，
-  # 改由本工作流统一负责，确保每次发布只发送一次。
+  # 自动触发：GitHub Release 正式发布后自动运行（与 contributor-flag.yml 保持一致，
+  # 该事件类型在本仓库已验证可稳定送达；created 事件在多数发布流程下不会独立触发）。
+  # Android.yml 已不再直接发送 Telegram，改由本工作流统一负责，确保每次发布只发送一次。
   release:
-    types: [created]
+    types: [released]
 
 permissions:
   contents: read
