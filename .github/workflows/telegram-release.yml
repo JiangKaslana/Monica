@@ -8,16 +8,20 @@ on:
         description: 'GitHub Release tag，例如 V1.0.305'
         required: false
         type: string
+      topic_id:
+        description: 'Telegram 话题(Topic) ID，留空使用仓库默认配置'
+        required: false
+        type: string
 
-  # 自动触发（GitHub Release 创建后自动运行）
-  release:
-    types: [created]
+  # 仅支持手动触发。Android.yml 在打 tag 发布时已经会直接发送一次 Telegram 消息，
+  # 这里不再监听 release 事件，避免同一个 Release 被发送两次。
+  # 如需重新发送某个已发布的 Release（例如资产更新后），手动触发本工作流并填写 release_tag 即可。
 
 permissions:
   contents: read
 
 concurrency:
-  group: telegram-release-${{ inputs.release_tag || github.event.release.tag_name }}
+  group: telegram-release-${{ inputs.release_tag }}
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +34,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
 
@@ -60,7 +64,9 @@ jobs:
             exit 1
           fi
 
-          asset_name="${arm64_assets[0]}"
+          # 数组按 gh api 返回顺序排列，通常是上传时间顺序；取最后一个即最新上传的 arm64 APK，
+          # 避免同一 Release 中残留的旧版本资产被误发送。
+          asset_name="${arm64_assets[-1]}"
           rm -rf release-assets
           mkdir -p release-assets
           gh release download "$tag" \
