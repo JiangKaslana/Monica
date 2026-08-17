@@ -8,11 +8,13 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.data.model.NoteData
+import takagi.ru.monica.data.model.SecureCustomField
 
 data class DecodedNoteContent(
     val content: String,
     val tags: List<String> = emptyList(),
-    val isMarkdown: Boolean = false
+    val isMarkdown: Boolean = false,
+    val customFields: List<SecureCustomField> = emptyList()
 )
 
 data class NoteInlineToken(
@@ -40,7 +42,8 @@ object NoteContentCodec {
     fun encode(
         content: String,
         tags: List<String> = emptyList(),
-        isMarkdown: Boolean = false
+        isMarkdown: Boolean = false,
+        customFields: List<SecureCustomField> = emptyList()
     ): Pair<String, String> {
         val sanitizedTags = tags
             .map { it.trim() }
@@ -50,7 +53,8 @@ object NoteContentCodec {
         val noteData = NoteData(
             content = content,
             tags = sanitizedTags,
-            isMarkdown = isMarkdown
+            isMarkdown = isMarkdown,
+            customFields = customFields.filter { it.isValid() }
         )
         return Json.encodeToString(noteData) to content
     }
@@ -213,7 +217,8 @@ object NoteContentCodec {
                             .map { it.trim() }
                             .filter { it.isNotEmpty() }
                             .distinct(),
-                        isMarkdown = noteData.isMarkdown
+                        isMarkdown = noteData.isMarkdown,
+                        customFields = noteData.customFields.filter { it.isValid() }
                     )
                 }
         }

@@ -98,6 +98,8 @@ import takagi.ru.monica.bitwarden.BitwardenVaultPremiumStore
 import takagi.ru.monica.data.AppSettings
 import takagi.ru.monica.data.NoteCodeBlockCollapseMode
 import takagi.ru.monica.data.PasswordDatabase
+import takagi.ru.monica.data.CustomFieldDraft
+import takagi.ru.monica.ui.components.CustomFieldEditorSection
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.toStorageTarget
 import takagi.ru.monica.notes.domain.NoteDraftStore
@@ -609,6 +611,7 @@ fun AddEditNoteScreen(
             content = payload.content,
             title = payload.title,
             tags = payload.tags,
+            customFields = payload.customFields,
             isMarkdown = payload.isMarkdown,
             isFavorite = currentState.isFavorite,
             createdAt = currentState.createdAt,
@@ -900,6 +903,8 @@ fun AddEditNoteScreen(
                         onTaskItemToggle = ::togglePreviewTask,
                         onPreviewInlineImage = { fileName -> showNoteImageDialog = fileName },
                         onTagsTextChange = { editorViewModel.updateTagsText(it) },
+                        customFields = editorState.customFields,
+                        onCustomFieldsChange = editorViewModel::updateCustomFields,
                         onAddImageClick = {
                             if (isBitwardenNoteTarget) {
                                 Toast.makeText(
@@ -936,6 +941,8 @@ fun AddEditNoteScreen(
                         onTaskItemToggle = ::togglePreviewTask,
                         onPreviewInlineImage = { fileName -> showNoteImageDialog = fileName },
                         onTagsTextChange = { editorViewModel.updateTagsText(it) },
+                        customFields = editorState.customFields,
+                        onCustomFieldsChange = editorViewModel::updateCustomFields,
                         onAddImageClick = {
                             if (isBitwardenNoteTarget) {
                                 Toast.makeText(
@@ -973,6 +980,8 @@ fun AddEditNoteScreen(
                         onTaskItemToggle = ::togglePreviewTask,
                         onPreviewInlineImage = { fileName -> showNoteImageDialog = fileName },
                         onTagsTextChange = { editorViewModel.updateTagsText(it) },
+                        customFields = editorState.customFields,
+                        onCustomFieldsChange = editorViewModel::updateCustomFields,
                         onAddImageClick = {
                             if (isBitwardenNoteTarget) {
                                 Toast.makeText(
@@ -1377,6 +1386,8 @@ private fun NoteEditorModeBody(
     onTaskItemToggle: (lineIndex: Int, checked: Boolean) -> Unit,
     onPreviewInlineImage: (String) -> Unit,
     onTagsTextChange: (String) -> Unit,
+    customFields: List<CustomFieldDraft> = emptyList(),
+    onCustomFieldsChange: (List<CustomFieldDraft>) -> Unit = {},
     onAddImageClick: () -> Unit,
     onRemoveImage: (String) -> Unit
 ) {
@@ -1476,6 +1487,12 @@ private fun NoteEditorModeBody(
                         borderless = false,
                         showTags = true,
                         editorTakesRemainingSpace = false
+                    )
+
+                    CustomFieldEditorSection(
+                        fields = customFields,
+                        onFieldsChange = onCustomFieldsChange,
+                        modifier = Modifier.fillMaxWidth()
                     )
 
                     if (isEditing) {

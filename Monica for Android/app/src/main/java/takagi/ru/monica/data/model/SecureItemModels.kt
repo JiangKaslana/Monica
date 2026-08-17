@@ -306,5 +306,6 @@ fun DocumentData.displayFullName(): String {
 data class NoteData(
     val content: String,            // 笔记正文
     val tags: List<String> = emptyList(), // 标签列表
-    val isMarkdown: Boolean = false      // 是否为Markdown格式
+    val isMarkdown: Boolean = false,     // 是否为Markdown格式
+    val customFields: List<SecureCustomField> = emptyList()
 )

@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -54,6 +55,7 @@ import takagi.ru.monica.ui.components.ActionStrip
 import takagi.ru.monica.ui.components.ActionStripItem
 import takagi.ru.monica.ui.components.ImageDialog
 import takagi.ru.monica.ui.components.MarkdownPreviewText
+import takagi.ru.monica.ui.components.CustomFieldDisplayCard
 import takagi.ru.monica.util.ImageManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -75,6 +77,7 @@ fun NoteDetailScreen(
 ) {
     val detailImageMaxDimension = 1440
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val database = remember { PasswordDatabase.getDatabase(context) }
     val untitledLabel = stringResource(R.string.untitled)
     val imageManager = remember { ImageManager(context) }
@@ -333,6 +336,22 @@ fun NoteDetailScreen(
                     text = decodedNote.tags.joinToString(separator = "  ") { "#$it" },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            if (decodedNote.customFields.isNotEmpty()) {
+                CustomFieldDisplayCard(
+                    fields = decodedNote.customFields.mapIndexed { index, field ->
+                        takagi.ru.monica.data.CustomField(
+                            id = index.toLong(),
+                            entryId = currentNote.id,
+                            title = field.label,
+                            value = field.value,
+                            isProtected = field.isProtected(),
+                            sortOrder = index
+                        )
+                    },
+                    onCopyField = { _, value -> clipboardManager.setText(AnnotatedString(value)) }
                 )
             }
 

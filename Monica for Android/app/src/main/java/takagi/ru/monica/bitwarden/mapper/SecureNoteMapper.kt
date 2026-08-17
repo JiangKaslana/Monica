@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import takagi.ru.monica.bitwarden.api.*
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.SecureItem
+import takagi.ru.monica.data.model.SecureCustomField
 import takagi.ru.monica.notes.domain.NoteContentCodec
 import java.util.Date
 
@@ -149,5 +150,6 @@ data class NoteItemData(
     val content: String = "",
     // Monica 特有字段
     val isMarkdown: Boolean = false,
-    val tags: List<String> = emptyList()
+    val tags: List<String> = emptyList(),
+    val customFields: List<SecureCustomField> = emptyList()
 )

@@ -1109,7 +1109,12 @@ class CipherUploadProcessor(
             notes = crypto.encryptString(externalContent, symmetricKey),
             folderId = item.bitwardenFolderId,
             favorite = item.isFavorite,
-            secureNote = CipherSecureNoteApiData(type = 0)
+            secureNote = CipherSecureNoteApiData(type = 0),
+            fields = buildEncryptedFields(
+                symmetricKey = symmetricKey,
+                reservedFields = emptyList(),
+                customFields = noteData.customFields
+            )
         )
     }
     
@@ -1250,7 +1255,8 @@ class CipherUploadProcessor(
             NoteItemData(
                 content = appData.content,
                 isMarkdown = appData.isMarkdown,
-                tags = appData.tags
+                tags = appData.tags,
+                customFields = appData.customFields
             )
         } catch (_: Exception) {
             try {

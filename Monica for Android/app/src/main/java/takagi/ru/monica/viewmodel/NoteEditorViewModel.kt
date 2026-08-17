@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import takagi.ru.monica.data.SecureItem
+import takagi.ru.monica.data.CustomFieldDraft
+import takagi.ru.monica.data.model.SecureCustomField
+import takagi.ru.monica.data.model.SecureCustomFieldType
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.normalizedStorageTargets
 import takagi.ru.monica.data.model.toStorageTarget
@@ -28,6 +31,7 @@ data class NoteEditorUiState(
     val contentField: TextFieldValue = TextFieldValue(""),
     val isMarkdownPreview: Boolean = false,
     val tagsText: String = "",
+    val customFields: List<CustomFieldDraft> = emptyList(),
     val isFavorite: Boolean = false,
     val selectedCategoryId: Long? = null,
     val keepassDatabaseId: Long? = null,
@@ -51,7 +55,8 @@ data class NoteSavePayload(
     val content: String,
     val imagePathsJson: String,
     val isMarkdown: Boolean,
-    val tags: List<String>
+    val tags: List<String>,
+    val customFields: List<SecureCustomField> = emptyList()
 )
 
 private data class NoteEditDraft(
@@ -59,6 +64,7 @@ private data class NoteEditDraft(
     val content: String,
     val isMarkdown: Boolean,
     val tags: List<String>,
+    val customFields: List<SecureCustomField>,
     val isFavorite: Boolean,
     val categoryId: Long?,
     val keepassDatabaseId: Long?,
@@ -106,6 +112,14 @@ class NoteEditorViewModel(
                 contentField = hydratedField,
                 isMarkdownPreview = false,
                 tagsText = draft.tags.joinToString(", "),
+                customFields = draft.customFields.map { field ->
+                    CustomFieldDraft(
+                        id = CustomFieldDraft.nextTempId(),
+                        title = field.label,
+                        value = field.value,
+                        isProtected = field.isProtected()
+                    )
+                },
                 isFavorite = draft.isFavorite,
                 selectedCategoryId = draft.categoryId,
                 keepassDatabaseId = draft.keepassDatabaseId,
@@ -228,6 +242,10 @@ class NoteEditorViewModel(
     fun updateTagsText(tags: String) {
         _uiState.update { it.copy(tagsText = tags) }
         scheduleDraftSave()
+    }
+
+    fun updateCustomFields(fields: List<CustomFieldDraft>) {
+        _uiState.update { it.copy(customFields = fields) }
     }
 
     fun toggleFavorite() {
@@ -402,6 +420,15 @@ class NoteEditorViewModel(
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .distinct()
+        val customFields = state.customFields
+            .filter { it.shouldPersist() }
+            .map { field ->
+                SecureCustomField(
+                    label = field.title.trim(),
+                    value = field.value,
+                    type = if (field.isProtected) SecureCustomFieldType.HIDDEN else SecureCustomFieldType.TEXT
+                )
+            }
         val normalizedContent = state.contentField.text.trimEnd()
         val finalTitle = if (state.title.isNotBlank()) {
             state.title.trim()
@@ -414,7 +441,8 @@ class NoteEditorViewModel(
             content = normalizedContent,
             imagePathsJson = NoteContentCodec.encodeImagePaths(imagePaths),
             isMarkdown = isMarkdown,
-            tags = tags
+            tags = tags,
+            customFields = customFields
         )
     }
 
@@ -460,6 +488,7 @@ private fun SecureItem.toNoteEditDraft(): NoteEditDraft {
         content = decoded.content,
         isMarkdown = decoded.isMarkdown,
         tags = decoded.tags,
+        customFields = decoded.customFields,
         isFavorite = isFavorite,
         categoryId = categoryId,
         keepassDatabaseId = keepassDatabaseId,

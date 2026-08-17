@@ -969,9 +969,11 @@ class CipherSyncProcessor(
 
         val name = decryptString(cipher.name, symmetricKey) ?: "Note"
         val notes = decryptString(cipher.notes, symmetricKey) ?: ""
+        val customFields = decryptCustomFields(cipher.fields, symmetricKey)
+            .map { it.toSecureCustomField() }
         
         // 构建笔记数据
-        val noteData = NoteData(content = notes)
+        val noteData = NoteData(content = notes, customFields = customFields)
         val itemData = json.encodeToString(noteData)
         
         if (existing == null) {

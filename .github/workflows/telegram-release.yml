@@ -1,24 +1,23 @@
 name: Send Release APK to Telegram
 
-run-name: Send ${{ inputs.release_tag }} arm64 APK to Telegram
-
 on:
+  # 手动触发（支持直接输入版本号）
   workflow_dispatch:
     inputs:
       release_tag:
-        description: GitHub Release tag or title, for example V1.0.304
-        required: true
-        type: string
-      topic_id:
-        description: Optional Telegram forum topic id; falls back to the TELEGRAM_TOPIC_ID secret, then the General topic
+        description: 'GitHub Release tag，例如 V1.0.305'
         required: false
         type: string
+
+  # 自动触发（GitHub Release 创建后自动运行）
+  release:
+    types: [created]
 
 permissions:
   contents: read
 
 concurrency:
-  group: telegram-release-${{ inputs.release_tag }}
+  group: telegram-release-${{ inputs.release_tag || github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -31,34 +30,17 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
         run: |
           set -euo pipefail
 
-          tag="$(printf '%s' "$RELEASE_TAG" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          tag="${RELEASE_TAG:-}"
           if [ -z "$tag" ]; then
-            echo "::error title=Release tag missing::Please enter a GitHub Release tag or title, for example V1.0.304."
+            echo "::error title=Release tag missing::Please provide release_tag or trigger via release event."
             exit 1
           fi
 
-          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            # Retry the lookup by exact release title in case the input was
-            # the visible release name rather than its git tag.
-            title_json="$(printf '%s' "$tag" | jq -Rr '@json')"
-            title_tag="$(
-              gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
-                --json name,tagName \
-                --jq ".[] | select(.name == ${title_json}) | .tagName" \
-              | head -n 1
-            )" || true
-            if [ -z "${title_tag:-}" ]; then
-              echo "::error title=Release not found::GitHub Release $tag does not exist."
-              exit 1
-            fi
-            echo "Input matched a release title; using tag '$title_tag'."
-            tag="$title_tag"
-          fi
-
+          # 查找 arm64 APK
           shopt -s nocasematch
           arm64_assets=()
           while IFS= read -r asset_name; do
@@ -74,18 +56,8 @@ jobs:
           shopt -u nocasematch
 
           if [ "${#arm64_assets[@]}" -eq 0 ]; then
-            echo "::error title=arm64 APK missing::Release $tag has no arm64 APK asset. Run Android Release Build first or upload the APK to this Release."
-            echo "Available assets:"
-            gh release view "$tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json assets \
-              --jq '.assets[].name' || true
+            echo "::error title=arm64 APK missing::Release $tag has no arm64 APK asset."
             exit 1
-          fi
-
-          if [ "${#arm64_assets[@]}" -gt 1 ]; then
-            echo "Multiple arm64 APK assets found; the first one will be sent:"
-            printf '  %s\n' "${arm64_assets[@]}"
           fi
 
           asset_name="${arm64_assets[0]}"
@@ -97,18 +69,10 @@ jobs:
             --dir release-assets
 
           apk_path="release-assets/$asset_name"
-          if [ ! -f "$apk_path" ]; then
-            echo "::error title=APK download failed::Downloaded asset was not found at $apk_path."
-            exit 1
-          fi
-
-          # Percent-encode the tag for the release URL in the caption.
-          encoded_tag="$(printf '%s' "$tag" | jq -Rr '@uri')"
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "path=$apk_path" >> "$GITHUB_OUTPUT"
-          echo "url_tag=$encoded_tag" >> "$GITHUB_OUTPUT"
-          echo "Selected asset: $asset_name"
+          echo "url_tag=$(printf '%s' "$tag" | jq -Rr '@uri')" >> "$GITHUB_OUTPUT"
 
       - name: Build caption with release notes
         id: build_caption
@@ -123,12 +87,8 @@ jobs:
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --json body --jq '.body' > release-notes.md
 
-          # Convert the markdown release notes to Telegram HTML and wrap them in an
-          # expandable blockquote (collapsed by default, tap the arrow to expand).
-          # Captions are capped at 1024 UTF-16 units, so trim line by line if needed.
           python3 - "$RELEASE_TAG" "$URL_TAG" <<'PY'
           import html, os, re, sys
-
           tag, url_tag = sys.argv[1], sys.argv[2]
           repo = os.environ['GITHUB_REPOSITORY']
           body = open('release-notes.md', encoding='utf-8').read().strip()
@@ -194,20 +154,13 @@ jobs:
 
           caption="$(cat caption.html)"
 
-          # Forum topics require message_thread_id; when unset Telegram posts to the General topic.
           thread_args=()
           if [ -n "${TOPIC_ID:-}" ]; then
-            if ! [[ "$TOPIC_ID" =~ ^-?[0-9]+$ ]]; then
-              echo "::error title=Invalid topic id::Topic id must be a number, for example 12."
-              exit 1
-            fi
             thread_args=(--form-string "message_thread_id=${TOPIC_ID}")
-            echo "Sending to topic ${TOPIC_ID}."
           fi
 
           curl --fail-with-body --show-error --silent \
             --retry 3 \
-            --retry-all-errors \
             --form-string "chat_id=${TELEGRAM_CHAT_ID}" \
             --form-string "caption=${caption}" \
             --form-string "parse_mode=HTML" \

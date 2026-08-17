@@ -19,6 +19,7 @@ import takagi.ru.monica.bitwarden.repository.BitwardenRepository
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.LocalKeePassDatabaseDao
 import takagi.ru.monica.data.SecureItem
+import takagi.ru.monica.data.model.SecureCustomField
 import takagi.ru.monica.data.OperationLogItemType
 import takagi.ru.monica.data.SecureItemOwnership
 import takagi.ru.monica.data.asMonicaLocalCopy
@@ -340,6 +341,7 @@ class NoteViewModel(
         content: String,
         title: String? = null,
         tags: List<String> = emptyList(),
+        customFields: List<SecureCustomField> = emptyList(),
         isMarkdown: Boolean = false,
         isFavorite: Boolean = false,
         categoryId: Long? = null,
@@ -357,7 +359,8 @@ class NoteViewModel(
             val (itemData, notesCache) = NoteContentCodec.encode(
                 content = content,
                 tags = tags,
-                isMarkdown = isMarkdown
+                isMarkdown = isMarkdown,
+                customFields = customFields
             )
             val resolvedTitle = NoteContentCodec.resolveTitle(title = title, content = content)
             val keepassIdentity = resolveKeePassMutationIdentity(
@@ -411,6 +414,7 @@ class NoteViewModel(
         content: String,
         title: String? = null,
         tags: List<String> = emptyList(),
+        customFields: List<SecureCustomField>? = null,
         isMarkdown: Boolean = false,
         isFavorite: Boolean,
         createdAt: Date,
@@ -442,7 +446,9 @@ class NoteViewModel(
             val (itemData, notesCache) = NoteContentCodec.encode(
                 content = content,
                 tags = tags,
-                isMarkdown = isMarkdown
+                isMarkdown = isMarkdown,
+                customFields = customFields
+                    ?: existingItem?.let(NoteContentCodec::decodeFromItem)?.customFields.orEmpty()
             )
             val resolvedTitle = NoteContentCodec.resolveTitle(title = title, content = content)
             val keepassIdentity = resolveKeePassMutationIdentity(
@@ -549,6 +555,7 @@ class NoteViewModel(
         content: String,
         title: String? = null,
         tags: List<String> = emptyList(),
+        customFields: List<SecureCustomField> = emptyList(),
         isMarkdown: Boolean = false,
         isFavorite: Boolean = false,
         createdAt: Date = Date(),
@@ -588,6 +595,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             categoryId = currentTarget.categoryId,
@@ -601,6 +609,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,
@@ -616,6 +625,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             imagePaths = imagePaths,
@@ -630,6 +640,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,
@@ -646,6 +657,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             imagePaths = imagePaths,
@@ -660,6 +672,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,
@@ -676,6 +689,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             imagePaths = imagePaths,
@@ -690,6 +704,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,
@@ -711,6 +726,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             categoryId = target.categoryId,
@@ -721,6 +737,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,
@@ -732,6 +749,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             imagePaths = imagePaths,
@@ -743,6 +761,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,
@@ -755,6 +774,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             imagePaths = imagePaths,
@@ -766,6 +786,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,
@@ -778,6 +799,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             imagePaths = imagePaths,
@@ -789,6 +811,7 @@ class NoteViewModel(
                             content = content,
                             title = title,
                             tags = tags,
+                            customFields = customFields,
                             isMarkdown = isMarkdown,
                             isFavorite = isFavorite,
                             createdAt = createdAt,

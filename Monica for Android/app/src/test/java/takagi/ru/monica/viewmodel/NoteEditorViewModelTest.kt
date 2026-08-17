@@ -14,6 +14,9 @@ import org.junit.Before
 import org.junit.Test
 import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.SecureItem
+import takagi.ru.monica.data.CustomFieldDraft
+import takagi.ru.monica.data.model.SecureCustomField
+import takagi.ru.monica.data.model.SecureCustomFieldType
 import takagi.ru.monica.notes.domain.NoteContentCodec
 import takagi.ru.monica.notes.domain.NoteDraftStorage
 import takagi.ru.monica.notes.domain.NoteDraftStore
@@ -104,6 +107,34 @@ class NoteEditorViewModelTest {
     }
 
     @Test
+    fun customFields_roundTripThroughEditor_andDiscardIncompleteRows() {
+        val vm = NoteEditorViewModel()
+        vm.loadForEdit(
+            createNote(
+                customFields = listOf(
+                    SecureCustomField("API key", "secret", SecureCustomFieldType.HIDDEN)
+                )
+            )
+        )
+
+        assertEquals("API key", vm.uiState.value.customFields.single().title)
+        assertTrue(vm.uiState.value.customFields.single().isProtected)
+
+        vm.updateCustomFields(
+            vm.uiState.value.customFields + CustomFieldDraft(
+                id = CustomFieldDraft.nextTempId(),
+                title = "Incomplete",
+                value = ""
+            )
+        )
+        val fields = vm.buildSavePayload(isMarkdown = true).customFields
+
+        assertEquals(1, fields.size)
+        assertEquals(SecureCustomFieldType.HIDDEN, fields.single().type)
+        assertEquals("secret", fields.single().value)
+    }
+
+    @Test
     fun applyInitialStorageIfNeeded_prefersInitialThenDraftThenRemembered() {
         val vm = NoteEditorViewModel()
         vm.applyInitialStorageIfNeeded(
@@ -189,12 +220,14 @@ class NoteEditorViewModelTest {
         title: String = "t",
         content: String = "c",
         tags: List<String> = emptyList(),
-        imageIds: List<String> = emptyList()
+        imageIds: List<String> = emptyList(),
+        customFields: List<SecureCustomField> = emptyList()
     ): SecureItem {
         val (itemData, notes) = NoteContentCodec.encode(
             content = content,
             tags = tags,
-            isMarkdown = true
+            isMarkdown = true,
+            customFields = customFields
         )
         return SecureItem(
             id = 7L,
