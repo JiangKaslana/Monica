@@ -13,15 +13,16 @@ on:
         required: false
         type: string
 
-  # 仅支持手动触发。Android.yml 在打 tag 发布时已经会直接发送一次 Telegram 消息，
-  # 这里不再监听 release 事件，避免同一个 Release 被发送两次。
-  # 如需重新发送某个已发布的 Release（例如资产更新后），手动触发本工作流并填写 release_tag 即可。
+  # 自动触发：GitHub Release 创建后自动运行。Android.yml 已不再直接发送 Telegram，
+  # 改由本工作流统一负责，确保每次发布只发送一次。
+  release:
+    types: [created]
 
 permissions:
   contents: read
 
 concurrency:
-  group: telegram-release-${{ inputs.release_tag }}
+  group: telegram-release-${{ inputs.release_tag || github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -34,7 +35,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
         run: |
           set -euo pipefail
 
