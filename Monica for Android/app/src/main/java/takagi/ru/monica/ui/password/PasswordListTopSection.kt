@@ -71,6 +71,7 @@ import takagi.ru.monica.ui.password.BitwardenReunlockTopActionsMenuItem
 import takagi.ru.monica.ui.password.BitwardenSyncTopActionsMenuItem
 import takagi.ru.monica.ui.password.CommonPasswordTopActionsMenuItems
 import takagi.ru.monica.ui.password.KeepassRefreshTopActionsMenuItem
+import takagi.ru.monica.ui.password.KeepassNativeManagerTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxCommitHistoryTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxCreateSnapshotTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxSyncTopActionsMenuItem
@@ -171,6 +172,11 @@ internal fun PasswordListTopSection(
     val selectedMdbxDatabase = remember(selectedMdbxDatabaseId, mdbxDatabases) {
         selectedMdbxDatabaseId?.let { databaseId ->
             mdbxDatabases.find { it.id == databaseId }
+        }
+    }
+    val onOpenKeePassNativeManager: () -> Unit = {
+        selectedKeePassDatabaseId?.let { databaseId ->
+            localKeePassViewModel.openNativeManager(databaseId)
         }
     }
     Column {
@@ -381,6 +387,14 @@ internal fun PasswordListTopSection(
                                         viewModel.refreshKeePassFromSourceForCurrentContext()
                                     }
                                 )
+                                if (selectedKeePassDatabaseId != null) {
+                                    KeepassNativeManagerTopActionsMenuItem(
+                                        onClick = {
+                                            onTopActionsMenuExpandedChange(false)
+                                            onOpenKeePassNativeManager()
+                                        }
+                                    )
+                                }
                             }
                             if (
                                 selectedMdbxDatabaseId != null &&
@@ -788,7 +802,11 @@ internal fun PasswordListTopSection(
             is CategoryFilter.BitwardenVaultStarred -> UnifiedCategoryFilterSelection.BitwardenVaultStarredFilter(filter.vaultId)
             is CategoryFilter.BitwardenVaultUncategorized -> UnifiedCategoryFilterSelection.BitwardenVaultUncategorizedFilter(filter.vaultId)
             is CategoryFilter.KeePassDatabase -> UnifiedCategoryFilterSelection.KeePassDatabaseFilter(filter.databaseId)
-            is CategoryFilter.KeePassGroupFilter -> UnifiedCategoryFilterSelection.KeePassGroupFilter(filter.databaseId, filter.groupPath)
+        is CategoryFilter.KeePassGroupFilter -> UnifiedCategoryFilterSelection.KeePassGroupFilter(
+            filter.databaseId,
+            filter.groupPath,
+            filter.groupUuid
+        )
             is CategoryFilter.KeePassDatabaseStarred -> UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter(filter.databaseId)
             is CategoryFilter.KeePassDatabaseUncategorized -> UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter(filter.databaseId)
             is CategoryFilter.MdbxDatabase -> UnifiedCategoryFilterSelection.MdbxDatabaseFilter(filter.databaseId)

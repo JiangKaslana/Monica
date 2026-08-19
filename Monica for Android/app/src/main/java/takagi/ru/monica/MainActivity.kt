@@ -84,6 +84,7 @@ import takagi.ru.monica.data.model.isBarcodeEntry
 import takagi.ru.monica.data.model.isSshKeyEntry
 import takagi.ru.monica.external.ExternalTotpImportController
 import takagi.ru.monica.external.ExternalTotpImportRequest
+import takagi.ru.monica.keepass.KeePassNativeResolvedRoute
 import takagi.ru.monica.navigation.Screen
 import takagi.ru.monica.data.dedup.DedupMergeService
 import takagi.ru.monica.repository.PasswordRepository
@@ -809,6 +810,15 @@ fun MonicaContent(
     val settings by settingsViewModel.settings.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
+    LaunchedEffect(localKeePassViewModel, navController) {
+        localKeePassViewModel.nativeManagerOpenRequests.collect {
+            if (navController.currentDestination?.route != Screen.LocalKeePass.route) {
+                navController.navigate(Screen.LocalKeePass.route) {
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
     val sensitiveFieldMigrationManager = remember(database, securityManager) {
         SensitiveFieldMigrationManager(
             context = context.applicationContext,
@@ -3592,6 +3602,7 @@ fun MonicaContent(
             popExitTransition = { easyNotesScreenExit() }
         ) {
             takagi.ru.monica.ui.screens.PageAdjustmentCustomizationScreen(
+                viewModel = settingsViewModel,
                 onNavigateBack = {
                     navController.popBackStack()
                 },
@@ -3838,6 +3849,23 @@ fun MonicaContent(
                 viewModel = localKeePassViewModel,
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateNativeEntry = { route ->
+                    when (route) {
+                        is KeePassNativeResolvedRoute.Password ->
+                            navController.navigate(Screen.PasswordDetail.createRoute(route.id)) { launchSingleTop = true }
+                        is KeePassNativeResolvedRoute.Totp ->
+                            navController.navigate(Screen.AddEditTotp.createRoute(route.id)) { launchSingleTop = true }
+                        is KeePassNativeResolvedRoute.Note ->
+                            navController.navigate(Screen.NoteDetail.createRoute(route.id)) { launchSingleTop = true }
+                        is KeePassNativeResolvedRoute.BankCard ->
+                            navController.navigate("bank_card_detail/${route.id}") { launchSingleTop = true }
+                        is KeePassNativeResolvedRoute.Document ->
+                            navController.navigate(Screen.DocumentDetail.createRoute(route.id)) { launchSingleTop = true }
+                        is KeePassNativeResolvedRoute.Passkey ->
+                            navController.navigate(Screen.PasskeyDetail.createRoute(route.recordId)) { launchSingleTop = true }
+                        KeePassNativeResolvedRoute.Generic -> Unit
+                    }
                 }
             )
         }

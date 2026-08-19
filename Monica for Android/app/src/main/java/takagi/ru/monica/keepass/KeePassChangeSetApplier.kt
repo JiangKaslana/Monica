@@ -7,6 +7,8 @@ import app.keemobile.kotpass.cryptography.EncryptedValue
 import app.keemobile.kotpass.database.KeePassDatabase
 import app.keemobile.kotpass.database.modifiers.binaries
 import app.keemobile.kotpass.database.modifiers.modifyBinaries
+import app.keemobile.kotpass.database.modifiers.modifyContent
+import app.keemobile.kotpass.database.modifiers.modifyCustomIcons
 import app.keemobile.kotpass.database.modifiers.modifyParentGroup
 import app.keemobile.kotpass.constants.PredefinedIcon
 import app.keemobile.kotpass.models.AutoTypeData
@@ -14,6 +16,7 @@ import app.keemobile.kotpass.models.AutoTypeItem
 import app.keemobile.kotpass.models.BinaryData
 import app.keemobile.kotpass.models.BinaryReference
 import app.keemobile.kotpass.models.CustomDataValue
+import app.keemobile.kotpass.models.CustomIcon
 import app.keemobile.kotpass.models.Entry
 import app.keemobile.kotpass.models.EntryFields
 import app.keemobile.kotpass.models.EntryValue
@@ -25,11 +28,14 @@ import java.time.Instant
 import java.util.UUID
 
 class KeePassChangeSetApplier {
+    private val nativeMutation = KeePassNativeMutation()
+    private val recycleBinPolicy = KeePassRecycleBinPolicy(nativeMutation = nativeMutation)
     fun apply(
         database: KeePassDatabase,
         changeSet: KeePassChangeSet
     ): KeePassChangeSetApplyResult {
         val updatedDatabase = when (changeSet.operation) {
+            KeePassChangeOperation.CREATE_ENTRY -> createEntryDatabase(database, changeSet)
             KeePassChangeOperation.CREATE_GROUP_TREE -> createGroupTree(database, changeSet)
             KeePassChangeOperation.DELETE_GROUP_TREE -> deleteGroupTree(database, changeSet)
             KeePassChangeOperation.ADD_ATTACHMENT -> addAttachment(database, changeSet)
@@ -47,17 +53,52 @@ class KeePassChangeSetApplier {
         database: KeePassDatabase,
         changeSet: KeePassChangeSet
     ): KeePassDatabase {
-        val updatedRoot = when (changeSet.operation) {
-            KeePassChangeOperation.CREATE_ENTRY -> createEntry(database.content.group, changeSet)
-            KeePassChangeOperation.FIELD_PATCH -> applyFieldPatch(database.content.group, changeSet)
-            KeePassChangeOperation.MOVE_ENTRY -> moveEntry(database.content.group, changeSet)
-            KeePassChangeOperation.MOVE_TO_RECYCLE_BIN -> moveEntryToRecycleBin(database.content.group, changeSet)
-            KeePassChangeOperation.RESTORE_FROM_RECYCLE_BIN -> restoreEntryFromRecycleBin(database.content.group, changeSet)
-            KeePassChangeOperation.PERMANENT_DELETE -> permanentDelete(database.content.group, changeSet)
-            KeePassChangeOperation.CREATE_GROUP -> createGroup(database.content.group, changeSet)
-            KeePassChangeOperation.RENAME_GROUP -> renameGroup(database.content.group, changeSet)
-            KeePassChangeOperation.DELETE_GROUP -> deleteGroup(database.content.group, changeSet)
-            KeePassChangeOperation.MOVE_GROUP -> moveGroup(database.content.group, changeSet)
+        return when (changeSet.operation) {
+            KeePassChangeOperation.CREATE_ENTRY -> error("CREATE_ENTRY must be handled before group replay")
+            KeePassChangeOperation.FIELD_PATCH -> database.modifyParentGroup {
+                applyFieldPatch(
+                    root = this,
+                    changeSet = changeSet,
+                    meta = database.content.meta,
+                    binaryPool = database.binaries
+                )
+            }
+            KeePassChangeOperation.ENTRY_EDIT_PATCH -> applyEntryEditPatch(database, changeSet)
+            KeePassChangeOperation.ENTRY_PRESENTATION_PATCH -> {
+                applyEntryPresentation(database, changeSet)
+            }
+            KeePassChangeOperation.CUSTOM_ICON_POOL_PATCH -> {
+                applyCustomIconPoolPatch(database, changeSet)
+            }
+            KeePassChangeOperation.MOVE_ENTRY -> database.modifyParentGroup {
+                moveEntry(this, changeSet)
+            }
+            KeePassChangeOperation.MOVE_TO_RECYCLE_BIN -> moveEntryToRecycleBin(database, changeSet)
+            KeePassChangeOperation.RESTORE_FROM_RECYCLE_BIN -> database.modifyParentGroup {
+                restoreEntryFromRecycleBin(this, changeSet)
+            }
+            KeePassChangeOperation.PERMANENT_DELETE -> permanentDelete(database, changeSet)
+            KeePassChangeOperation.RESTORE_HISTORY -> database.modifyParentGroup {
+                restoreHistory(
+                    root = this,
+                    changeSet = changeSet,
+                    meta = database.content.meta,
+                    binaryPool = database.binaries
+                )
+            }
+            KeePassChangeOperation.DELETE_HISTORY -> database.modifyParentGroup {
+                deleteHistory(this, changeSet)
+            }
+            KeePassChangeOperation.CREATE_GROUP -> database.modifyParentGroup {
+                createGroup(this, changeSet)
+            }
+            KeePassChangeOperation.RENAME_GROUP -> database.modifyParentGroup {
+                renameGroup(this, changeSet)
+            }
+            KeePassChangeOperation.DELETE_GROUP -> deleteGroup(database, changeSet)
+            KeePassChangeOperation.MOVE_GROUP -> database.modifyParentGroup {
+                moveGroup(this, changeSet)
+            }
             KeePassChangeOperation.CREATE_GROUP_TREE,
             KeePassChangeOperation.DELETE_GROUP_TREE -> {
                 throw IllegalArgumentException("Group tree operation must be handled before group replay")
@@ -67,7 +108,76 @@ class KeePassChangeSetApplier {
                 throw IllegalArgumentException("Attachment operation must be handled before group replay")
             }
         }
-        return database.modifyParentGroup { updatedRoot }
+    }
+
+    /** Applies a create-entry patch, including complete native metadata/pools when present. */
+    private fun createEntryDatabase(
+        database: KeePassDatabase,
+        changeSet: KeePassChangeSet,
+    ): KeePassDatabase {
+        val patch = changeSet.entryPatch
+            ?: throw IllegalArgumentException("CREATE_ENTRY requires entryPatch")
+        val nativeEntry = patch.nativeEntry
+        if (nativeEntry == null) {
+            return database.modifyParentGroup { createEntry(this, changeSet) }
+        }
+        val entryUuid = changeSet.requiredEntryUuid()
+        val nativeUuid = nativeEntry.uuid.toUuidOrNull()
+            ?: throw IllegalArgumentException("CREATE_ENTRY native entry has invalid UUID")
+        require(nativeUuid == entryUuid) { "CREATE_ENTRY native UUID does not match entry UUID" }
+        if (containsEntryUuid(database.content.group, entryUuid)) {
+            throw IllegalArgumentException("KeePass entry already exists for create: $entryUuid")
+        }
+        val targetGroupUuid = patch.targetGroupUuid?.toUuidOrNull()
+            ?: throw IllegalArgumentException("CREATE_ENTRY requires targetGroupUuid")
+        ensureGroupTreeBinaryPoolComplete(
+            nativeEntry,
+            patch.binaryPool,
+        )
+        ensureGroupTreeCustomIconPoolComplete(
+            nativeEntry,
+            patch.customIconPool,
+        )
+        val entry = nativeMutation.initializeEntry(nativeEntry.toEntry())
+        val inserted = addEntryToGroupUuid(database.content.group, targetGroupUuid, entry)
+        if (!inserted.inserted) {
+            throw IllegalArgumentException("KeePass target group not found for create: $targetGroupUuid")
+        }
+        var updated = database.modifyParentGroup { inserted.group }
+            .modifyBinaries { pool ->
+                patch.binaryPool.fold(pool) { current, item ->
+                    val binary = item.toBinaryData()
+                    val existing = current[binary.hash]
+                    if (existing != null && !existing.rawContent.contentEquals(binary.rawContent)) {
+                        throw IllegalArgumentException("KeePass binary hash collision: ${item.hash}")
+                    }
+                    current + (binary.hash to (existing ?: binary))
+                }
+            }
+            .modifyCustomIcons { pool ->
+                patch.customIconPool.fold(pool) { current, item ->
+                    val uuid = item.uuid.toUuidOrNull()
+                        ?: throw IllegalArgumentException("Invalid custom icon UUID: ${item.uuid}")
+                    val icon = item.toCustomIcon()
+                    val existing = current[uuid]
+                    if (existing != null && !existing.sameContentAs(icon)) {
+                        throw IllegalArgumentException("KeePass custom icon UUID collision: $uuid")
+                    }
+                    current + (uuid to (existing ?: icon))
+                }
+            }
+        changeSet.databaseMetaPatch?.let { metaPatch ->
+            val templatesUuid = metaPatch.entryTemplatesGroupUuid?.toUuidOrNull()
+            updated = updated.modifyContent {
+                copy(meta = meta.copy(
+                    entryTemplatesGroup = templatesUuid ?: meta.entryTemplatesGroup,
+                    entryTemplatesGroupChanged = metaPatch.entryTemplatesGroupChangedEpochMillis
+                        ?.let { java.time.Instant.ofEpochMilli(it) }
+                        ?: meta.entryTemplatesGroupChanged,
+                ))
+            }
+        }
+        return updated
     }
 
     fun applyAll(
@@ -101,7 +211,8 @@ class KeePassChangeSetApplier {
             throw IllegalArgumentException("KeePass group tree already exists for create: $rootGroupUuid")
         }
         ensureGroupTreeBinaryPoolComplete(groupTreePatch.root, groupTreePatch.binaryPool)
-        val group = groupTreePatch.root.toGroup()
+        ensureGroupTreeCustomIconPoolComplete(groupTreePatch.root, groupTreePatch.customIconPool)
+        val group = nativeMutation.initializeGroup(groupTreePatch.root.toGroup())
         val inserted = addGroupToParentUuid(
             group = database.content.group,
             parentGroupUuid = targetParentGroupUuid,
@@ -110,7 +221,7 @@ class KeePassChangeSetApplier {
         if (!inserted.inserted) {
             throw IllegalArgumentException("KeePass target group not found for group tree create: $targetParentGroupUuid")
         }
-        return database
+        var updated = database
             .modifyParentGroup { inserted.group }
             .modifyBinaries { pool ->
                 groupTreePatch.binaryPool.fold(pool) { current, item ->
@@ -118,6 +229,19 @@ class KeePassChangeSetApplier {
                     current + (binaryData.hash to binaryData)
                 }
             }
+            .modifyCustomIcons { pool ->
+                groupTreePatch.customIconPool.fold(pool) { current, item ->
+                    val uuid = item.uuid.toUuidOrNull()
+                        ?: throw IllegalArgumentException("Invalid group tree custom icon uuid: ${item.uuid}")
+                    val customIcon = item.toCustomIcon()
+                    val existing = current[uuid]
+                    if (existing != null && !existing.sameContentAs(customIcon)) {
+                        throw IllegalArgumentException("Group tree custom icon UUID collision: $uuid")
+                    }
+                    current + (uuid to (existing ?: customIcon))
+                }
+            }
+        return updated
     }
 
     private fun deleteGroupTree(database: KeePassDatabase, changeSet: KeePassChangeSet): KeePassDatabase {
@@ -136,18 +260,30 @@ class KeePassChangeSetApplier {
         if (database.content.group.uuid == sourceGroupUuid) {
             throw IllegalArgumentException("KeePass root group cannot be deleted")
         }
-        val result = removeGroupByUuid(database.content.group, sourceGroupUuid)
-        if (!result.removed) {
+        val result = removeGroupByUuidWithValue(database.content.group, sourceGroupUuid)
+        val removedGroup = result.removed
+        if (removedGroup == null) {
             throw IllegalArgumentException("KeePass group not found for group tree delete: $sourceGroupUuid")
         }
         val payloadHashes = groupTreePatch.binaryPool
             .mapNotNull { it.hash.hexToByteStringOrNull() }
             .toSet()
         val withoutGroup = database.modifyParentGroup { result.group }
-        return withoutGroup.modifyBinaries { pool ->
+        val withoutUnusedBinaries = withoutGroup.modifyBinaries { pool ->
             payloadHashes.fold(pool) { current, hash ->
                 if (anyEntryReferencesHash(withoutGroup.content.group, hash)) current else current - hash
             }
+        }
+        val payloadCustomIconUuids = groupTreePatch.customIconPool
+            .mapNotNull { it.uuid.toUuidOrNull() }
+            .toSet()
+        val withoutUnusedCustomIcons = withoutUnusedBinaries.modifyCustomIcons { pool ->
+            payloadCustomIconUuids.fold(pool) { current, uuid ->
+                if (groupTreeReferencesCustomIcon(withoutGroup.content.group, uuid)) current else current - uuid
+            }
+        }
+        return withoutUnusedCustomIcons.modifyContent {
+            nativeMutation.recordPermanentDeletion(this, removedGroup)
         }
     }
 
@@ -169,10 +305,11 @@ class KeePassChangeSetApplier {
             uuid = entryUuid,
             fields = fields
         )
-        val entry = patch.iconName
+        val decoratedEntry = patch.iconName
             ?.let { iconName -> runCatching { PredefinedIcon.valueOf(iconName) }.getOrNull() }
             ?.let { icon -> baseEntry.copy(icon = icon) }
             ?: baseEntry
+        val entry = nativeMutation.initializeEntry(decoratedEntry)
         val inserted = addEntryToGroupUuid(root, targetGroupUuid, entry)
         if (!inserted.inserted) {
             throw IllegalArgumentException("KeePass target group not found for create: $targetGroupUuid")
@@ -180,7 +317,12 @@ class KeePassChangeSetApplier {
         return inserted.group
     }
 
-    private fun applyFieldPatch(root: Group, changeSet: KeePassChangeSet): Group {
+    private fun applyFieldPatch(
+        root: Group,
+        changeSet: KeePassChangeSet,
+        meta: app.keemobile.kotpass.models.Meta,
+        binaryPool: Map<ByteString, BinaryData>
+    ): Group {
         val entryUuid = changeSet.requiredEntryUuid()
         val fieldPatch = changeSet.fieldPatch
             ?: throw IllegalArgumentException("FIELD_PATCH requires fieldPatch")
@@ -189,19 +331,337 @@ class KeePassChangeSetApplier {
                 field.name to field.toEntryValue()
             }.toTypedArray()
         )
-        val patch = KeePassEntryFieldPatch.fromEntryFields(
-            replacementFields = replacementFields,
-            removeManagedField = removeManagedFieldFor(fieldPatch.managedScope),
-            removeFieldNames = fieldPatch.removeFieldNames + fieldPatch.replacementFields.map { it.name }
-        )
         val result = updateEntryByUuid(root, entryUuid) { entry ->
             assertFieldPatchHasNoRemoteConflict(entry, changeSet, fieldPatch)
-            patch.applyTo(entry)
+            nativeMutation.editEntry(
+                entry = entry,
+                meta = meta,
+                binaryPool = binaryPool
+            ) { current ->
+                if (fieldPatch.replaceAllFields) {
+                    current.copy(fields = replacementFields)
+                } else {
+                    KeePassEntryFieldPatch.fromEntryFields(
+                        replacementFields = replacementFields,
+                        removeManagedField = removeManagedFieldFor(fieldPatch.managedScope),
+                        removeFieldNames = fieldPatch.removeFieldNames + fieldPatch.replacementFields.map { it.name }
+                    ).applyTo(current)
+                }
+            }
         }
         if (!result.updated) {
             throw IllegalArgumentException("KeePass entry not found for field patch: $entryUuid")
         }
         return result.group
+    }
+
+    /**
+     * Applies the regular fields and presentation in one database mutation.
+     *
+     * The editor uses this operation when an icon upload and field edits are
+     * submitted together.  Both conflict checks happen against the original
+     * entry before anything is changed, so a failed presentation check cannot
+     * leave a partially updated entry behind.
+     */
+    private fun applyEntryEditPatch(
+        database: KeePassDatabase,
+        changeSet: KeePassChangeSet,
+    ): KeePassDatabase {
+        val entryUuid = changeSet.requiredEntryUuid()
+        val fieldPatch = changeSet.fieldPatch
+            ?: throw IllegalArgumentException("ENTRY_EDIT_PATCH requires fieldPatch")
+        val presentationPatch = changeSet.entryPresentationPatch
+            ?: throw IllegalArgumentException("ENTRY_EDIT_PATCH requires entryPresentationPatch")
+
+        var addedIcon: Pair<UUID, CustomIcon>? = null
+        presentationPatch.customIcon?.let { item ->
+            val uuid = item.uuid.toUuidOrNull()
+                ?: throw IllegalArgumentException("Invalid custom icon UUID: ${item.uuid}")
+            val icon = item.toCustomIcon()
+            addedIcon = uuid to icon
+            if (presentationPatch.customIconUuid?.toUuidOrNull()?.let { it != uuid } == true) {
+                throw IllegalArgumentException("Custom icon UUID does not match presentation UUID")
+            }
+        }
+        val selectedCustomIconUuid = when {
+            presentationPatch.clearCustomIcon -> null
+            presentationPatch.customIconUuid != null -> presentationPatch.customIconUuid.toUuidOrNull()
+                ?: throw IllegalArgumentException(
+                    "Invalid custom icon UUID: ${presentationPatch.customIconUuid}"
+                )
+            else -> null
+        }
+
+        val current = findEntryByUuid(database.content.group, entryUuid)
+            ?: throw IllegalArgumentException("KeePass entry not found for edit patch: $entryUuid")
+        assertFieldPatchHasNoRemoteConflict(current, changeSet, fieldPatch)
+        val expectedPresentation = presentationPatch.basePresentationSignature
+        if (!expectedPresentation.isNullOrBlank() &&
+            KeePassEntryFingerprint.buildPresentation(current) != expectedPresentation
+        ) {
+            throw KeePassChangeConflictException(
+                changeId = changeSet.changeId,
+                entryUuid = changeSet.entryUuid,
+                reason = "Remote entry icon changed before replay",
+            )
+        }
+        if (selectedCustomIconUuid != null && addedIcon == null &&
+            database.content.meta.customIcons[selectedCustomIconUuid] == null
+        ) {
+            throw IllegalArgumentException("KeePass custom icon not found: $selectedCustomIconUuid")
+        }
+
+        val replacementFields = EntryFields.of(
+            *fieldPatch.replacementFields.map { field -> field.name to field.toEntryValue() }
+                .toTypedArray(),
+        )
+        var result = database.modifyParentGroup {
+            val updated = updateEntryByUuid(this, entryUuid) { entry ->
+                nativeMutation.editEntry(
+                    entry = entry,
+                    meta = database.content.meta,
+                    binaryPool = database.binaries,
+                ) { currentEntry ->
+                    val fieldsUpdated = if (fieldPatch.replaceAllFields) {
+                        currentEntry.copy(fields = replacementFields)
+                    } else {
+                        KeePassEntryFieldPatch.fromEntryFields(
+                            replacementFields = replacementFields,
+                            removeManagedField = removeManagedFieldFor(fieldPatch.managedScope),
+                            removeFieldNames = fieldPatch.removeFieldNames +
+                                fieldPatch.replacementFields.map { it.name },
+                        ).applyTo(currentEntry)
+                    }
+                    val predefinedIcon = presentationPatch.predefinedIconName?.let { name ->
+                        runCatching { PredefinedIcon.valueOf(name) }.getOrElse {
+                            throw IllegalArgumentException("Unknown predefined icon: $name")
+                        }
+                    }
+                    fieldsUpdated.copy(
+                        icon = predefinedIcon ?: fieldsUpdated.icon,
+                        customIconUuid = when {
+                            presentationPatch.clearCustomIcon -> null
+                            presentationPatch.customIconUuid != null -> selectedCustomIconUuid
+                            else -> fieldsUpdated.customIconUuid
+                        },
+                        autoType = presentationPatch.autoType?.toAutoTypeData() ?: fieldsUpdated.autoType,
+                    )
+                }
+            }
+            if (!updated.updated) {
+                throw IllegalArgumentException("KeePass entry not found for edit patch: $entryUuid")
+            }
+            updated.group
+        }
+        addedIcon?.let { (uuid, icon) ->
+            result = result.modifyCustomIcons { pool ->
+                val existing = pool[uuid]
+                if (existing != null && !existing.sameContentAs(icon)) {
+                    throw IllegalArgumentException("Custom icon UUID collision: $uuid")
+                }
+                pool + (uuid to (existing ?: icon))
+            }
+        }
+        presentationPatch.removeCustomIconUuid?.toUuidOrNull()?.let { removedUuid ->
+            if (!groupTreeReferencesCustomIcon(result.content.group, removedUuid)) {
+                result = result.modifyCustomIcons { pool -> pool - removedUuid }
+            }
+        }
+        return result
+    }
+
+    private fun applyEntryPresentation(
+        database: KeePassDatabase,
+        changeSet: KeePassChangeSet,
+    ): KeePassDatabase {
+        val entryUuid = changeSet.requiredEntryUuid()
+        val patch = changeSet.entryPresentationPatch
+            ?: throw IllegalArgumentException("ENTRY_PRESENTATION_PATCH requires entryPresentationPatch")
+        var addedIcon: Pair<UUID, CustomIcon>? = null
+        patch.customIcon?.let { item ->
+            val uuid = item.uuid.toUuidOrNull()
+                ?: throw IllegalArgumentException("Invalid custom icon UUID: ${item.uuid}")
+            val icon = item.toCustomIcon()
+            addedIcon = uuid to icon
+            if (patch.customIconUuid?.toUuidOrNull()?.let { it != uuid } == true) {
+                throw IllegalArgumentException("Custom icon UUID does not match presentation UUID")
+            }
+        }
+        val selectedCustomIconUuid = when {
+            patch.clearCustomIcon -> null
+            patch.customIconUuid != null -> patch.customIconUuid.toUuidOrNull()
+                ?: throw IllegalArgumentException("Invalid custom icon UUID: ${patch.customIconUuid}")
+            else -> null
+        }
+        val updated = updateEntryByUuid(database.content.group, entryUuid) { entry ->
+            val expectedPresentation = patch.basePresentationSignature
+            if (!expectedPresentation.isNullOrBlank() &&
+                KeePassEntryFingerprint.buildPresentation(entry) != expectedPresentation
+            ) {
+                throw KeePassChangeConflictException(
+                    changeId = changeSet.changeId,
+                    entryUuid = changeSet.entryUuid,
+                    reason = "Remote entry icon changed before replay",
+                )
+            }
+            val predefinedIcon = patch.predefinedIconName?.let { name ->
+                runCatching { PredefinedIcon.valueOf(name) }.getOrElse {
+                    throw IllegalArgumentException("Unknown predefined icon: $name")
+                }
+            }
+            if (selectedCustomIconUuid != null && addedIcon == null &&
+                database.content.meta.customIcons[selectedCustomIconUuid] == null
+            ) {
+                throw IllegalArgumentException("KeePass custom icon not found: $selectedCustomIconUuid")
+            }
+            nativeMutation.editEntry(
+                entry = entry,
+                meta = database.content.meta,
+                binaryPool = database.binaries,
+            ) { current ->
+                current.copy(
+                    icon = predefinedIcon ?: current.icon,
+                    customIconUuid = when {
+                        patch.clearCustomIcon -> null
+                        patch.customIconUuid != null -> selectedCustomIconUuid
+                        else -> current.customIconUuid
+                    },
+                    autoType = patch.autoType?.toAutoTypeData() ?: current.autoType,
+                )
+            }
+        }
+        if (!updated.updated) {
+            throw IllegalArgumentException("KeePass entry not found for presentation patch: $entryUuid")
+        }
+        var result = database.modifyParentGroup { updated.group }
+        addedIcon?.let { (uuid, icon) ->
+            result = result.modifyCustomIcons { pool ->
+                val existing = pool[uuid]
+                if (existing != null && !existing.sameContentAs(icon)) {
+                    throw IllegalArgumentException("Custom icon UUID collision: $uuid")
+                }
+                pool + (uuid to (existing ?: icon))
+            }
+        }
+        patch.removeCustomIconUuid?.toUuidOrNull()?.let { removedUuid ->
+            if (!groupTreeReferencesCustomIcon(result.content.group, removedUuid)) {
+                result = result.modifyCustomIcons { pool -> pool - removedUuid }
+            }
+        }
+        return result
+    }
+
+    private fun applyCustomIconPoolPatch(
+        database: KeePassDatabase,
+        changeSet: KeePassChangeSet,
+    ): KeePassDatabase {
+        val patch = changeSet.customIconPoolPatch
+            ?: throw IllegalArgumentException("CUSTOM_ICON_POOL_PATCH requires customIconPoolPatch")
+        var result = database.modifyCustomIcons { pool ->
+            patch.upsert.fold(pool) { current, item ->
+                val uuid = item.uuid.toUuidOrNull()
+                    ?: throw IllegalArgumentException("Invalid custom icon UUID: ${item.uuid}")
+                val icon = item.toCustomIcon()
+                val existing = current[uuid]
+                if (existing != null && !existing.sameContentAs(icon) &&
+                    uuid.toString().lowercase() !in patch.removeUuids.map { it.lowercase() }
+                ) {
+                    throw IllegalArgumentException("Custom icon UUID collision: $uuid")
+                }
+                current + (uuid to (existing ?: icon))
+            }
+        }
+        patch.removeUuids.forEach { rawUuid ->
+            val uuid = rawUuid.toUuidOrNull()
+                ?: throw IllegalArgumentException("Invalid custom icon UUID: $rawUuid")
+            if (groupTreeReferencesCustomIcon(result.content.group, uuid)) {
+                throw IllegalArgumentException("Custom icon is still referenced: $uuid")
+            }
+            result = result.modifyCustomIcons { pool -> pool - uuid }
+        }
+        return result
+    }
+
+    private fun restoreHistory(
+        root: Group,
+        changeSet: KeePassChangeSet,
+        meta: app.keemobile.kotpass.models.Meta,
+        binaryPool: Map<ByteString, BinaryData>
+    ): Group {
+        val entryUuid = changeSet.requiredEntryUuid()
+        val historyPatch = changeSet.historyPatch
+            ?: throw IllegalArgumentException("RESTORE_HISTORY requires historyPatch")
+        val result = updateEntryByUuid(root, entryUuid) { entry ->
+            assertEntryHasNoRemoteConflict(entry, changeSet)
+            val historical = entry.history.getOrNull(historyPatch.historyIndex)
+                ?: throw IllegalArgumentException("KeePass history version not found: ${historyPatch.historyIndex}")
+            assertHistorySnapshotMatches(historical, historyPatch, changeSet)
+            nativeMutation.editEntry(
+                entry = entry,
+                meta = meta,
+                binaryPool = binaryPool
+            ) { current ->
+                historical.copy(
+                    uuid = current.uuid,
+                    history = current.history
+                )
+            }
+        }
+        if (!result.updated) {
+            throw IllegalArgumentException("KeePass entry not found for history restore: $entryUuid")
+        }
+        return result.group
+    }
+
+    private fun deleteHistory(
+        root: Group,
+        changeSet: KeePassChangeSet
+    ): Group {
+        val entryUuid = changeSet.requiredEntryUuid()
+        val historyPatch = changeSet.historyPatch
+            ?: throw IllegalArgumentException("DELETE_HISTORY requires historyPatch")
+        val result = updateEntryByUuid(root, entryUuid) { entry ->
+            assertEntryHasNoRemoteConflict(entry, changeSet)
+            val historical = entry.history.getOrNull(historyPatch.historyIndex)
+                ?: throw IllegalArgumentException("KeePass history version not found: ${historyPatch.historyIndex}")
+            assertHistorySnapshotMatches(historical, historyPatch, changeSet)
+            entry.copy(
+                history = entry.history.filterIndexed { index, _ -> index != historyPatch.historyIndex }
+            )
+        }
+        if (!result.updated) {
+            throw IllegalArgumentException("KeePass entry not found for history delete: $entryUuid")
+        }
+        return result.group
+    }
+
+    private fun assertHistorySnapshotMatches(
+        snapshot: Entry,
+        patch: KeePassHistoryChangePatch,
+        changeSet: KeePassChangeSet
+    ) {
+        val expected = patch.expectedSnapshotFingerprint?.takeIf { it.isNotBlank() } ?: return
+        if (KeePassEntryFingerprint.build(snapshot) != expected) {
+            throw KeePassChangeConflictException(
+                changeId = changeSet.changeId,
+                entryUuid = changeSet.entryUuid,
+                reason = "History snapshot changed before replay"
+            )
+        }
+    }
+
+    private fun assertEntryHasNoRemoteConflict(
+        entry: Entry,
+        changeSet: KeePassChangeSet
+    ) {
+        val baseFingerprint = changeSet.baseFingerprint?.takeIf { it.isNotBlank() } ?: return
+        if (KeePassEntryFingerprint.build(entry) != baseFingerprint) {
+            throw KeePassChangeConflictException(
+                changeId = changeSet.changeId,
+                entryUuid = changeSet.entryUuid,
+                reason = "Remote entry fingerprint changed before history replay"
+            )
+        }
     }
 
     private fun assertFieldPatchHasNoRemoteConflict(
@@ -256,22 +716,34 @@ class KeePassChangeSetApplier {
         val removed = removeEntryByUuid(root, entryUuid)
         val entry = removed.removed?.entry
             ?: throw IllegalArgumentException("KeePass entry not found for move: $entryUuid")
-        val inserted = addEntryToGroupUuid(removed.group, targetGroupUuid, entry)
+        val inserted = addEntryToGroupUuid(
+            removed.group,
+            targetGroupUuid,
+            nativeMutation.markEntryMoved(entry)
+        )
         if (!inserted.inserted) {
             throw IllegalArgumentException("KeePass target group not found for move: $targetGroupUuid")
         }
         return inserted.group
     }
 
-    private fun moveEntryToRecycleBin(root: Group, changeSet: KeePassChangeSet): Group {
+    private fun moveEntryToRecycleBin(
+        database: KeePassDatabase,
+        changeSet: KeePassChangeSet
+    ): KeePassDatabase {
         val entryUuid = changeSet.requiredEntryUuid()
         val patch = changeSet.structurePatch
             ?: throw IllegalArgumentException("MOVE_TO_RECYCLE_BIN requires structurePatch")
-        val recycleBinUuid = patch.recycleBinGroupUuid?.toUuidOrNull()
-            ?: throw IllegalArgumentException("MOVE_TO_RECYCLE_BIN requires recycleBinGroupUuid")
         val previousParentUuid = patch.previousParentGroupUuid?.toUuidOrNull()
             ?: throw IllegalArgumentException("MOVE_TO_RECYCLE_BIN requires previousParentGroupUuid")
-        val removed = removeEntryByUuid(root, entryUuid, excludedGroupUuid = recycleBinUuid)
+        val preferredRecycleBinUuid = patch.recycleBinGroupUuid?.toUuidOrNull()
+        val resolution = recycleBinPolicy.ensure(database, preferredRecycleBinUuid)
+        val recycleBinUuid = resolution.recycleBinUuid
+        val removed = removeEntryByUuid(
+            resolution.database.content.group,
+            entryUuid,
+            excludedGroupUuid = recycleBinUuid
+        )
         val entry = removed.removed?.entry
             ?: throw IllegalArgumentException("KeePass entry not found for recycle bin move: $entryUuid")
         val actualPreviousParent = removed.removed.parentGroupUuid
@@ -283,12 +755,15 @@ class KeePassChangeSetApplier {
         val inserted = addEntryToGroupUuid(
             group = removed.group,
             targetGroupUuid = recycleBinUuid,
-            entry = entry.copy(previousParentGroup = previousParentUuid)
+            entry = nativeMutation.markEntryMoved(
+                entry = entry,
+                previousParentGroup = previousParentUuid
+            )
         )
         if (!inserted.inserted) {
             throw IllegalArgumentException("KeePass recycle bin group not found: $recycleBinUuid")
         }
-        return inserted.group
+        return resolution.database.modifyParentGroup { inserted.group }
     }
 
     private fun restoreEntryFromRecycleBin(root: Group, changeSet: KeePassChangeSet): Group {
@@ -320,7 +795,10 @@ class KeePassChangeSetApplier {
         val inserted = addEntryToGroupUuid(
             group = removed.group,
             targetGroupUuid = targetGroupUuid,
-            entry = entry.copy(previousParentGroup = null)
+            entry = nativeMutation.markEntryMoved(
+                entry = entry,
+                previousParentGroup = null
+            )
         )
         if (!inserted.inserted) {
             throw IllegalArgumentException("KeePass restore target group not found: $targetGroupUuid")
@@ -328,13 +806,18 @@ class KeePassChangeSetApplier {
         return inserted.group
     }
 
-    private fun permanentDelete(root: Group, changeSet: KeePassChangeSet): Group {
+    private fun permanentDelete(database: KeePassDatabase, changeSet: KeePassChangeSet): KeePassDatabase {
         val entryUuid = changeSet.requiredEntryUuid()
-        val removed = removeEntryByUuid(root, entryUuid)
-        if (removed.removed == null) {
+        val removed = removeEntryByUuid(database.content.group, entryUuid)
+        val removedEntry = removed.removed?.entry
+        if (removedEntry == null) {
             throw IllegalArgumentException("KeePass entry not found for permanent delete: $entryUuid")
         }
-        return removed.group
+        return database
+            .modifyParentGroup { removed.group }
+            .modifyContent {
+                nativeMutation.recordPermanentDeletion(this, removedEntry)
+            }
     }
 
     private fun createGroup(root: Group, changeSet: KeePassChangeSet): Group {
@@ -352,7 +835,7 @@ class KeePassChangeSetApplier {
         val result = addGroupToParentUuid(
             group = root,
             parentGroupUuid = parentGroupUuid,
-            newGroup = Group(uuid = groupUuid, name = groupName)
+            newGroup = nativeMutation.initializeGroup(Group(uuid = groupUuid, name = groupName))
         )
         if (!result.inserted) {
             throw IllegalArgumentException("KeePass parent group not found for create: $parentGroupUuid")
@@ -374,19 +857,24 @@ class KeePassChangeSetApplier {
         return result.group
     }
 
-    private fun deleteGroup(root: Group, changeSet: KeePassChangeSet): Group {
+    private fun deleteGroup(database: KeePassDatabase, changeSet: KeePassChangeSet): KeePassDatabase {
         val patch = changeSet.structurePatch
             ?: throw IllegalArgumentException("DELETE_GROUP requires structurePatch")
         val groupUuid = patch.sourceGroupUuid?.toUuidOrNull()
             ?: throw IllegalArgumentException("DELETE_GROUP requires sourceGroupUuid")
-        if (root.uuid == groupUuid) {
+        if (database.content.group.uuid == groupUuid) {
             throw IllegalArgumentException("KeePass root group cannot be deleted")
         }
-        val result = removeGroupByUuid(root, groupUuid)
-        if (!result.removed) {
+        val result = removeGroupByUuidWithValue(database.content.group, groupUuid)
+        val removedGroup = result.removed
+        if (removedGroup == null) {
             throw IllegalArgumentException("KeePass group not found for delete: $groupUuid")
         }
-        return result.group
+        return database
+            .modifyParentGroup { result.group }
+            .modifyContent {
+                nativeMutation.recordPermanentDeletion(this, removedGroup)
+            }
     }
 
     private fun moveGroup(root: Group, changeSet: KeePassChangeSet): Group {
@@ -413,7 +901,7 @@ class KeePassChangeSetApplier {
         val inserted = addGroupToParentUuid(
             group = removed.group,
             parentGroupUuid = targetParentGroupUuid,
-            newGroup = groupToMove
+            newGroup = nativeMutation.markGroupMoved(groupToMove)
         )
         if (!inserted.inserted) {
             throw IllegalArgumentException("KeePass target group not found for move: $targetParentGroupUuid")
@@ -438,13 +926,19 @@ class KeePassChangeSetApplier {
         }
         val newRef = BinaryReference(hash = binaryData.hash, name = patch.fileName)
         val updated = updateEntryByUuid(database.content.group, entryUuid) { entry ->
-            val alreadyLinked = entry.binaries.any {
-                it.hash == newRef.hash && it.name == newRef.name
-            }
-            if (alreadyLinked) {
-                entry
-            } else {
-                entry.copy(binaries = entry.binaries + newRef)
+            nativeMutation.editEntry(
+                entry = entry,
+                meta = database.content.meta,
+                binaryPool = database.binaries
+            ) { current ->
+                val alreadyLinked = current.binaries.any {
+                    it.hash == newRef.hash && it.name == newRef.name
+                }
+                if (alreadyLinked) {
+                    current
+                } else {
+                    current.copy(binaries = current.binaries + newRef)
+                }
             }
         }
         if (!updated.updated) {
@@ -464,16 +958,22 @@ class KeePassChangeSetApplier {
         val requestedHash = patch.binaryHash.hexToByteString()
         var removedRef: BinaryReference? = null
         val updated = updateEntryByUuid(database.content.group, entryUuid) { entry ->
-            val targetRef = entry.binaries.firstOrNull {
-                it.hash == requestedHash && it.name == patch.fileName
-            } ?: entry.binaries.firstOrNull {
-                it.hash == requestedHash
-            }
-            if (targetRef == null) {
-                entry
-            } else {
-                removedRef = targetRef
-                entry.copy(binaries = entry.binaries - targetRef)
+            nativeMutation.editEntry(
+                entry = entry,
+                meta = database.content.meta,
+                binaryPool = database.binaries
+            ) { current ->
+                val targetRef = current.binaries.firstOrNull {
+                    it.hash == requestedHash && it.name == patch.fileName
+                } ?: current.binaries.firstOrNull {
+                    it.hash == requestedHash
+                }
+                if (targetRef == null) {
+                    current
+                } else {
+                    removedRef = targetRef
+                    current.copy(binaries = current.binaries - targetRef)
+                }
             }
         }
         if (!updated.updated) {
@@ -590,12 +1090,6 @@ class KeePassChangeSetApplier {
         newGroup: Group
     ): AddGroupResult {
         if (group.uuid == parentGroupUuid) {
-            val conflict = group.groups.any { sibling ->
-                sibling.uuid != newGroup.uuid && sibling.name.equals(newGroup.name, ignoreCase = true)
-            }
-            if (conflict) {
-                throw IllegalArgumentException("KeePass group sibling name conflict: ${newGroup.name}")
-            }
             return AddGroupResult(group.copy(groups = group.groups + newGroup), inserted = true)
         }
 
@@ -620,14 +1114,8 @@ class KeePassChangeSetApplier {
         var updated = false
         val groups = group.groups.map { child ->
             if (!updated && child.uuid == groupUuid) {
-                val conflict = group.groups.any { sibling ->
-                    sibling.uuid != groupUuid && sibling.name.equals(newName, ignoreCase = true)
-                }
-                if (conflict) {
-                    throw IllegalArgumentException("KeePass group sibling name conflict: $newName")
-                }
                 updated = true
-                child.copy(name = newName)
+                nativeMutation.editGroup(child) { current -> current.copy(name = newName) }
             } else {
                 val childResult = renameGroupByUuid(child, groupUuid, newName)
                 if (childResult.updated) {
@@ -689,8 +1177,32 @@ class KeePassChangeSetApplier {
     }
 
     private fun anyEntryReferencesHash(group: Group, hash: ByteString): Boolean {
-        return group.entries.any { entry -> entry.binaries.any { it.hash == hash } } ||
+        return group.entries.any { entry -> entryReferencesHash(entry, hash) } ||
             group.groups.any { anyEntryReferencesHash(it, hash) }
+    }
+
+    private fun findEntryByUuid(group: Group, entryUuid: UUID): Entry? {
+        group.entries.firstOrNull { it.uuid == entryUuid }?.let { return it }
+        group.groups.forEach { child ->
+            findEntryByUuid(child, entryUuid)?.let { return it }
+        }
+        return null
+    }
+
+    private fun entryReferencesHash(entry: Entry, hash: ByteString): Boolean {
+        return entry.binaries.any { it.hash == hash } ||
+            entry.history.any { snapshot -> entryReferencesHash(snapshot, hash) }
+    }
+
+    private fun groupTreeReferencesCustomIcon(group: Group, customIconUuid: UUID): Boolean {
+        return group.customIconUuid == customIconUuid ||
+            group.entries.any { entry -> entryReferencesCustomIcon(entry, customIconUuid) } ||
+            group.groups.any { child -> groupTreeReferencesCustomIcon(child, customIconUuid) }
+    }
+
+    private fun entryReferencesCustomIcon(entry: Entry, customIconUuid: UUID): Boolean {
+        return entry.customIconUuid == customIconUuid ||
+            entry.history.any { snapshot -> entryReferencesCustomIcon(snapshot, customIconUuid) }
     }
 
     private fun removeManagedFieldFor(scope: KeePassManagedFieldScope): (String) -> Boolean {
@@ -714,6 +1226,62 @@ class KeePassChangeSetApplier {
         }
     }
 
+    private fun ensureGroupTreeBinaryPoolComplete(
+        root: KeePassEntryTreeSnapshot,
+        binaryPool: List<KeePassBinaryPoolItemPatch>,
+    ) {
+        val available = binaryPool.mapTo(mutableSetOf()) { it.hash.lowercase() }
+        val referenced = collectBinaryHashes(root)
+        val missing = referenced.filterNot { it.lowercase() in available }
+        if (missing.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "CREATE_ENTRY missing binary pool content for hash(es): ${missing.joinToString(", ")}",
+            )
+        }
+    }
+
+    private fun ensureGroupTreeCustomIconPoolComplete(
+        root: KeePassGroupTreeSnapshot,
+        customIconPool: List<KeePassCustomIconPoolItemPatch>
+    ) {
+        val available = customIconPool.mapTo(mutableSetOf()) { it.uuid.lowercase() }
+        val referenced = collectCustomIconUuids(root)
+        val missing = referenced.filterNot { it.lowercase() in available }
+        if (missing.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "CREATE_GROUP_TREE missing custom icon content for uuid(s): ${missing.joinToString(", ")}"
+            )
+        }
+    }
+
+    private fun ensureGroupTreeCustomIconPoolComplete(
+        root: KeePassEntryTreeSnapshot,
+        customIconPool: List<KeePassCustomIconPoolItemPatch>,
+    ) {
+        val available = customIconPool.mapTo(mutableSetOf()) { it.uuid.lowercase() }
+        val referenced = collectCustomIconUuids(root)
+        val missing = referenced.filterNot { it.lowercase() in available }
+        if (missing.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "CREATE_ENTRY missing custom icon content for uuid(s): ${missing.joinToString(", ")}",
+            )
+        }
+    }
+
+    private fun collectBinaryHashes(root: KeePassEntryTreeSnapshot): Set<String> {
+        val hashes = linkedSetOf<String>()
+        root.binaries.forEach { hashes += it.hash }
+        root.history.forEach { hashes += collectBinaryHashes(it) }
+        return hashes
+    }
+
+    private fun collectCustomIconUuids(root: KeePassEntryTreeSnapshot): Set<String> {
+        val uuids = linkedSetOf<String>()
+        root.customIconUuid?.let(uuids::add)
+        root.history.forEach { uuids += collectCustomIconUuids(it) }
+        return uuids
+    }
+
     private fun collectBinaryHashes(group: KeePassGroupTreeSnapshot): Set<String> {
         val hashes = linkedSetOf<String>()
         group.entries.forEach { entry -> collectBinaryHashes(entry, hashes) }
@@ -724,6 +1292,19 @@ class KeePassChangeSetApplier {
     private fun collectBinaryHashes(entry: KeePassEntryTreeSnapshot, hashes: MutableSet<String>) {
         entry.binaries.forEach { hashes += it.hash }
         entry.history.forEach { collectBinaryHashes(it, hashes) }
+    }
+
+    private fun collectCustomIconUuids(group: KeePassGroupTreeSnapshot): Set<String> {
+        val uuids = linkedSetOf<String>()
+        group.customIconUuid?.let(uuids::add)
+        group.entries.forEach { entry -> collectCustomIconUuids(entry, uuids) }
+        group.groups.forEach { child -> uuids += collectCustomIconUuids(child) }
+        return uuids
+    }
+
+    private fun collectCustomIconUuids(entry: KeePassEntryTreeSnapshot, uuids: MutableSet<String>) {
+        entry.customIconUuid?.let(uuids::add)
+        entry.history.forEach { collectCustomIconUuids(it, uuids) }
     }
 
     private fun KeePassGroupTreeSnapshot.toGroup(): Group {
@@ -775,16 +1356,38 @@ class KeePassChangeSetApplier {
     }
 
     private fun KeePassBinaryPoolItemPatch.toBinaryData(): BinaryData {
-        val bytes = Base64.decode(contentBase64, Base64.NO_WRAP)
-        val binaryData: BinaryData = if (compressed) {
+        val bytes = java.util.Base64.getDecoder().decode(contentBase64)
+        val binaryData: BinaryData = if (rawStorageContent) {
+            if (compressed) {
+                BinaryData.Compressed(this.protected, bytes)
+            } else {
+                BinaryData.Uncompressed(this.protected, bytes)
+            }
+        } else if (compressed) {
+            // Schema-v1 compatibility: old payloads carried decompressed bytes.
             BinaryData.Uncompressed(this.protected, bytes).toCompressed()
         } else {
             BinaryData.Uncompressed(this.protected, bytes)
         }
         if (!binaryData.hash.hex().equals(hash, ignoreCase = true)) {
-            throw IllegalArgumentException("Group tree binary hash mismatch: $hash")
+            throw IllegalArgumentException("KeePass binary hash mismatch: $hash")
         }
         return binaryData
+    }
+
+    private fun KeePassCustomIconPoolItemPatch.toCustomIcon(): CustomIcon {
+        val bytes = java.util.Base64.getDecoder().decode(dataBase64)
+        return CustomIcon(
+            data = bytes,
+            name = name,
+            lastModified = lastModifiedEpochMillis?.let(Instant::ofEpochMilli)
+        )
+    }
+
+    private fun CustomIcon.sameContentAs(other: CustomIcon): Boolean {
+        return data.contentEquals(other.data) &&
+            name == other.name &&
+            lastModified == other.lastModified
     }
 
     private fun KeePassTimesPatch?.toTimeData(): TimeData {

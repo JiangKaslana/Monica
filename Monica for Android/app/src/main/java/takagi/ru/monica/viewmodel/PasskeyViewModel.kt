@@ -389,10 +389,26 @@ class PasskeyViewModel(
             withContext(Dispatchers.IO) {
                 dao.getAllDatabasesSync().forEach { database ->
                     databaseCount++
+                    val decision = bridge.legacyProjectionRefreshDecision(
+                        database.id,
+                        takagi.ru.monica.keepass.KeePassProjectionKind.PASSKEY
+                    ).getOrElse { error ->
+                        failedDatabaseCount++
+                        Log.w(TAG, "Failed to inspect KeePass passkey revision for database ${database.id}: ${error.message}")
+                        return@forEach
+                    }
+                    if (!decision.needsRefresh) {
+                        return@forEach
+                    }
                     bridge.readLegacyPasskeys(database.id)
                         .onSuccess { imported ->
                             importedCount += imported.size
                             repository.syncKeePassPasskeys(database.id, imported)
+                            bridge.markLegacyProjectionIndexed(
+                                database.id,
+                                decision.revisionToken,
+                                setOf(takagi.ru.monica.keepass.KeePassProjectionKind.PASSKEY)
+                            )
                         }
                         .onFailure { error ->
                             failedDatabaseCount++

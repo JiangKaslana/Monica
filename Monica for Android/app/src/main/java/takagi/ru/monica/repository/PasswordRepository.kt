@@ -68,8 +68,12 @@ class PasswordRepository(
             .withoutExternalSteamMaFileEntries()
     }
 
-    fun getPasswordEntriesByKeePassGroup(databaseId: Long, groupPath: String): Flow<List<PasswordEntry>> {
-        return passwordEntryDao.getPasswordEntriesByKeePassGroup(databaseId, groupPath)
+    fun getPasswordEntriesByKeePassGroup(
+        databaseId: Long,
+        groupPath: String,
+        groupUuid: String? = null
+    ): Flow<List<PasswordEntry>> {
+        return passwordEntryDao.getPasswordEntriesByKeePassGroup(databaseId, groupPath, groupUuid)
             .withoutExternalSteamMaFileEntries()
     }
     

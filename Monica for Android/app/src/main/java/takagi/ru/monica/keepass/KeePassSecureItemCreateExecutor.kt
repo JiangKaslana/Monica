@@ -22,7 +22,8 @@ class KeePassSecureItemCreateExecutor(
         )
         if (syncResult.isFailure) {
             rollbackItem(id)
-            Log.e(TAG, "KeePass write failed: ${syncResult.exceptionOrNull()?.message}")
+            val error = syncResult.exceptionOrNull()
+            Log.e(TAG, "KeePass write failed: ${error?.message}", error)
             return null
         }
 

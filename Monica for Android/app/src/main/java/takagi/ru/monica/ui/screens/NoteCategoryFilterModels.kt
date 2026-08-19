@@ -16,7 +16,11 @@ internal sealed interface NoteCategoryFilter {
     data class BitwardenVaultStarred(val vaultId: Long) : NoteCategoryFilter
     data class BitwardenVaultUncategorized(val vaultId: Long) : NoteCategoryFilter
     data class KeePassDatabase(val databaseId: Long) : NoteCategoryFilter
-    data class KeePassGroupFilter(val databaseId: Long, val groupPath: String) : NoteCategoryFilter
+    data class KeePassGroupFilter(
+        val databaseId: Long,
+        val groupPath: String,
+        val groupUuid: String? = null
+    ) : NoteCategoryFilter
     data class KeePassDatabaseStarred(val databaseId: Long) : NoteCategoryFilter
     data class KeePassDatabaseUncategorized(val databaseId: Long) : NoteCategoryFilter
     data class MdbxDatabase(val databaseId: Long) : NoteCategoryFilter
@@ -60,7 +64,12 @@ internal fun encodeNoteCategoryFilter(filter: NoteCategoryFilter): SavedCategory
     is NoteCategoryFilter.BitwardenVaultStarred -> SavedCategoryFilterState(type = "bitwarden_vault_starred", primaryId = filter.vaultId)
     is NoteCategoryFilter.BitwardenVaultUncategorized -> SavedCategoryFilterState(type = "bitwarden_vault_uncategorized", primaryId = filter.vaultId)
     is NoteCategoryFilter.KeePassDatabase -> SavedCategoryFilterState(type = "keepass_database", primaryId = filter.databaseId)
-    is NoteCategoryFilter.KeePassGroupFilter -> SavedCategoryFilterState(type = "keepass_group", primaryId = filter.databaseId, text = filter.groupPath)
+    is NoteCategoryFilter.KeePassGroupFilter -> SavedCategoryFilterState(
+        type = "keepass_group",
+        primaryId = filter.databaseId,
+        text = filter.groupPath,
+        groupUuid = filter.groupUuid
+    )
     is NoteCategoryFilter.KeePassDatabaseStarred -> SavedCategoryFilterState(type = "keepass_database_starred", primaryId = filter.databaseId)
     is NoteCategoryFilter.KeePassDatabaseUncategorized -> SavedCategoryFilterState(type = "keepass_database_uncategorized", primaryId = filter.databaseId)
     is NoteCategoryFilter.MdbxDatabase -> SavedCategoryFilterState(type = "mdbx_database", primaryId = filter.databaseId)
@@ -87,7 +96,11 @@ internal fun decodeNoteCategoryFilter(state: SavedCategoryFilterState): NoteCate
         "keepass_group" -> {
             val databaseId = state.primaryId
             val groupPath = state.text
-            if (databaseId != null && !groupPath.isNullOrBlank()) NoteCategoryFilter.KeePassGroupFilter(databaseId, groupPath) else NoteCategoryFilter.All
+            if (databaseId != null && !groupPath.isNullOrBlank()) {
+                NoteCategoryFilter.KeePassGroupFilter(databaseId, groupPath, state.groupUuid)
+            } else {
+                NoteCategoryFilter.All
+            }
         }
         "keepass_database_starred" -> state.primaryId?.let { NoteCategoryFilter.KeePassDatabaseStarred(it) } ?: NoteCategoryFilter.All
         "keepass_database_uncategorized" -> state.primaryId?.let { NoteCategoryFilter.KeePassDatabaseUncategorized(it) } ?: NoteCategoryFilter.All

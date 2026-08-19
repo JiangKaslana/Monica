@@ -692,7 +692,11 @@ private fun buildFolderChips(
             chips += children.map {
                 FolderChipItem(
                     label = decodeKeePassPathForDisplay(it.path),
-                    selection = UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, it.path)
+                    selection = UnifiedCategoryFilterSelection.KeePassGroupFilter(
+                        databaseId = databaseId,
+                        groupPath = it.path,
+                        groupUuid = it.uuid
+                    )
                 )
             }
             chips

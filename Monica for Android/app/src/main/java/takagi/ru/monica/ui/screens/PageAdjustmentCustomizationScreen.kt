@@ -129,6 +129,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PageAdjustmentCustomizationScreen(
+    viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToPasswordListCustomization: () -> Unit,
     onNavigateToPasswordCardAdjustment: () -> Unit,
@@ -136,6 +137,8 @@ fun PageAdjustmentCustomizationScreen(
     onNavigateToPasswordFieldCustomization: () -> Unit,
     onNavigateToIconSettings: () -> Unit
 ) {
+    val settings by viewModel.settings.collectAsState()
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -163,6 +166,21 @@ fun PageAdjustmentCustomizationScreen(
                 text = stringResource(R.string.page_adjust_custom_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            SwitchSettingsCard(
+                title = stringResource(R.string.vault_v2_hierarchical_layout_title),
+                subtitle = stringResource(R.string.vault_v2_hierarchical_layout_desc),
+                checked = settings.vaultV2LayoutMode == takagi.ru.monica.data.VaultV2LayoutMode.HIERARCHICAL,
+                onCheckedChange = { enabled ->
+                    viewModel.updateVaultV2LayoutMode(
+                        if (enabled) {
+                            takagi.ru.monica.data.VaultV2LayoutMode.HIERARCHICAL
+                        } else {
+                            takagi.ru.monica.data.VaultV2LayoutMode.CLASSIC
+                        }
+                    )
+                }
             )
 
             PageAdjustmentEntryCard(

@@ -3,7 +3,6 @@ package takagi.ru.monica.utils
 import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
-import java.io.ByteArrayOutputStream
 import java.io.FileNotFoundException
 import java.io.InputStream
 
@@ -45,7 +44,7 @@ fun ContentResolver.readKeePassKeyFileBytes(uri: Uri, unavailableMessage: String
     persistKeePassKeyFileReadPermission(uri)
     return try {
         openInputStream(uri)?.use { input ->
-            input.readKeePassKeyFileBytesLimited(KeePassKeyFileStore.MAX_KEY_FILE_BYTES)
+            input.readKeePassKeyFileBytesFully()
         }
             ?: throw FileNotFoundException("KeePass key file is unavailable")
     } catch (error: Exception) {
@@ -61,21 +60,5 @@ fun ContentResolver.readKeePassKeyFileBytes(uri: Uri, unavailableMessage: String
     }
 }
 
-/** Reads at most [maxBytes] without first allocating an unbounded provider stream in memory. */
-internal fun InputStream.readKeePassKeyFileBytesLimited(maxBytes: Int): ByteArray {
-    require(maxBytes > 0) { "密钥文件大小限制无效" }
-    val output = ByteArrayOutputStream(minOf(maxBytes, DEFAULT_KEY_FILE_BUFFER_SIZE))
-    val buffer = ByteArray(DEFAULT_KEY_FILE_BUFFER_SIZE)
-    var total = 0
-    while (true) {
-        val read = read(buffer)
-        if (read < 0) break
-        if (read == 0) continue
-        total += read
-        require(total <= maxBytes) { "密钥文件超过 ${maxBytes / 1024} KB" }
-        output.write(buffer, 0, read)
-    }
-    return output.toByteArray()
-}
-
-private const val DEFAULT_KEY_FILE_BUFFER_SIZE = 8 * 1024
+/** KeePass accepts arbitrary key-file content, including files larger than one MiB. */
+internal fun InputStream.readKeePassKeyFileBytesFully(): ByteArray = readBytes()

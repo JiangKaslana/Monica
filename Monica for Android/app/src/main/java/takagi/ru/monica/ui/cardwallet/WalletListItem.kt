@@ -67,7 +67,15 @@ data class WalletListItem(
                 vaultId == filter.vaultId && item.categoryId == null
             is UnifiedCategoryFilterSelection.KeePassDatabaseFilter -> keePassId == filter.databaseId
             is UnifiedCategoryFilterSelection.KeePassGroupFilter ->
-                keePassId == filter.databaseId && groupPath == filter.groupPath
+                takagi.ru.monica.ui.KeePassGroupFilterIdentity(
+                    filter.databaseId,
+                    filter.groupPath,
+                    filter.groupUuid
+                ).matches(
+                    itemDatabaseId = keePassId,
+                    itemGroupPath = groupPath,
+                    itemGroupUuid = item.keepassGroupUuid
+                )
             is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter ->
                 keePassId == filter.databaseId && item.isFavorite
             is UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter ->

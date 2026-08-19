@@ -131,6 +131,7 @@ import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
+import takagi.ru.monica.ui.components.toUnifiedMoveInitialSource
 import takagi.ru.monica.ui.password.PasswordTopActionsDropdownMenu
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.sync.SyncDiagnostics
@@ -1581,6 +1582,7 @@ fun CardWalletScreen(
         UnifiedMoveToCategoryBottomSheet(
             visible = true,
             onDismiss = { showBatchMoveCategoryDialog = false },
+            initialSource = selectedCategoryFilter.toUnifiedMoveInitialSource(),
             categories = categories,
             keepassDatabases = keepassDatabases,
             mdbxDatabases = mdbxDatabases,
@@ -1623,7 +1625,12 @@ private fun encodeCardWalletCategoryFilter(filter: UnifiedCategoryFilterSelectio
         is UnifiedCategoryFilterSelection.BitwardenVaultStarredFilter -> SavedCategoryFilterState(type = "bitwarden_vault_starred", primaryId = filter.vaultId)
         is UnifiedCategoryFilterSelection.BitwardenVaultUncategorizedFilter -> SavedCategoryFilterState(type = "bitwarden_vault_uncategorized", primaryId = filter.vaultId)
         is UnifiedCategoryFilterSelection.KeePassDatabaseFilter -> SavedCategoryFilterState(type = "keepass_database", primaryId = filter.databaseId)
-        is UnifiedCategoryFilterSelection.KeePassGroupFilter -> SavedCategoryFilterState(type = "keepass_group", primaryId = filter.databaseId, text = filter.groupPath)
+        is UnifiedCategoryFilterSelection.KeePassGroupFilter -> SavedCategoryFilterState(
+            type = "keepass_group",
+            primaryId = filter.databaseId,
+            text = filter.groupPath,
+            groupUuid = filter.groupUuid
+        )
         is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter -> SavedCategoryFilterState(type = "keepass_database_starred", primaryId = filter.databaseId)
         is UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter -> SavedCategoryFilterState(type = "keepass_database_uncategorized", primaryId = filter.databaseId)
         is UnifiedCategoryFilterSelection.MdbxDatabaseFilter -> SavedCategoryFilterState(type = "mdbx_database", primaryId = filter.databaseId)
@@ -1634,7 +1641,7 @@ private fun encodeCardWalletCategoryFilter(filter: UnifiedCategoryFilterSelectio
 private val cardWalletCategoryFilterSaver = listSaver<UnifiedCategoryFilterSelection, Any?>(
     save = { filter ->
         val state = encodeCardWalletCategoryFilter(filter)
-        listOf(state.type, state.primaryId, state.secondaryId, state.text)
+        listOf(state.type, state.primaryId, state.secondaryId, state.text, state.groupUuid)
     },
     restore = { saved ->
         decodeCardWalletCategoryFilter(
@@ -1642,7 +1649,8 @@ private val cardWalletCategoryFilterSaver = listSaver<UnifiedCategoryFilterSelec
                 type = saved.getOrNull(0) as? String ?: "all",
                 primaryId = saved.getOrNull(1) as? Long,
                 secondaryId = saved.getOrNull(2) as? Long,
-                text = saved.getOrNull(3) as? String
+                text = saved.getOrNull(3) as? String,
+                groupUuid = saved.getOrNull(4) as? String
             )
         )
     }
@@ -1673,7 +1681,7 @@ private fun decodeCardWalletCategoryFilter(state: SavedCategoryFilterState): Uni
             val databaseId = state.primaryId
             val groupPath = state.text
             if (databaseId != null && !groupPath.isNullOrBlank()) {
-                UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, groupPath)
+                UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, groupPath, state.groupUuid)
             } else {
                 UnifiedCategoryFilterSelection.All
             }

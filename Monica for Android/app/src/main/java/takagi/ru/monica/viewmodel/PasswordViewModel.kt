@@ -105,7 +105,11 @@ sealed class CategoryFilter {
     object LocalUncategorized : CategoryFilter()
     data class Custom(val categoryId: Long) : CategoryFilter()
     data class KeePassDatabase(val databaseId: Long) : CategoryFilter()
-    data class KeePassGroupFilter(val databaseId: Long, val groupPath: String) : CategoryFilter()
+    data class KeePassGroupFilter(
+        val databaseId: Long,
+        val groupPath: String,
+        val groupUuid: String? = null
+    ) : CategoryFilter()
     data class KeePassDatabaseStarred(val databaseId: Long) : CategoryFilter()
     data class KeePassDatabaseUncategorized(val databaseId: Long) : CategoryFilter()
     data class MdbxDatabase(val databaseId: Long) : CategoryFilter()
@@ -689,7 +693,11 @@ class PasswordViewModel(
                     is CategoryFilter.Custom -> repository.getPasswordEntriesByCategory(filter.categoryId)
                         .map { list -> list.filter { it.isLocalOnlyEntry() } }
                     is CategoryFilter.KeePassDatabase -> repository.getPasswordEntriesByKeePassDatabase(filter.databaseId)
-                    is CategoryFilter.KeePassGroupFilter -> repository.getPasswordEntriesByKeePassGroup(filter.databaseId, filter.groupPath)
+                    is CategoryFilter.KeePassGroupFilter -> repository.getPasswordEntriesByKeePassGroup(
+                        filter.databaseId,
+                        filter.groupPath,
+                        filter.groupUuid
+                    )
                     is CategoryFilter.KeePassDatabaseStarred -> rawAllPasswordsSource.map { list ->
                         list.filter { it.keepassDatabaseId == filter.databaseId && it.isFavorite }
                     }
@@ -930,7 +938,15 @@ class PasswordViewModel(
             is CategoryFilter.Custom -> entries.filter { it.categoryId == filter.categoryId && it.isLocalOnlyEntry() }
             is CategoryFilter.KeePassDatabase -> entries.filter { it.keepassDatabaseId == filter.databaseId }
             is CategoryFilter.KeePassGroupFilter -> entries.filter {
-                it.keepassDatabaseId == filter.databaseId && it.keepassGroupPath == filter.groupPath
+                takagi.ru.monica.ui.KeePassGroupFilterIdentity(
+                    databaseId = filter.databaseId,
+                    groupPath = filter.groupPath,
+                    groupUuid = filter.groupUuid
+                ).matches(
+                    itemDatabaseId = it.keepassDatabaseId,
+                    itemGroupPath = it.keepassGroupPath,
+                    itemGroupUuid = it.keepassGroupUuid
+                )
             }
             is CategoryFilter.KeePassDatabaseStarred -> entries.filter {
                 it.keepassDatabaseId == filter.databaseId && it.isFavorite
@@ -1527,6 +1543,20 @@ class PasswordViewModel(
                     }
                 KeePassKdbxService.invalidateProcessCache(databaseId)
             }
+            val passwordDecision = bridge.legacyProjectionRefreshDecision(
+                databaseId = databaseId,
+                kind = takagi.ru.monica.keepass.KeePassProjectionKind.PASSWORD,
+                forceRefresh = forceRefresh
+            ).getOrThrow()
+            val totpDecision = bridge.legacyProjectionRefreshDecision(
+                databaseId = databaseId,
+                kind = takagi.ru.monica.keepass.KeePassProjectionKind.TOTP,
+                forceRefresh = forceRefresh
+            ).getOrThrow()
+            if (!passwordDecision.needsRefresh && !totpDecision.needsRefresh) {
+                SyncDiagnostics.skipped(taskId, target, trigger, "native_revision_unchanged", startedAt)
+                return
+            }
             val snapshot = bridge
                 .loadLegacyWorkspace(databaseId, allowedSecureItemTypes = setOf(ItemType.TOTP))
                 .getOrNull()
@@ -1534,8 +1564,20 @@ class PasswordViewModel(
                     SyncDiagnostics.skipped(taskId, target, trigger, "workspace_unavailable", startedAt)
                     return
                 }
-            upsertKeePassEntries(databaseId, snapshot.passwords)
-            syncKeePassTotpEntries(databaseId, snapshot.secureItems)
+            val indexedKinds = mutableSetOf<takagi.ru.monica.keepass.KeePassProjectionKind>()
+            if (passwordDecision.needsRefresh) {
+                upsertKeePassEntries(databaseId, snapshot.passwords)
+                indexedKinds += takagi.ru.monica.keepass.KeePassProjectionKind.PASSWORD
+            }
+            if (totpDecision.needsRefresh) {
+                syncKeePassTotpEntries(databaseId, snapshot.secureItems)
+                indexedKinds += takagi.ru.monica.keepass.KeePassProjectionKind.TOTP
+            }
+            bridge.markLegacyProjectionIndexed(
+                databaseId = databaseId,
+                revisionToken = snapshot.sessionRevision ?: passwordDecision.revisionToken,
+                kinds = indexedKinds
+            )
             SyncDiagnostics.success(
                 taskId = taskId,
                 target = target,
@@ -2091,7 +2133,11 @@ class PasswordViewModel(
                 val databaseId = settings.lastPasswordCategoryFilterPrimaryId
                 val groupPath = settings.lastPasswordCategoryFilterText
                 if (databaseId != null && !groupPath.isNullOrBlank()) {
-                    CategoryFilter.KeePassGroupFilter(databaseId, groupPath)
+                    CategoryFilter.KeePassGroupFilter(
+                        databaseId = databaseId,
+                        groupPath = groupPath,
+                        groupUuid = settings.lastPasswordCategoryFilterGroupUuid
+                    )
                 } else {
                     CategoryFilter.All
                 }
@@ -2178,7 +2224,8 @@ class PasswordViewModel(
                     is CategoryFilter.KeePassGroupFilter -> manager.updateLastPasswordCategoryFilter(
                         type = SAVED_FILTER_KEEPASS_GROUP,
                         primaryId = filter.databaseId,
-                        text = filter.groupPath
+                        text = filter.groupPath,
+                        groupUuid = filter.groupUuid
                     )
                     is CategoryFilter.BitwardenVault -> manager.updateLastPasswordCategoryFilter(
                         type = SAVED_FILTER_BITWARDEN_VAULT,
@@ -2403,6 +2450,65 @@ class PasswordViewModel(
                 ).copy(updatedAt = Date())
             }
         )
+    }
+
+    /**
+     * Updates only Monica's searchable Room projection after the raw KDBX move
+     * has already completed in [LocalKeePassViewModel]. This must not write the
+     * KDBX again, otherwise a lossless native move can be replaced by a second
+     * projection-built entry with a different UUID.
+     */
+    suspend fun finalizePasswordsWrittenToKeePassAwait(
+        targetEntryUuidsByPasswordId: Map<Long, String>,
+        databaseId: Long,
+        groupPath: String?
+    ) {
+        if (targetEntryUuidsByPasswordId.isEmpty()) return
+        val entries = repository.getPasswordsByIds(targetEntryUuidsByPasswordId.keys.toList())
+        entries.forEach { entry ->
+            val targetEntryUuid = targetEntryUuidsByPasswordId[entry.id]
+                ?: return@forEach
+
+            if (entry.hasBitwardenCipherBinding()) {
+                val vaultId = entry.bitwardenVaultId
+                    ?: throw IllegalStateException("Bitwarden vault binding is missing")
+                val cipherId = entry.bitwardenCipherId
+                    ?.takeIf { it.isNotBlank() }
+                    ?: throw IllegalStateException("Bitwarden cipher binding is missing")
+                val queueResult = bitwardenRepository?.queueCipherDelete(
+                    vaultId = vaultId,
+                    cipherId = cipherId,
+                    entryId = entry.id
+                ) ?: Result.failure(IllegalStateException("Bitwarden 仓库不可用"))
+                if (queueResult.isFailure) {
+                    throw queueResult.exceptionOrNull()
+                        ?: IllegalStateException("排队删除 Bitwarden 条目失败")
+                }
+            }
+
+            val updatedEntry = KeePassCrossDatabaseTransfer
+                .bindPasswordProjectionAfterNativeMove(
+                    entry = entry,
+                    databaseId = databaseId,
+                    groupPath = groupPath,
+                    targetEntryUuid = targetEntryUuid
+                )
+                .copy(updatedAt = Date())
+            repository.updatePasswordEntry(updatedEntry)
+
+            if (entry.mdbxDatabaseId != null) {
+                appContext?.let { context ->
+                    runCatching {
+                        AttachmentContainer.facade(context).removeAttachmentsFromMdbxSource(entry)
+                    }.onFailure { error ->
+                        Log.e(
+                            "PasswordViewModel",
+                            "Failed to remove MDBX attachment mirrors after KeePass move: ${error.message}"
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun movePasswordsToMdbxDatabase(ids: List<Long>, databaseId: Long?, folderId: String? = null) {

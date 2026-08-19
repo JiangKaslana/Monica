@@ -101,6 +101,67 @@ class KeePassCrossDatabaseTransferTest {
         assertNotEquals(first, differentType)
     }
 
+    @Test
+    fun nativePasswordMoveRoutingUsesRawEntryForSameAndCrossDatabaseMoves() {
+        val sameDatabase = password(
+            keepassDatabaseId = 5L,
+            keepassEntryUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )
+        val crossDatabase = password(
+            keepassDatabaseId = 6L,
+            keepassEntryUuid = "11111111-2222-3333-4444-555555555555"
+        )
+
+        assertEquals(
+            KeePassPasswordMoveRoute.NATIVE_RELOCATE,
+            resolveKeePassPasswordMoveRoute(sameDatabase, targetDatabaseId = 5L)
+        )
+        assertEquals(
+            KeePassPasswordMoveRoute.NATIVE_CROSS_DATABASE,
+            resolveKeePassPasswordMoveRoute(crossDatabase, targetDatabaseId = 5L)
+        )
+    }
+
+    @Test
+    fun nativePasswordMoveRoutingFallsBackForProjectionOnlyEntries() {
+        assertEquals(
+            KeePassPasswordMoveRoute.LEGACY_PROJECTION,
+            resolveKeePassPasswordMoveRoute(password(), targetDatabaseId = 5L)
+        )
+        assertEquals(
+            KeePassPasswordMoveRoute.LEGACY_PROJECTION,
+            resolveKeePassPasswordMoveRoute(
+                password(keepassDatabaseId = 6L, keepassEntryUuid = "not-a-uuid"),
+                targetDatabaseId = 5L
+            )
+        )
+    }
+
+    @Test
+    fun nativeMoveProjectionUsesPersistedTargetUuidWithoutRewritingKdbx() {
+        val source = password(
+            keepassDatabaseId = 6L,
+            keepassEntryUuid = "11111111-2222-3333-4444-555555555555",
+            bitwardenVaultId = 8L,
+            bitwardenCipherId = "cipher",
+            bitwardenLocalModified = true
+        )
+
+        val bound = KeePassCrossDatabaseTransfer.bindPasswordProjectionAfterNativeMove(
+            entry = source,
+            databaseId = TARGET_DATABASE_ID,
+            groupPath = "Archive",
+            targetEntryUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )
+
+        assertEquals(TARGET_DATABASE_ID, bound.keepassDatabaseId)
+        assertEquals("Archive", bound.keepassGroupPath)
+        assertEquals("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", bound.keepassEntryUuid)
+        assertNull(bound.bitwardenVaultId)
+        assertNull(bound.bitwardenCipherId)
+        assertEquals(false, bound.bitwardenLocalModified)
+    }
+
     private fun password(
         id: Long = 1L,
         keepassDatabaseId: Long? = null,

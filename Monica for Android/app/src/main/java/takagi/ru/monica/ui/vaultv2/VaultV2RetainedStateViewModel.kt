@@ -1,5 +1,6 @@
 package takagi.ru.monica.ui.vaultv2
 
+import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 
 internal data class VaultV2PasswordRevision(
@@ -14,6 +15,7 @@ internal data class VaultV2ManualStackMetadata(
 )
 
 internal class VaultV2RetainedState {
+    val folderNavigationHistory = mutableStateListOf<VaultV2FolderNavigationEntry>()
     val computedListSnapshots: VaultV2RetainedSourceSnapshotStore<
         VaultV2ComputedSnapshotKey,
         VaultV2ComputedSources,
@@ -39,6 +41,7 @@ internal class VaultV2RetainedState {
     }
 
     fun clear() {
+        folderNavigationHistory.clear()
         computedListSnapshots.clear()
         visibleListSnapshots.clear()
         manualStackMetadata = null

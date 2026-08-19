@@ -27,10 +27,39 @@ import takagi.ru.monica.utils.KeePassCodecSupport
 import takagi.ru.monica.utils.extractKeePassCustomFieldsForPasswordEntry
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.time.Instant
 import java.util.UUID
+import takagi.ru.monica.utils.encodeKeePassDatabaseArtifactFile
 
 class KeePassKdbxFixtureIntegrationTest {
+
+    @Test
+    fun `file artifact encoding remains readable when Kotpass closes its sink`() {
+        val credentials = Credentials.from(EncryptedValue.fromString("artifact-password"))
+        val database = KeePassDatabase.Ver4x.create(
+            rootName = "Root",
+            meta = Meta(generator = "Monica artifact test", name = "Artifact"),
+            credentials = credentials,
+        )
+        val file = File.createTempFile("monica-kdbx-artifact-test-", ".kdbx")
+        try {
+            val revision = encodeKeePassDatabaseArtifactFile(database, file)
+            assertTrue(file.isFile)
+            assertTrue(file.length() > 0L)
+            assertEquals(file.length(), revision.sizeBytes)
+            val decoded = file.inputStream().use { input ->
+                KeePassDatabase.decode(
+                    input,
+                    credentials,
+                    cipherProviders = KeePassCodecSupport.cipherProviders,
+                )
+            }
+            assertEquals("Artifact", decoded.content.meta.name)
+        } finally {
+            file.delete()
+        }
+    }
 
     @Test
     fun kdbxRoundTripPreservesOtpUnknownPluginAttachmentHistoryAndMetadataAfterPatch() {
@@ -90,6 +119,8 @@ class KeePassKdbxFixtureIntegrationTest {
         val childGroupUuid = UUID.randomUUID()
         val entryUuid = UUID.randomUUID()
         val historyUuid = UUID.randomUUID()
+        val customIconUuid = UUID.randomUUID()
+        val customIconData = byteArrayOf(2, 4, 6, 8)
         val now = Instant.parse("2026-06-25T00:00:00Z")
         val baseDatabase = KeePassDatabase.Ver4x.create(
             rootName = "Root",
@@ -102,6 +133,7 @@ class KeePassKdbxFixtureIntegrationTest {
             root = KeePassGroupTreeSnapshot(
                 uuid = groupUuid.toString(),
                 name = "Moved",
+                customIconUuid = customIconUuid.toString(),
                 tags = listOf("group-tag"),
                 times = KeePassTimesPatch(
                     creationTimeEpochMillis = now.minusSeconds(300).toEpochMilli(),
@@ -123,7 +155,8 @@ class KeePassKdbxFixtureIntegrationTest {
                         history = listOf(
                             KeePassEntryTreeSnapshot(
                                 uuid = historyUuid.toString(),
-                                fields = listOf(KeePassFieldChange("Title", "Old Login"))
+                                fields = listOf(KeePassFieldChange("Title", "Old Login")),
+                                customIconUuid = customIconUuid.toString()
                             )
                         ),
                         tags = listOf("entry-tag"),
@@ -142,6 +175,14 @@ class KeePassKdbxFixtureIntegrationTest {
                             )
                         )
                     )
+                )
+            ),
+            customIconPool = listOf(
+                KeePassCustomIconPoolItemPatch(
+                    uuid = customIconUuid.toString(),
+                    dataBase64 = java.util.Base64.getEncoder().encodeToString(customIconData),
+                    name = "Moved icon",
+                    lastModifiedEpochMillis = now.toEpochMilli()
                 )
             ),
             sourceRootGroupUuid = groupUuid.toString(),
@@ -188,10 +229,15 @@ class KeePassKdbxFixtureIntegrationTest {
         assertEquals("entry state", createdEntry.customData.getValue("entry-plugin").value)
         assertEquals("Old Login", createdEntry.history.single().fields.getValue("Title").content)
         assertEquals("Child", createdGroup.groups.single { it.uuid == childGroupUuid }.name)
+        assertArrayEquals(
+            customIconData,
+            createdDatabase.content.meta.customIcons.getValue(customIconUuid).data
+        )
 
         val deletedDatabase = applier.apply(createdDatabase, deleteChangeSet).updatedDatabase
 
         assertNull(findGroup(deletedDatabase.content.group, groupUuid))
+        assertNull(deletedDatabase.content.meta.customIcons[customIconUuid])
     }
 
     private fun fixtureEntry(

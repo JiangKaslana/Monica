@@ -45,6 +45,7 @@ import takagi.ru.monica.data.KeePassStorageLocation
 import takagi.ru.monica.data.KeePassSyncStatus
 import takagi.ru.monica.data.LocalKeePassDatabase
 import takagi.ru.monica.data.toCreationOptions
+import takagi.ru.monica.keepass.KeePassNativeResolvedRoute
 import takagi.ru.monica.viewmodel.LocalKeePassViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -71,9 +72,10 @@ private const val GOOGLE_DRIVE_ENTRY_ENABLED = false
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LocalKeePassScreen(
+internal fun LocalKeePassScreen(
     viewModel: LocalKeePassViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateNativeEntry: (KeePassNativeResolvedRoute) -> Unit
 ) {
     val context = LocalContext.current
     val allDatabases by viewModel.allDatabases.collectAsState()
@@ -84,6 +86,7 @@ fun LocalKeePassScreen(
     val verificationStates by viewModel.verificationStates.collectAsState()
     val uriPermissionStates by viewModel.uriPermissionStates.collectAsState()
     val keyFileAccessStates by viewModel.keyFileAccessStates.collectAsState()
+    val activeNativeManagerDatabaseId by viewModel.activeNativeManagerDatabaseId.collectAsState()
     
     // 对话框状态
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -99,6 +102,19 @@ fun LocalKeePassScreen(
     var keyFileExportDatabase by remember { mutableStateOf<LocalKeePassDatabase?>(null) }
     var selectedExternalUri by remember { mutableStateOf<Uri?>(null) }
     var permissionRepairDatabaseId by remember { mutableStateOf<Long?>(null) }
+
+    val nativeManagerDatabase = activeNativeManagerDatabaseId?.let { databaseId ->
+        allDatabases.firstOrNull { database -> database.id == databaseId }
+    }
+    nativeManagerDatabase?.let { database ->
+        KeePassNativeManagerScreen(
+            database = database,
+            viewModel = viewModel,
+            onNavigateBack = { viewModel.closeNativeManager(database.id) },
+            onNavigateSpecialized = onNavigateNativeEntry
+        )
+        return
+    }
     
     // 文件选择器
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -475,7 +491,12 @@ fun LocalKeePassScreen(
                 keyFileExportDatabase = db
                 keyFileExportLauncher.launch(db.keyFileName ?: "${db.name}.key")
             },
-            onDeleteKeyFileCopy = { db -> viewModel.deleteKeyFileCopy(db.id) }
+            onDeleteKeyFileCopy = { db -> viewModel.deleteKeyFileCopy(db.id) },
+            onOpenNativeManager = { db ->
+                showDatabaseDetailSheet = false
+                selectedDatabase = null
+                viewModel.openNativeManager(db.id)
+            }
         )
     }
 }
@@ -2016,6 +2037,7 @@ private fun DatabaseDetailBottomSheet(
     onKeepKeyFileCopy: (LocalKeePassDatabase) -> Unit,
     onExportKeyFileCopy: (LocalKeePassDatabase) -> Unit,
     onDeleteKeyFileCopy: (LocalKeePassDatabase) -> Unit,
+    onOpenNativeManager: (LocalKeePassDatabase) -> Unit,
 ) {
     val dateFormat = remember { SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()) }
     val creationOptions = database.toCreationOptions()
@@ -2508,6 +2530,16 @@ private fun DatabaseDetailBottomSheet(
             )
             
             Spacer(modifier = Modifier.height(12.dp))
+
+            ActionButton(
+                icon = Icons.Default.AccountTree,
+                text = stringResource(R.string.keepass_native_open_manager),
+                onClick = {
+                    dismissSheet {
+                        onOpenNativeManager(database)
+                    }
+                }
+            )
             
             // 设为默认
             if (!database.isDefault) {

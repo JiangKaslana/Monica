@@ -63,6 +63,34 @@ class KeePassChangeSetTest {
     }
 
     @Test
+    fun customIconPoolPatchRoundTripsWithoutEntryFingerprint() {
+        val uuid = "00000000-0000-0000-0000-000000000011"
+        val changeSet = KeePassChangeSet(
+            changeId = "icon-pool-1",
+            databaseId = 42,
+            target = KeePassChangeTarget.UNKNOWN_ENTRY,
+            operation = KeePassChangeOperation.CUSTOM_ICON_POOL_PATCH,
+            entryUuid = null,
+            baseFingerprint = null,
+            customIconPoolPatch = KeePassCustomIconPoolChangePatch(
+                upsert = listOf(
+                    KeePassCustomIconPoolItemPatch(
+                        uuid = uuid,
+                        dataBase64 = "AQID",
+                        name = "Logo",
+                    ),
+                ),
+            ),
+        )
+
+        val decoded = KeePassChangeSetCodec.decode(KeePassChangeSetCodec.encode(changeSet))
+
+        assertEquals(changeSet, decoded)
+        assertFalse(decoded.requiresBaseFingerprint())
+        assertEquals(uuid, decoded.customIconPoolPatch!!.upsert.single().uuid)
+    }
+
+    @Test
     fun trashMoveIsASeparateStructureChange() {
         val changeSet = KeePassChangeSet(
             changeId = "trash-1",
@@ -263,6 +291,14 @@ class KeePassChangeSetTest {
                         compressed = true,
                         contentBase64 = "AQID"
                     )
+                ),
+                customIconPool = listOf(
+                    KeePassCustomIconPoolItemPatch(
+                        uuid = "custom-icon-uuid",
+                        dataBase64 = "BAUG",
+                        name = "Custom icon",
+                        lastModifiedEpochMillis = 456L
+                    )
                 )
             )
         )
@@ -274,6 +310,7 @@ class KeePassChangeSetTest {
         assertFalse(decoded.requiresBaseFingerprint())
         assertEquals("Work", decoded.groupTreePatch!!.root.name)
         assertEquals("AQID", decoded.groupTreePatch.binaryPool.single().contentBase64)
+        assertEquals("BAUG", decoded.groupTreePatch.customIconPool.single().dataBase64)
     }
 
     @Test

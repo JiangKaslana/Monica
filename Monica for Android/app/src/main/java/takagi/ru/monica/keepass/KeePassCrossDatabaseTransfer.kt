@@ -46,6 +46,23 @@ object KeePassCrossDatabaseTransfer {
         )
     }
 
+    fun bindPasswordProjectionAfterNativeMove(
+        entry: PasswordEntry,
+        databaseId: Long,
+        groupPath: String?,
+        targetEntryUuid: String
+    ): PasswordEntry {
+        val normalizedTargetUuid = UUID.fromString(targetEntryUuid).toString()
+        return bindPasswordToTarget(
+            entry = entry,
+            databaseId = databaseId,
+            groupPath = groupPath
+        ).copy(
+            keepassEntryUuid = normalizedTargetUuid,
+            keepassGroupUuid = null
+        )
+    }
+
     fun secureItemTargetEntryUuid(
         item: SecureItem?,
         databaseId: Long,

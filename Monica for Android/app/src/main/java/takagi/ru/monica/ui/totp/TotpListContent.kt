@@ -174,6 +174,7 @@ import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
+import takagi.ru.monica.ui.components.toUnifiedMoveInitialSource
 import takagi.ru.monica.ui.common.dialog.DeleteConfirmDialog
 import takagi.ru.monica.ui.common.layout.DetailPane
 import takagi.ru.monica.ui.common.layout.InspectorRow
@@ -300,7 +301,11 @@ fun TotpListContent(
         is takagi.ru.monica.viewmodel.TotpCategoryFilter.LocalUncategorized -> UnifiedCategoryFilterSelection.LocalUncategorized
         is takagi.ru.monica.viewmodel.TotpCategoryFilter.Custom -> UnifiedCategoryFilterSelection.Custom(filter.categoryId)
         is takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassDatabase -> UnifiedCategoryFilterSelection.KeePassDatabaseFilter(filter.databaseId)
-        is takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassGroupFilter -> UnifiedCategoryFilterSelection.KeePassGroupFilter(filter.databaseId, filter.groupPath)
+        is takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassGroupFilter -> UnifiedCategoryFilterSelection.KeePassGroupFilter(
+            filter.databaseId,
+            filter.groupPath,
+            filter.groupUuid
+        )
         is takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassDatabaseStarred -> UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter(filter.databaseId)
         is takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassDatabaseUncategorized -> UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter(filter.databaseId)
         is takagi.ru.monica.viewmodel.TotpCategoryFilter.BitwardenVault -> UnifiedCategoryFilterSelection.BitwardenVaultFilter(filter.vaultId)
@@ -319,7 +324,13 @@ fun TotpListContent(
             is UnifiedCategoryFilterSelection.LocalUncategorized -> viewModel.setCategoryFilter(takagi.ru.monica.viewmodel.TotpCategoryFilter.LocalUncategorized)
             is UnifiedCategoryFilterSelection.Custom -> viewModel.setCategoryFilter(takagi.ru.monica.viewmodel.TotpCategoryFilter.Custom(selection.categoryId))
             is UnifiedCategoryFilterSelection.KeePassDatabaseFilter -> viewModel.setCategoryFilter(takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassDatabase(selection.databaseId))
-            is UnifiedCategoryFilterSelection.KeePassGroupFilter -> viewModel.setCategoryFilter(takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassGroupFilter(selection.databaseId, selection.groupPath))
+            is UnifiedCategoryFilterSelection.KeePassGroupFilter -> viewModel.setCategoryFilter(
+                takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassGroupFilter(
+                    selection.databaseId,
+                    selection.groupPath,
+                    selection.groupUuid
+                )
+            )
             is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter -> viewModel.setCategoryFilter(takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassDatabaseStarred(selection.databaseId))
             is UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter -> viewModel.setCategoryFilter(takagi.ru.monica.viewmodel.TotpCategoryFilter.KeePassDatabaseUncategorized(selection.databaseId))
             is UnifiedCategoryFilterSelection.BitwardenVaultFilter -> viewModel.setCategoryFilter(takagi.ru.monica.viewmodel.TotpCategoryFilter.BitwardenVault(selection.vaultId))
@@ -571,6 +582,7 @@ fun TotpListContent(
     UnifiedMoveToCategoryBottomSheet(
         visible = showMoveToCategoryDialog,
         onDismiss = { showMoveToCategoryDialog = false },
+        initialSource = totpSelectedFilter.toUnifiedMoveInitialSource(),
         categories = categories,
         keepassDatabases = keepassDatabases,
         mdbxDatabases = mdbxDatabases,

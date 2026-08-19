@@ -21,8 +21,24 @@ interface PasswordEntryDao {
     @Query("SELECT * FROM password_entries WHERE isDeleted = 0 AND isArchived = 0 AND keepassDatabaseId = :databaseId ORDER BY isFavorite DESC, sortOrder ASC, updatedAt DESC")
     fun getPasswordEntriesByKeePassDatabase(databaseId: Long): Flow<List<PasswordEntry>>
 
-    @Query("SELECT * FROM password_entries WHERE isDeleted = 0 AND isArchived = 0 AND keepassDatabaseId = :databaseId AND keepassGroupPath = :groupPath ORDER BY isFavorite DESC, sortOrder ASC, updatedAt DESC")
-    fun getPasswordEntriesByKeePassGroup(databaseId: Long, groupPath: String): Flow<List<PasswordEntry>>
+    @Query(
+        """
+        SELECT * FROM password_entries
+        WHERE isDeleted = 0
+          AND isArchived = 0
+          AND keepassDatabaseId = :databaseId
+          AND (
+            (:groupUuid IS NOT NULL AND keepass_group_uuid = :groupUuid)
+            OR ((:groupUuid IS NULL OR keepass_group_uuid IS NULL) AND keepassGroupPath = :groupPath)
+          )
+        ORDER BY isFavorite DESC, sortOrder ASC, updatedAt DESC
+        """
+    )
+    fun getPasswordEntriesByKeePassGroup(
+        databaseId: Long,
+        groupPath: String,
+        groupUuid: String?
+    ): Flow<List<PasswordEntry>>
 
     @Query("SELECT * FROM password_entries WHERE isDeleted = 0 AND isArchived = 0 AND keepassDatabaseId IS NULL ORDER BY isFavorite DESC, sortOrder ASC, updatedAt DESC")
     fun getPasswordEntriesWithoutKeePassDatabase(): Flow<List<PasswordEntry>>

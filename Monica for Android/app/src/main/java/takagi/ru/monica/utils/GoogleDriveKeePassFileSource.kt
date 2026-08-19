@@ -12,6 +12,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import takagi.ru.monica.data.KeepassRemoteSource
+import takagi.ru.monica.keepass.KeePassRemoteVersionPolicy
 import java.io.IOException
 import java.time.Instant
 import java.util.Locale
@@ -70,11 +71,13 @@ class GoogleDriveKeePassFileSource(
         expectedVersion: String?
     ): FileSourceWriteResult = withContext(Dispatchers.IO) {
         val fileItem = resolveFileItem()
-        if (expectedVersion != null) {
-            val actual = fileItem.versionToken()
-            if (actual != null && actual != expectedVersion) {
-                throw IOException("远端文件已变化，请先重新同步")
-            }
+        if (!KeePassRemoteVersionPolicy.matches(
+                expected = expectedVersion,
+                versionToken = fileItem.version,
+                etag = fileItem.md5Checksum
+            )
+        ) {
+            throw IOException("远端文件已变化，请先重新同步")
         }
         val payload = executeJsonRequest(
             absoluteUrl = "$DRIVE_UPLOAD_BASE/files/${Uri.encode(fileItem.id)}?uploadType=media&fields=$FILE_FIELDS",

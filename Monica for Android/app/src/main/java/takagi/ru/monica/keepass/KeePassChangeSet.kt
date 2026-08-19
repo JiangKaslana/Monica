@@ -16,10 +16,14 @@ data class KeePassChangeSet(
     val baseGroupPath: String? = null,
     val baseGroupUuid: String? = null,
     val entryPatch: KeePassEntryCreatePatch? = null,
+    val databaseMetaPatch: KeePassDatabaseMetaPatch? = null,
     val fieldPatch: KeePassFieldChangePatch? = null,
+    val entryPresentationPatch: KeePassEntryPresentationPatch? = null,
+    val customIconPoolPatch: KeePassCustomIconPoolChangePatch? = null,
     val structurePatch: KeePassStructureChangePatch? = null,
     val attachmentPatch: KeePassAttachmentChangePatch? = null,
     val groupTreePatch: KeePassGroupTreeChangePatch? = null,
+    val historyPatch: KeePassHistoryChangePatch? = null,
     val createdAtEpochMillis: Long = System.currentTimeMillis()
 ) {
     init {
@@ -29,6 +33,24 @@ data class KeePassChangeSet(
         require(databaseId > 0) { "KeePass change set requires a database id" }
         require(operation != KeePassChangeOperation.FIELD_PATCH || fieldPatch != null) {
             "FIELD_PATCH requires fieldPatch"
+        }
+        require(operation != KeePassChangeOperation.ENTRY_EDIT_PATCH || fieldPatch != null) {
+            "ENTRY_EDIT_PATCH requires fieldPatch"
+        }
+        require(operation != KeePassChangeOperation.ENTRY_EDIT_PATCH || entryPresentationPatch != null) {
+            "ENTRY_EDIT_PATCH requires entryPresentationPatch"
+        }
+        require(
+            operation != KeePassChangeOperation.ENTRY_PRESENTATION_PATCH ||
+                entryPresentationPatch != null
+        ) {
+            "ENTRY_PRESENTATION_PATCH requires entryPresentationPatch"
+        }
+        require(
+            operation != KeePassChangeOperation.CUSTOM_ICON_POOL_PATCH ||
+                customIconPoolPatch != null
+        ) {
+            "CUSTOM_ICON_POOL_PATCH requires customIconPoolPatch"
         }
         require(operation != KeePassChangeOperation.CREATE_ENTRY || entryPatch != null) {
             "CREATE_ENTRY requires entryPatch"
@@ -41,6 +63,9 @@ data class KeePassChangeSet(
         }
         require(!operation.isGroupTreeOperation() || groupTreePatch != null) {
             "${operation.name} requires groupTreePatch"
+        }
+        require(!operation.isHistoryOperation() || historyPatch != null) {
+            "${operation.name} requires historyPatch"
         }
         require(
             operation != KeePassChangeOperation.ADD_ATTACHMENT ||
@@ -64,7 +89,8 @@ data class KeePassChangeSet(
             operation != KeePassChangeOperation.DELETE_GROUP &&
             operation != KeePassChangeOperation.MOVE_GROUP &&
             operation != KeePassChangeOperation.CREATE_GROUP_TREE &&
-            operation != KeePassChangeOperation.DELETE_GROUP_TREE
+            operation != KeePassChangeOperation.DELETE_GROUP_TREE &&
+            operation != KeePassChangeOperation.CUSTOM_ICON_POOL_PATCH
     }
 
     companion object {
@@ -77,7 +103,13 @@ data class KeePassEntryCreatePatch(
     val targetGroupPath: String? = null,
     val targetGroupUuid: String? = null,
     val fields: List<KeePassFieldChange>,
-    val iconName: String? = null
+    val iconName: String? = null,
+    /** Full native payload used when a template or plugin entry is copied. */
+    val nativeEntry: KeePassEntryTreeSnapshot? = null,
+    /** Binary pool payload required by [nativeEntry]. */
+    val binaryPool: List<KeePassBinaryPoolItemPatch> = emptyList(),
+    /** Custom icon pool payload required by [nativeEntry]. */
+    val customIconPool: List<KeePassCustomIconPoolItemPatch> = emptyList(),
 ) {
     init {
         require(fields.isNotEmpty()) { "CREATE_ENTRY requires at least one field" }
@@ -97,12 +129,18 @@ enum class KeePassChangeTarget {
 enum class KeePassChangeOperation {
     CREATE_ENTRY,
     FIELD_PATCH,
+    /** Atomically applies fields and presentation (including custom icon pool changes). */
+    ENTRY_EDIT_PATCH,
+    ENTRY_PRESENTATION_PATCH,
+    CUSTOM_ICON_POOL_PATCH,
     MOVE_ENTRY,
     MOVE_TO_RECYCLE_BIN,
     RESTORE_FROM_RECYCLE_BIN,
     PERMANENT_DELETE,
     ADD_ATTACHMENT,
     REMOVE_ATTACHMENT,
+    RESTORE_HISTORY,
+    DELETE_HISTORY,
     CREATE_GROUP,
     RENAME_GROUP,
     DELETE_GROUP,
@@ -132,6 +170,72 @@ enum class KeePassChangeOperation {
     fun isGroupTreeOperation(): Boolean {
         return this == CREATE_GROUP_TREE || this == DELETE_GROUP_TREE
     }
+
+    fun isHistoryOperation(): Boolean {
+        return this == RESTORE_HISTORY || this == DELETE_HISTORY
+    }
+}
+
+@Serializable
+data class KeePassDatabaseMetaPatch(
+    val entryTemplatesGroupUuid: String? = null,
+    val entryTemplatesGroupChangedEpochMillis: Long? = null,
+) {
+    init {
+        entryTemplatesGroupUuid?.let {
+            require(runCatching { UUID.fromString(it) }.isSuccess) {
+                "Invalid entry templates group UUID"
+            }
+        }
+    }
+}
+
+@Serializable
+data class KeePassEntryPresentationPatch(
+    val predefinedIconName: String? = null,
+    val customIconUuid: String? = null,
+    val clearCustomIcon: Boolean = false,
+    val customIcon: KeePassCustomIconPoolItemPatch? = null,
+    val removeCustomIconUuid: String? = null,
+    val basePresentationSignature: String? = null,
+    val autoType: KeePassAutoTypePatch? = null,
+) {
+    init {
+        customIconUuid?.let { require(isUuid(it)) { "Invalid custom icon UUID" } }
+        removeCustomIconUuid?.let { require(isUuid(it)) { "Invalid removed custom icon UUID" } }
+        customIcon?.let { icon ->
+            require(isUuid(icon.uuid)) { "Invalid custom icon UUID" }
+            require(icon.dataBase64.isNotBlank()) { "Custom icon content cannot be blank" }
+            require(customIconUuid == null || customIconUuid.equals(icon.uuid, ignoreCase = true)) {
+                "Custom icon UUID does not match presentation UUID"
+            }
+        }
+        require(!(clearCustomIcon && customIconUuid != null)) {
+            "A presentation patch cannot clear and select a custom icon at once"
+        }
+    }
+
+    private fun isUuid(value: String): Boolean = runCatching { UUID.fromString(value) }.isSuccess
+}
+
+@Serializable
+data class KeePassCustomIconPoolChangePatch(
+    val upsert: List<KeePassCustomIconPoolItemPatch> = emptyList(),
+    val removeUuids: List<String> = emptyList(),
+) {
+    init {
+        val upsertUuids = upsert.map { it.uuid.lowercase() }
+        require(upsertUuids.size == upsertUuids.distinct().size) {
+            "Duplicate custom icon UUID in pool patch"
+        }
+        val remove = removeUuids.map { it.lowercase() }
+        require(remove.size == remove.distinct().size) {
+            "Duplicate custom icon UUID in pool removal patch"
+        }
+        require(upsertUuids.intersect(remove.toSet()).isEmpty()) {
+            "A custom icon cannot be added and removed in the same patch"
+        }
+    }
 }
 
 @Serializable
@@ -139,7 +243,8 @@ data class KeePassFieldChangePatch(
     val managedScope: KeePassManagedFieldScope,
     val replacementFields: List<KeePassFieldChange>,
     val removeFieldNames: List<String> = emptyList(),
-    val baseFields: List<KeePassFieldBaseValue> = emptyList()
+    val baseFields: List<KeePassFieldBaseValue> = emptyList(),
+    val replaceAllFields: Boolean = false
 ) {
     init {
         require(replacementFields.isNotEmpty() || removeFieldNames.isNotEmpty()) {
@@ -208,6 +313,7 @@ data class KeePassStructureChangePatch(
 data class KeePassGroupTreeChangePatch(
     val root: KeePassGroupTreeSnapshot,
     val binaryPool: List<KeePassBinaryPoolItemPatch> = emptyList(),
+    val customIconPool: List<KeePassCustomIconPoolItemPatch> = emptyList(),
     val sourceRootGroupUuid: String? = null,
     val targetParentGroupUuid: String? = null
 ) {
@@ -217,8 +323,30 @@ data class KeePassGroupTreeChangePatch(
             require(item.hash.isNotBlank()) { "group tree binary pool hash cannot be blank" }
             require(item.contentBase64.isNotBlank()) { "group tree binary pool content cannot be blank" }
         }
+        customIconPool.forEach { item ->
+            require(item.uuid.isNotBlank()) { "group tree custom icon uuid cannot be blank" }
+            require(item.dataBase64.isNotBlank()) { "group tree custom icon content cannot be blank" }
+        }
     }
 }
+
+@Serializable
+data class KeePassHistoryChangePatch(
+    val historyIndex: Int,
+    val expectedSnapshotFingerprint: String? = null
+) {
+    init {
+        require(historyIndex >= 0) { "history index cannot be negative" }
+    }
+}
+
+@Serializable
+data class KeePassCustomIconPoolItemPatch(
+    val uuid: String,
+    val dataBase64: String,
+    val name: String? = null,
+    val lastModifiedEpochMillis: Long? = null
+)
 
 @Serializable
 data class KeePassGroupTreeSnapshot(
@@ -303,7 +431,14 @@ data class KeePassBinaryPoolItemPatch(
     val hash: String,
     val protected: Boolean = false,
     val compressed: Boolean = true,
-    val contentBase64: String
+    val contentBase64: String,
+    /**
+     * True when [contentBase64] contains Kotpass' exact stored bytes.
+     *
+     * Older change sets stored the logical (decompressed) content and are
+     * intentionally left on the legacy reconstruction path when this is false.
+     */
+    val rawStorageContent: Boolean = false,
 )
 
 @Serializable

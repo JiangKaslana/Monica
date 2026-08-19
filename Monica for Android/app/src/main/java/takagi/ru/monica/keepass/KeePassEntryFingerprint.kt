@@ -20,6 +20,24 @@ object KeePassEntryFingerprint {
         return normalizedFieldPairs.joinToString("\u001F") { (key, value) -> "$key=$value" }
     }
 
+    fun buildPresentation(entry: Entry): String = buildString {
+        append(entry.icon?.name.orEmpty())
+        append('\u001F')
+        append(entry.customIconUuid?.toString().orEmpty())
+        append('\u001F')
+        append(entry.autoType?.enabled ?: "")
+        append('\u001F')
+        append(entry.autoType?.obfuscation?.name.orEmpty())
+        append('\u001F')
+        append(entry.autoType?.defaultSequence.orEmpty())
+        entry.autoType?.items.orEmpty().forEach { item ->
+            append('\u001F')
+            append(item.window)
+            append('=')
+            append(item.keystrokeSequence)
+        }
+    }
+
     private fun normalizeRemoteConflictTitleForSignature(title: String): String {
         val suffixPattern = Regex("\\s*\\Q$REMOTE_CONFLICT_TITLE_SUFFIX\\E(?:\\s*\\Q$REMOTE_CONFLICT_TITLE_SUFFIX\\E)*\\s*$")
         val baseTitle = title

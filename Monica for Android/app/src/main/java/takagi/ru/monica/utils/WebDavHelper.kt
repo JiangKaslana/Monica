@@ -422,6 +422,7 @@ private data class PageAdjustmentSettingsBackupEntry(
     val authenticatorCardDisplayFields: List<String> = emptyList(),
     val authenticatorCardHideCodeByDefault: Boolean = false,
     val authenticatorLayoutMode: String = takagi.ru.monica.data.AuthenticatorLayoutMode.STANDARD.name,
+    val vaultV2LayoutMode: String = takagi.ru.monica.data.VaultV2LayoutMode.CLASSIC.name,
     val validatorProgressBarStyle: String = "LINEAR",
     val validatorUnifiedProgressBar: String = "ENABLED",
     val validatorSmoothProgress: Boolean = true,
@@ -723,6 +724,7 @@ class WebDavHelper(
             authenticatorCardDisplayFields = authenticatorCardDisplayFields,
             authenticatorCardHideCodeByDefault = authenticatorCardHideCodeByDefault,
             authenticatorLayoutMode = authenticatorLayoutMode,
+            vaultV2LayoutMode = vaultV2LayoutMode,
             validatorProgressBarStyle = validatorProgressBarStyle,
             validatorUnifiedProgressBar = validatorUnifiedProgressBar,
             validatorSmoothProgress = validatorSmoothProgress,
@@ -3849,6 +3851,8 @@ class WebDavHelper(
                                                     pageAdjustmentBackup.authenticatorCardHideCodeByDefault,
                                                 authenticatorLayoutMode =
                                                     pageAdjustmentBackup.authenticatorLayoutMode,
+                                                vaultV2LayoutMode =
+                                                    pageAdjustmentBackup.vaultV2LayoutMode,
                                                 validatorProgressBarStyle =
                                                     pageAdjustmentBackup.validatorProgressBarStyle,
                                                 validatorUnifiedProgressBar =
@@ -4125,9 +4129,6 @@ class WebDavHelper(
                                                 KeePassBackupEntryPolicy.Kind.KEY_FILE -> {
                                                     if (!isEncrypted) {
                                                         throw SecurityException("未加密备份中的 KeePass 密钥文件已被拒绝")
-                                                    }
-                                                    if (tempFile.length() > KeePassKeyFileStore.MAX_KEY_FILE_BYTES) {
-                                                        throw IllegalArgumentException("KeePass密钥文件超过允许大小")
                                                     }
                                                     if (pendingKeePassKeyFiles.put(dbId, tempFile.readBytes()) != null) {
                                                         invalidKeePassRestoreIds += dbId

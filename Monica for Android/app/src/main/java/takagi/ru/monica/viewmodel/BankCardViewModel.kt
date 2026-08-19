@@ -199,8 +199,20 @@ class BankCardViewModel(
         SyncDiagnostics.queued(taskId, target, trigger)
         val startedAt = SyncDiagnostics.start(taskId, target, trigger)
         try {
-            val snapshots = keepassBridge
-                ?.readLegacySecureItems(databaseId, setOf(ItemType.BANK_CARD))
+            val bridge = keepassBridge ?: run {
+                SyncDiagnostics.skipped(taskId, target, trigger, "bridge_unavailable", startedAt)
+                return
+            }
+            val decision = bridge.legacyProjectionRefreshDecision(
+                databaseId,
+                takagi.ru.monica.keepass.KeePassProjectionKind.BANK_CARD
+            ).getOrThrow()
+            if (!decision.needsRefresh) {
+                SyncDiagnostics.skipped(taskId, target, trigger, "native_revision_unchanged", startedAt)
+                return
+            }
+            val snapshots = bridge
+                .readLegacySecureItems(databaseId, setOf(ItemType.BANK_CARD))
                 ?.getOrNull()
                 ?: run {
                     SyncDiagnostics.skipped(taskId, target, trigger, "bridge_or_read_unavailable", startedAt)
@@ -252,6 +264,11 @@ class BankCardViewModel(
                     }
                 }
             }
+            bridge.markLegacyProjectionIndexed(
+                databaseId,
+                decision.revisionToken,
+                setOf(takagi.ru.monica.keepass.KeePassProjectionKind.BANK_CARD)
+            )
             SyncDiagnostics.success(
                 taskId = taskId,
                 target = target,

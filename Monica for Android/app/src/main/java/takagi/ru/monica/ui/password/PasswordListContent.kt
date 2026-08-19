@@ -1611,6 +1611,7 @@ fun PasswordListContent(
 
     PasswordBatchMoveSheet(
         visible = showMoveToCategoryDialog,
+        initialSource = currentFilter.toUnifiedMoveInitialSource(),
         categories = categories,
         keepassDatabases = keepassDatabases,
         mdbxDatabases = mdbxDatabases,

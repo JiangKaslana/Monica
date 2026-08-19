@@ -15,12 +15,14 @@ import app.keemobile.kotpass.database.encode
 import app.keemobile.kotpass.database.header.KdfParameters
 import app.keemobile.kotpass.database.modifiers.binaries
 import app.keemobile.kotpass.database.modifiers.modifyBinaries
+import app.keemobile.kotpass.database.modifiers.modifyCustomIcons
 import app.keemobile.kotpass.database.modifiers.modifyParentGroup
 import app.keemobile.kotpass.models.AutoTypeData
 import app.keemobile.kotpass.models.AutoTypeItem
 import app.keemobile.kotpass.models.BinaryData
 import app.keemobile.kotpass.models.BinaryReference
 import app.keemobile.kotpass.models.CustomDataValue
+import app.keemobile.kotpass.models.CustomIcon
 import app.keemobile.kotpass.models.Entry
 import app.keemobile.kotpass.models.EntryFields
 import app.keemobile.kotpass.models.EntryValue
@@ -44,6 +46,7 @@ import takagi.ru.monica.data.KeePassDatabaseSourceType
 import takagi.ru.monica.data.KeePassDatabaseCreationOptions
 import takagi.ru.monica.data.KeePassFormatVersion
 import takagi.ru.monica.data.KeePassKdfAlgorithm
+import takagi.ru.monica.data.KeePassSyncPhase
 import takagi.ru.monica.data.LocalKeePassDatabase
 import takagi.ru.monica.data.LocalKeePassDatabaseDao
 import takagi.ru.monica.data.PasswordDatabase
@@ -65,22 +68,28 @@ import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.data.model.formatForDisplay
 import takagi.ru.monica.keepass.KeePassDxPasskeyCodec
 import takagi.ru.monica.keepass.KeePassChangeOperation
+import takagi.ru.monica.keepass.KeePassChangeConflictException
 import takagi.ru.monica.keepass.KeePassChangeSet
 import takagi.ru.monica.keepass.KeePassChangeSetApplier
 import takagi.ru.monica.keepass.KeePassChangeTarget
 import takagi.ru.monica.keepass.KeePassAttachmentChangePatch
 import takagi.ru.monica.keepass.KeePassEntryCreatePatch
+import takagi.ru.monica.keepass.KeePassDatabaseMetaPatch
+import takagi.ru.monica.keepass.KeePassEntryPresentationPatch
+import takagi.ru.monica.keepass.KeePassCustomIconPoolChangePatch
 import takagi.ru.monica.keepass.KeePassFieldChangePatch
 import takagi.ru.monica.keepass.KeePassAutoTypeItemPatch
 import takagi.ru.monica.keepass.KeePassAutoTypePatch
 import takagi.ru.monica.keepass.KeePassBinaryPoolItemPatch
 import takagi.ru.monica.keepass.KeePassBinaryReferencePatch
 import takagi.ru.monica.keepass.KeePassCustomDataPatch
+import takagi.ru.monica.keepass.KeePassCustomIconPoolItemPatch
 import takagi.ru.monica.keepass.KeePassEntryFingerprint
 import takagi.ru.monica.keepass.KeePassFieldChange
 import takagi.ru.monica.keepass.KeePassEntryTreeSnapshot
 import takagi.ru.monica.keepass.KeePassGroupTreeChangePatch
 import takagi.ru.monica.keepass.KeePassGroupTreeSnapshot
+import takagi.ru.monica.keepass.KeePassHistoryChangePatch
 import takagi.ru.monica.keepass.KeePassPendingChangeBaseSnapshot
 import takagi.ru.monica.keepass.KeePassPendingChangeRepository
 import takagi.ru.monica.keepass.KeePassPendingFlushPlan
@@ -91,6 +100,61 @@ import takagi.ru.monica.keepass.KeePassTimesPatch
 import takagi.ru.monica.keepass.KeePassManagedFieldScope
 import takagi.ru.monica.keepass.KeePassEntryFieldPatch
 import takagi.ru.monica.keepass.KeePassFieldRegistry
+import takagi.ru.monica.keepass.KeePassNativeMutation
+import takagi.ru.monica.keepass.KeePassNativeBrowserBuilder
+import takagi.ru.monica.keepass.KeePassNativeBrowserSnapshot
+import takagi.ru.monica.keepass.KeePassNativeEntryIdentity
+import takagi.ru.monica.keepass.KeePassNativeEntryRecord
+import takagi.ru.monica.keepass.KeePassNativeEntryPresentationUpdate
+import takagi.ru.monica.keepass.KeePassNativeCustomIconPoolUpdate
+import takagi.ru.monica.keepass.KeePassCustomIconEditor
+import takagi.ru.monica.keepass.KeePassNativeGroupIdentity
+import takagi.ru.monica.keepass.KeePassNativeGroupRecord
+import takagi.ru.monica.keepass.KeePassNativeSearch
+import takagi.ru.monica.keepass.KeePassNativeSearchOptions
+import takagi.ru.monica.keepass.KeePassNativeSearchResult
+import takagi.ru.monica.keepass.KeePassNativeSession
+import takagi.ru.monica.keepass.KeePassNativeSessionBuilder
+import takagi.ru.monica.keepass.KeePassNativeSessionCache
+import takagi.ru.monica.keepass.KeePassEncodeBufferPolicy
+import takagi.ru.monica.keepass.KeePassDatabaseCredentialEditor
+import takagi.ru.monica.keepass.KeePassDatabaseAccessPolicy
+import takagi.ru.monica.keepass.KeePassDatabaseSettingsEditor
+import takagi.ru.monica.keepass.KeePassDatabaseSettingsSnapshot
+import takagi.ru.monica.keepass.KeePassDatabaseSettingsUpdate
+import takagi.ru.monica.keepass.KeePassKeyFileChangeMode
+import takagi.ru.monica.keepass.KeePassMasterCredentialChangeResult
+import takagi.ru.monica.keepass.SharedPreferencesKeePassDatabaseAccessPolicy
+import takagi.ru.monica.keepass.KeePassProjectionIndexGate
+import takagi.ru.monica.keepass.KeePassProjectionKind
+import takagi.ru.monica.keepass.KeePassProjectionRefreshDecision
+import takagi.ru.monica.keepass.KeePassLosslessTransfer
+import takagi.ru.monica.keepass.KeePassNativeEntryTransferPayload
+import takagi.ru.monica.keepass.KeePassRecycleBinPolicy
+import takagi.ru.monica.keepass.KeePassRecoveryStore
+import takagi.ru.monica.keepass.KeePassRecoveryRecord
+import takagi.ru.monica.keepass.KeePassRawFileOperations
+import takagi.ru.monica.keepass.KeePassRemoteVersionPolicy
+import takagi.ru.monica.keepass.KeePassSourceRevision
+import takagi.ru.monica.keepass.KeePassSourceChangedException
+import takagi.ru.monica.keepass.KeePassSourceSafety
+import takagi.ru.monica.keepass.KeePassTargetFirstTransfer
+import takagi.ru.monica.keepass.KeePassConflictCenter
+import takagi.ru.monica.keepass.KeePassConflictDecision
+import takagi.ru.monica.keepass.KeePassConflictResolutionSide
+import takagi.ru.monica.keepass.KeePassRemoteConflictPreview
+import takagi.ru.monica.keepass.KeePassRemoteConflictResolution
+import takagi.ru.monica.keepass.KeePassDatabaseMaintenance
+import takagi.ru.monica.keepass.KeePassIntegrityReport
+import takagi.ru.monica.keepass.KeePassMaintenanceExecution
+import takagi.ru.monica.keepass.KeePassMaintenanceOptions
+import takagi.ru.monica.keepass.KeePassNativeDatabaseMerge
+import takagi.ru.monica.keepass.KeePassNativeDeleteMode
+import takagi.ru.monica.keepass.KeePassNativeGroupUpdate
+import takagi.ru.monica.keepass.KeePassNativeManagement
+import takagi.ru.monica.keepass.KeePassTemplateEngine
+import takagi.ru.monica.keepass.KeePassWritePreflight
+import takagi.ru.monica.keepass.KeePassWritePreflightResult
 import takagi.ru.monica.keepass.KeePassPasskeySyncCodec
 import takagi.ru.monica.keepass.KeePassSecureItemPhotoAttachments
 import takagi.ru.monica.keepass.KeePassTotpCodec
@@ -98,6 +162,7 @@ import takagi.ru.monica.notes.domain.NoteContentCodec
 import takagi.ru.monica.passkey.PasskeyCredentialIdCodec
 import takagi.ru.monica.passkey.PasskeyPrivateKeyStore
 import takagi.ru.monica.attachments.executor.KeePassAttachmentRef
+import takagi.ru.monica.attachments.facade.AttachmentUriMetadata
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.sync.SyncDiagnostics
 import takagi.ru.monica.util.ImageManager
@@ -109,6 +174,8 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.time.Instant
 import java.util.Date
 import java.util.LinkedHashMap
@@ -187,8 +254,24 @@ data class KeePassSecureItemData(
 data class KeePassWorkspaceSnapshot(
     val passwords: List<KeePassEntryData>,
     val secureItems: List<KeePassSecureItemData>,
-    val groups: List<KeePassGroupInfo>
+    val groups: List<KeePassGroupInfo>,
+    val sessionRevision: String? = null
 )
+
+/**
+ * Kotpass owns and closes the sink created around the supplied stream while encoding.
+ * Do not flush or sync [output] after [KeePassDatabase.encode] returns: the underlying
+ * [FileOutputStream] is already closed at that point.
+ */
+internal fun encodeKeePassDatabaseArtifactFile(
+    keePassDatabase: KeePassDatabase,
+    destination: File,
+): KeePassSourceRevision {
+    FileOutputStream(destination).use { output ->
+        keePassDatabase.encode(output, cipherProviders = KeePassCodecSupport.cipherProviders)
+    }
+    return KeePassSourceSafety.revisionOf(destination)
+}
 
 data class KeePassDatabaseDiagnostics(
     val entryCount: Int,
@@ -205,7 +288,16 @@ data class KeePassConflictResolutionResult(
     val conflictCopyCount: Int
 )
 
-private data class EntryTraversalContext(
+data class KeePassNativeEntryTransferResult(
+    val sourceDatabaseId: Long,
+    val sourceEntryUuid: String,
+    val targetDatabaseId: Long,
+    val targetEntryUuid: String,
+    val targetGroupUuid: String,
+    val moved: Boolean
+)
+
+internal data class EntryTraversalContext(
     val entry: Entry,
     val groupPath: String?,
     val groupUuid: UUID?,
@@ -239,14 +331,31 @@ private data class RemoteSyncOutcome(
     val writeResult: FileSourceWriteResult,
     val finalBytes: ByteArray,
     val finalDatabase: KeePassDatabase,
+    val finalRevision: KeePassSourceRevision,
     val conflictCopyCount: Int = 0
+)
+
+private data class CurrentRemoteConflictContext(
+    val database: LocalKeePassDatabase,
+    val credentials: Credentials,
+    val localDatabase: KeePassDatabase,
+    val localBytes: ByteArray,
+    val baseDatabase: KeePassDatabase,
+    val baseBytes: ByteArray,
+    val remoteDatabase: KeePassDatabase,
+    val remoteBytes: ByteArray,
+    val remoteStat: FileSourceStat,
+    val fileSource: KeePassFileSource
 )
 
 internal data class RemoteKdbxVerification(
     val bytes: ByteArray,
     val database: KeePassDatabase,
+    val revision: KeePassSourceRevision
+) {
     val hash: String
-)
+        get() = revision.sha256
+}
 
 data class KeePassRemoteSyncResult(
     val databaseName: String,
@@ -307,6 +416,20 @@ class KeePassKdbxService(
 ) {
     private val imageManager by lazy { ImageManager(context.applicationContext) }
     private val keyFileStore by lazy { KeePassKeyFileStore(context.applicationContext) }
+    private val credentialTransitionStore by lazy {
+        KeePassCredentialTransitionStore(
+            context = context.applicationContext,
+            securityManager = securityManager,
+            keyFileStore = keyFileStore
+        )
+    }
+    private val accessPolicy: KeePassDatabaseAccessPolicy by lazy {
+        SharedPreferencesKeePassDatabaseAccessPolicy(context.applicationContext)
+    }
+    private val nativeMutation = KeePassNativeMutation()
+    private val recoveryStore by lazy {
+        KeePassRecoveryStore(File(context.filesDir, "keepass_recovery"))
+    }
 
     companion object {
         private const val TAG = "KeePassKdbxService"
@@ -318,6 +441,7 @@ class KeePassKdbxService(
         // Disable post-write full decode verification for normal writes to reduce save latency.
         // The database is still encoded by the library and written atomically/with rollback paths.
         private const val ENABLE_POST_WRITE_DECODE_VERIFICATION = false
+        private const val MIB_BYTES = 1024L * 1024L
         private const val FIELD_MONICA_LOCAL_ID = "MonicaLocalId"
         private const val FIELD_MONICA_CONFLICT_COPY = "MonicaConflictCopy"
         private const val FIELD_MONICA_ITEM_ID = "MonicaSecureItemId"
@@ -393,6 +517,16 @@ class KeePassKdbxService(
         private val databaseLoadMutexes = mutableMapOf<Long, Mutex>()
         // 按数据库 ID 维护进程级已解锁会话；不同调用入口共享同一次 KDBX 解码结果。
         private val loadedDatabaseCache = LinkedHashMap<Long, CachedLoadedDatabase>(4, 0.75f, true)
+        private val nativeSessionCache = KeePassNativeSessionCache { databaseId, sourceRevision, database ->
+            KeePassNativeSessionBuilder.build(
+                databaseId = databaseId,
+                sourceRevision = sourceRevision,
+                database = database,
+                pathKeyBuilder = ::buildKeePassPathKey
+            )
+        }
+        private val nativeProjectionBundleCache = KeePassNativeProjectionBundleCache()
+        private val projectionIndexGate = KeePassProjectionIndexGate()
         private var activeDatabaseId: Long? = null
         // 跨实例缓存失效信号：某实例更新数据库绑定后，其他实例的本地缓存应立即失效。
         private val externallyInvalidatedDatabaseIds = mutableSetOf<Long>()
@@ -442,6 +576,9 @@ class KeePassKdbxService(
                     activeDatabaseId = null
                 }
             }
+            nativeSessionCache.invalidate(databaseId)
+            nativeProjectionBundleCache.invalidate(databaseId)
+            projectionIndexGate.invalidate(databaseId)
             externallyInvalidatedDatabaseIds += databaseId
         }
 
@@ -474,7 +611,11 @@ class KeePassKdbxService(
             while (warmCount > MAX_WARM_CACHED_DATABASES && iterator.hasNext()) {
                 val entry = iterator.next()
                 if (entry.key == activeId) continue
+                val evictedDatabaseId = entry.key
                 iterator.remove()
+                nativeSessionCache.invalidate(evictedDatabaseId)
+                nativeProjectionBundleCache.invalidate(evictedDatabaseId)
+                projectionIndexGate.invalidate(evictedDatabaseId)
                 warmCount--
             }
         }
@@ -537,9 +678,13 @@ class KeePassKdbxService(
         val database: LocalKeePassDatabase,
         val credentials: Credentials,
         val keePassDatabase: KeePassDatabase,
+        val nativeSession: Lazy<KeePassNativeSession>,
+        val nativeBrowser: Lazy<KeePassNativeBrowserSnapshot>,
+        val projectionBundle: Lazy<KeePassNativeProjectionBundle>,
         val sourceEtag: String?,
         val sourceLastModified: String?,
-        val sourceSignature: DatabaseSourceSignature?
+        val sourceSignature: DatabaseSourceSignature?,
+        val sourceRevision: KeePassSourceRevision
     )
 
     private data class CachedLoadedDatabase(
@@ -556,13 +701,44 @@ class KeePassKdbxService(
         val bytes: ByteArray,
         val etag: String?,
         val lastModified: String?,
-        val signature: DatabaseSourceSignature?
+        val signature: DatabaseSourceSignature?,
+        val revision: KeePassSourceRevision
     )
+
+    /**
+     * Re-openable KDBX source.  The parser consumes a stream and the source
+     * keeps only a digest and a small header in memory; large database bytes
+     * remain on disk or in the provider stream.
+     */
+    private class DatabaseStreamSource(
+        val openStream: () -> InputStream,
+        val header: ByteArray,
+        val revision: KeePassSourceRevision,
+        val etag: String? = null,
+        val lastModified: String? = null,
+        private val temporaryFile: File? = null,
+    ) : AutoCloseable {
+        fun readBytes(): ByteArray = openStream().use { it.readBytes() }
+
+        override fun close() {
+            temporaryFile?.let { file -> runCatching { file.delete() } }
+        }
+    }
+
+    private class EncodedDatabaseArtifact(
+        val file: File,
+        val revision: KeePassSourceRevision,
+    ) : AutoCloseable {
+        fun readBytes(): ByteArray = file.readBytes()
+        override fun close() {
+            runCatching { file.delete() }
+        }
+    }
 
     private data class MutationPlan<T>(
         val updatedDatabase: KeePassDatabase,
         val result: T,
-        val beforeRemoteUpload: (suspend (LocalKeePassDatabase, KeePassDatabase) -> Unit)? = null,
+        val beforeRemoteUpload: (suspend (LocalKeePassDatabase, KeePassSourceRevision) -> Unit)? = null,
         val afterWrite: (suspend (LocalKeePassDatabase, KeePassDatabase) -> Unit)? = null
     )
 
@@ -630,14 +806,15 @@ class KeePassKdbxService(
                 passwordOverride = passwordOverride,
                 keyFileUriOverride = keyFileUriOverride
             )
-            val bytes = readDatabaseBytes(database)
-            val (keePassDatabase, _) = decodeDatabaseWithFallback(
-                bytes = bytes,
-                credentialsResolution = credentials,
-                sourceLabel = "databaseId=$databaseId",
-                sourceName = database.resolvedActiveFilePath()
-            )
-            Result.success(buildDiagnostics(keePassDatabase))
+            openDatabaseStreamSource(database).use { source ->
+                val (keePassDatabase, _) = decodeDatabaseWithFallback(
+                    source = source,
+                    credentialsResolution = credentials,
+                    sourceLabel = "databaseId=$databaseId",
+                    sourceName = database.resolvedActiveFilePath(),
+                )
+                Result.success(buildDiagnostics(keePassDatabase))
+            }
         } catch (e: Exception) {
             Result.failure(normalizeError(e))
         }
@@ -650,14 +827,15 @@ class KeePassKdbxService(
     ): Result<KeePassDatabaseDiagnostics> = withContext(Dispatchers.IO) {
         try {
             val credentials = buildCredentialsFromRaw(password = password, keyFileUri = keyFileUri)
-            val bytes = readBytesFromUri(fileUri, "无法打开数据库文件")
-            val (keePassDatabase, _) = decodeDatabaseWithFallback(
-                bytes = bytes,
-                credentialsResolution = credentials,
-                sourceLabel = "uri=$fileUri",
-                sourceName = fileUri.lastPathSegment ?: fileUri.toString()
-            )
-            Result.success(buildDiagnostics(keePassDatabase))
+            openUriStreamSource(fileUri, "无法打开数据库文件").use { source ->
+                val (keePassDatabase, _) = decodeDatabaseWithFallback(
+                    source = source,
+                    credentialsResolution = credentials,
+                    sourceLabel = "uri=$fileUri",
+                    sourceName = fileUri.lastPathSegment ?: fileUri.toString(),
+                )
+                Result.success(buildDiagnostics(keePassDatabase))
+            }
         } catch (e: Exception) {
             Result.failure(normalizeError(e))
         }
@@ -732,48 +910,6 @@ class KeePassKdbxService(
                     return@withContext Result.success(
                         KeePassRemoteSyncResult(syncedDatabaseName, "已拉取远端最新版本")
                     )
-                }
-
-                if (database.sourceType == KeePassDatabaseSourceType.REMOTE_ONEDRIVE ||
-                    database.sourceType == KeePassDatabaseSourceType.REMOTE_WEBDAV
-                ) {
-                    val loaded = loadDatabase(databaseId)
-                    val mergeResult = resolveRemoteConflictInternal(
-                        database = database,
-                        credentials = loaded.credentials,
-                        localDatabase = loaded.keePassDatabase,
-                        remoteBytes = remoteBytes
-                    )
-                    syncService.markLocalChanges(databaseId, GoogleDriveKeePassSupport.sha256Hex(mergeResult.mergedBytes))
-                    val writeResult = fileSource.write(
-                        mergeResult.mergedBytes,
-                        expectedVersion = remoteStat.etag ?: remoteStat.versionToken
-                    )
-                    val verifiedRemote = verifyRemoteKdbxWrite(
-                        database = database,
-                        fileSource = fileSource,
-                        credentials = loaded.credentials,
-                        expectedBytes = mergeResult.mergedBytes,
-                        sourceLabel = "service-sync-merge"
-                    )
-                    OneDriveKeePassSupport.writeRelativeFile(context, workingPath, verifiedRemote.bytes)
-                    database.cacheCopyPath?.let { cachePath ->
-                        OneDriveKeePassSupport.writeRelativeFile(context, cachePath, verifiedRemote.bytes)
-                    }
-                    syncService.markSynchronized(
-                        databaseId = databaseId,
-                        versionToken = writeResult.versionToken,
-                        etag = writeResult.etag,
-                        baseHash = verifiedRemote.hash,
-                        workingHash = verifiedRemote.hash
-                    )
-                    invalidateProcessCache(databaseId)
-                    val message = if (mergeResult.conflictCopyCount > 0) {
-                        "已合并本地与远端修改，并保留 ${mergeResult.conflictCopyCount} 个远端冲突副本"
-                    } else {
-                        "已合并本地与远端修改"
-                    }
-                    return@withContext Result.success(KeePassRemoteSyncResult(syncedDatabaseName, message))
                 }
 
                 val conflictMessage = "远端文件已变化，且本地工作副本也有修改，请先处理冲突"
@@ -876,31 +1012,34 @@ class KeePassKdbxService(
                     newGroupName = normalizedName,
                     currentPathKey = ""
                 )
+                val changeSet = if (!existedBefore) {
+                    KeePassChangeSet(
+                        databaseId = loaded.database.id,
+                        target = KeePassChangeTarget.GROUP,
+                        operation = KeePassChangeOperation.CREATE_GROUP,
+                        entryUuid = null,
+                        baseFingerprint = null,
+                        baseGroupPath = parentPathKey,
+                        baseGroupUuid = parentGroupUuid.toString(),
+                        structurePatch = KeePassStructureChangePatch(
+                            sourceGroupPath = result.second.path,
+                            sourceGroupUuid = result.second.uuid,
+                            targetGroupPath = parentPathKey,
+                            targetGroupUuid = parentGroupUuid.toString(),
+                            groupName = normalizedName
+                        )
+                    )
+                } else {
+                    null
+                }
+                val updatedDatabase = changeSet?.let { change ->
+                    KeePassChangeSetApplier().apply(loaded.keePassDatabase, change).updatedDatabase
+                } ?: loaded.keePassDatabase
                 MutationPlan(
-                    updatedDatabase = loaded.keePassDatabase.modifyParentGroup { result.first },
+                    updatedDatabase = updatedDatabase,
                     result = result.second,
-                    beforeRemoteUpload = { database, _ ->
-                        val changeSet = if (!existedBefore) {
-                            KeePassChangeSet(
-                                databaseId = loaded.database.id,
-                                target = KeePassChangeTarget.GROUP,
-                                operation = KeePassChangeOperation.CREATE_GROUP,
-                                entryUuid = null,
-                                baseFingerprint = null,
-                                baseGroupPath = parentPathKey,
-                                baseGroupUuid = parentGroupUuid.toString(),
-                                structurePatch = KeePassStructureChangePatch(
-                                    sourceGroupPath = result.second.path,
-                                    sourceGroupUuid = result.second.uuid,
-                                    targetGroupPath = parentPathKey,
-                                    targetGroupUuid = parentGroupUuid.toString(),
-                                    groupName = normalizedName
-                                )
-                            )
-                        } else {
-                            null
-                        }
-                        enqueuePendingChangeSetsIfRemote(database, listOfNotNull(changeSet))
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOfNotNull(changeSet), workingRevision)
                     }
                 )
             }
@@ -936,31 +1075,30 @@ class KeePassKdbxService(
                     newName = normalizedName,
                     currentPathKey = ""
                 )
+                val changeSet = KeePassChangeSet(
+                    databaseId = loaded.database.id,
+                    target = KeePassChangeTarget.GROUP,
+                    operation = KeePassChangeOperation.RENAME_GROUP,
+                    entryUuid = null,
+                    baseFingerprint = null,
+                    baseGroupPath = groupPath,
+                    baseGroupUuid = targetGroupUuid.toString(),
+                    structurePatch = KeePassStructureChangePatch(
+                        sourceGroupPath = groupPath,
+                        sourceGroupUuid = targetGroupUuid.toString(),
+                        targetGroupPath = result.second.path,
+                        targetGroupUuid = targetGroupUuid.toString(),
+                        newGroupName = normalizedName
+                    )
+                )
                 MutationPlan(
-                    updatedDatabase = loaded.keePassDatabase.modifyParentGroup { result.first },
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet
+                    ).updatedDatabase,
                     result = result.second,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(
-                            database,
-                            listOf(
-                                KeePassChangeSet(
-                                    databaseId = loaded.database.id,
-                                    target = KeePassChangeTarget.GROUP,
-                                    operation = KeePassChangeOperation.RENAME_GROUP,
-                                    entryUuid = null,
-                                    baseFingerprint = null,
-                                    baseGroupPath = groupPath,
-                                    baseGroupUuid = targetGroupUuid.toString(),
-                                    structurePatch = KeePassStructureChangePatch(
-                                        sourceGroupPath = groupPath,
-                                        sourceGroupUuid = targetGroupUuid.toString(),
-                                        targetGroupPath = result.second.path,
-                                        targetGroupUuid = targetGroupUuid.toString(),
-                                        newGroupName = normalizedName
-                                    )
-                                )
-                            )
-                        )
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
                     }
                 )
             }
@@ -992,28 +1130,27 @@ class KeePassKdbxService(
                 if (!result.second) {
                     throw IllegalArgumentException("分组不存在: $groupPath")
                 }
+                val changeSet = KeePassChangeSet(
+                    databaseId = loaded.database.id,
+                    target = KeePassChangeTarget.GROUP,
+                    operation = KeePassChangeOperation.DELETE_GROUP,
+                    entryUuid = null,
+                    baseFingerprint = null,
+                    baseGroupPath = groupPath,
+                    baseGroupUuid = targetGroupUuid.toString(),
+                    structurePatch = KeePassStructureChangePatch(
+                        sourceGroupPath = groupPath,
+                        sourceGroupUuid = targetGroupUuid.toString()
+                    )
+                )
                 MutationPlan(
-                    updatedDatabase = loaded.keePassDatabase.modifyParentGroup { result.first },
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet
+                    ).updatedDatabase,
                     result = Unit,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(
-                            database,
-                            listOf(
-                                KeePassChangeSet(
-                                    databaseId = loaded.database.id,
-                                    target = KeePassChangeTarget.GROUP,
-                                    operation = KeePassChangeOperation.DELETE_GROUP,
-                                    entryUuid = null,
-                                    baseFingerprint = null,
-                                    baseGroupPath = groupPath,
-                                    baseGroupUuid = targetGroupUuid.toString(),
-                                    structurePatch = KeePassStructureChangePatch(
-                                        sourceGroupPath = groupPath,
-                                        sourceGroupUuid = targetGroupUuid.toString()
-                                    )
-                                )
-                            )
-                        )
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
                     }
                 )
             }
@@ -1147,35 +1284,35 @@ class KeePassKdbxService(
                     }
 
                     if (sourceDatabaseId == targetDatabaseId) {
-                        val updatedDatabase = sourceLoaded.keePassDatabase.modifyParentGroup { inserted.updatedGroup }
+                        val moveChangeSet = KeePassChangeSet(
+                            databaseId = sourceLoaded.database.id,
+                            target = KeePassChangeTarget.GROUP,
+                            operation = KeePassChangeOperation.MOVE_GROUP,
+                            entryUuid = null,
+                            baseFingerprint = null,
+                            baseGroupPath = sourceParentPath,
+                            baseGroupUuid = sourceParentGroupUuid.toString(),
+                            structurePatch = KeePassStructureChangePatch(
+                                sourceGroupPath = normalizedSourcePath,
+                                sourceGroupUuid = sourceGroupUuid.toString(),
+                                targetGroupPath = normalizedTargetParentPath,
+                                targetGroupUuid = targetParentGroupUuid.toString(),
+                                groupName = groupToMove.name
+                            )
+                        )
+                        val updatedDatabase = KeePassChangeSetApplier().apply(
+                            sourceLoaded.keePassDatabase,
+                            moveChangeSet
+                        ).updatedDatabase
                         writeDatabase(
                             database = sourceLoaded.database,
                             credentials = sourceLoaded.credentials,
                             keePassDatabase = updatedDatabase,
                             sourceEtag = sourceLoaded.sourceEtag,
                             sourceLastModified = sourceLoaded.sourceLastModified,
-                            beforeRemoteUpload = { database, _ ->
-                                enqueuePendingChangeSetsIfRemote(
-                                    database,
-                                    listOf(
-                                        KeePassChangeSet(
-                                            databaseId = sourceLoaded.database.id,
-                                            target = KeePassChangeTarget.GROUP,
-                                            operation = KeePassChangeOperation.MOVE_GROUP,
-                                            entryUuid = null,
-                                            baseFingerprint = null,
-                                            baseGroupPath = sourceParentPath,
-                                            baseGroupUuid = sourceParentGroupUuid.toString(),
-                                            structurePatch = KeePassStructureChangePatch(
-                                                sourceGroupPath = normalizedSourcePath,
-                                                sourceGroupUuid = sourceGroupUuid.toString(),
-                                                targetGroupPath = normalizedTargetParentPath,
-                                                targetGroupUuid = targetParentGroupUuid.toString(),
-                                                groupName = groupToMove.name
-                                            )
-                                        )
-                                    )
-                                )
+                            expectedSourceRevision = sourceLoaded.sourceRevision,
+                            beforeRemoteUpload = { database, workingRevision ->
+                                enqueuePendingChangeSetsIfRemote(database, listOf(moveChangeSet), workingRevision)
                             }
                         )
                     } else {
@@ -1184,7 +1321,6 @@ class KeePassKdbxService(
                         // after a target-success/source-failure split, skip target insertion if the
                         // same group UUID already exists at the intended target path.
                         if (existingTargetPath == null) {
-                            val targetDatabase = targetLoaded.keePassDatabase.modifyParentGroup { inserted.updatedGroup }
                             val createTreeChangeSet = KeePassChangeSet(
                                 databaseId = targetLoaded.database.id,
                                 target = KeePassChangeTarget.GROUP,
@@ -1200,18 +1336,22 @@ class KeePassKdbxService(
                                 ),
                                 groupTreePatch = groupTreePatch
                             )
+                            val targetDatabase = KeePassChangeSetApplier().apply(
+                                targetLoaded.keePassDatabase,
+                                createTreeChangeSet
+                            ).updatedDatabase
                             writeDatabase(
                                 database = targetLoaded.database,
                                 credentials = targetLoaded.credentials,
                                 keePassDatabase = targetDatabase,
                                 sourceEtag = targetLoaded.sourceEtag,
                                 sourceLastModified = targetLoaded.sourceLastModified,
-                                beforeRemoteUpload = { database, _ ->
-                                    enqueuePendingChangeSetsIfRemote(database, listOf(createTreeChangeSet))
+                                expectedSourceRevision = targetLoaded.sourceRevision,
+                                beforeRemoteUpload = { database, workingRevision ->
+                                    enqueuePendingChangeSetsIfRemote(database, listOf(createTreeChangeSet), workingRevision)
                                 }
                             )
                         }
-                        val sourceDatabase = sourceLoaded.keePassDatabase.modifyParentGroup { extracted.updatedGroup }
                         val deleteTreeChangeSet = KeePassChangeSet(
                             databaseId = sourceLoaded.database.id,
                             target = KeePassChangeTarget.GROUP,
@@ -1227,14 +1367,19 @@ class KeePassKdbxService(
                             ),
                             groupTreePatch = groupTreePatch
                         )
+                        val sourceDatabase = KeePassChangeSetApplier().apply(
+                            sourceLoaded.keePassDatabase,
+                            deleteTreeChangeSet
+                        ).updatedDatabase
                         writeDatabase(
                             database = sourceLoaded.database,
                             credentials = sourceLoaded.credentials,
                             keePassDatabase = sourceDatabase,
                             sourceEtag = sourceLoaded.sourceEtag,
                             sourceLastModified = sourceLoaded.sourceLastModified,
-                            beforeRemoteUpload = { database, _ ->
-                                enqueuePendingChangeSetsIfRemote(database, listOf(deleteTreeChangeSet))
+                            expectedSourceRevision = sourceLoaded.sourceRevision,
+                            beforeRemoteUpload = { database, workingRevision ->
+                                enqueuePendingChangeSetsIfRemote(database, listOf(deleteTreeChangeSet), workingRevision)
                             }
                         )
                     }
@@ -1256,15 +1401,15 @@ class KeePassKdbxService(
 
     suspend fun readPasswordEntries(databaseId: Long): Result<List<KeePassEntryData>> = withContext(Dispatchers.IO) {
         try {
-            val (database, _, keePassDatabase) = loadDatabase(databaseId)
-            val (entries, hasRecycleBinMeta) = collectEntryContexts(keePassDatabase)
-            val resolutionContext = KeePassFieldReferenceResolver.buildContext(entries.map { it.entry })
+            val loaded = loadDatabase(databaseId)
+            val database = loaded.database
+            val bundle = loaded.projectionBundle.value
             val data = buildPasswordEntryData(
                 databaseId = database.id,
                 databaseName = database.name,
-                entries = entries,
-                hasRecycleBinMeta = hasRecycleBinMeta,
-                resolutionContext = resolutionContext
+                entries = bundle.entries,
+                hasRecycleBinMeta = bundle.hasRecycleBinMeta,
+                resolutionContext = bundle.resolutionContext
             )
             dao.updateEntryCount(database.id, data.size)
             Result.success(data)
@@ -1279,18 +1424,19 @@ class KeePassKdbxService(
         allowedSecureItemTypes: Set<ItemType>? = null
     ): Result<KeePassWorkspaceSnapshot> = withContext(Dispatchers.IO) {
         try {
-            val (database, _, keePassDatabase) = loadDatabase(databaseId)
-            val (entries, hasRecycleBinMeta) = collectEntryContexts(keePassDatabase)
-            val resolutionContext = KeePassFieldReferenceResolver.buildContext(entries.map { it.entry })
+            val loaded = loadDatabase(databaseId)
+            val database = loaded.database
+            val keePassDatabase = loaded.keePassDatabase
+            val bundle = loaded.projectionBundle.value
             val passwords = buildPasswordEntryData(
                 databaseId = database.id,
                 databaseName = database.name,
-                entries = entries,
-                hasRecycleBinMeta = hasRecycleBinMeta,
-                resolutionContext = resolutionContext
+                entries = bundle.entries,
+                hasRecycleBinMeta = bundle.hasRecycleBinMeta,
+                resolutionContext = bundle.resolutionContext
             )
             val secureItems = mutableListOf<KeePassSecureItemData>()
-            entries.forEach { context ->
+            bundle.entries.forEach { context ->
                 entryToSecureItemData(
                     entry = context.entry,
                     keePassDatabase = keePassDatabase,
@@ -1298,18 +1444,19 @@ class KeePassKdbxService(
                     groupPath = context.groupPath,
                     groupUuid = context.groupUuid,
                     isInRecycleBinByMeta = context.isInRecycleBinByMeta,
-                    hasRecycleBinMeta = hasRecycleBinMeta,
+                    hasRecycleBinMeta = bundle.hasRecycleBinMeta,
                     allowedTypes = allowedSecureItemTypes,
-                    resolutionContext = resolutionContext
+                    resolutionContext = bundle.resolutionContext
                 )?.let(secureItems::add)
             }
-            val groups = buildGroupInfoList(keePassDatabase, includeRecycleBinGroups)
+            val groups = bundle.groups(includeRecycleBinGroups)
             dao.updateEntryCount(database.id, passwords.size)
             Result.success(
                 KeePassWorkspaceSnapshot(
                     passwords = passwords,
                     secureItems = secureItems,
-                    groups = groups
+                    groups = groups,
+                    sessionRevision = bundle.revisionToken
                 )
             )
         } catch (e: Exception) {
@@ -1322,8 +1469,8 @@ class KeePassKdbxService(
         includeRecycleBin: Boolean = false
     ): Result<List<KeePassGroupInfo>> = withContext(Dispatchers.IO) {
         try {
-            val (_, _, keePassDatabase) = loadDatabase(databaseId)
-            Result.success(buildGroupInfoList(keePassDatabase, includeRecycleBin))
+            val bundle = loadDatabase(databaseId).projectionBundle.value
+            Result.success(bundle.groups(includeRecycleBin))
         } catch (e: Exception) {
             Result.failure(normalizeError(e))
         }
@@ -1378,19 +1525,17 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
                     result = addedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
             Result.success(addedCount)
         } catch (e: Exception) {
-            Result.failure(normalizeError(e))
+            Result.failure(logMutationFailure("addOrUpdatePasswordEntries", databaseId, e))
         }
     }
 
@@ -1430,8 +1575,8 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
                     result = Unit,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets, workingRevision)
                     }
                 )
             }
@@ -1439,6 +1584,1619 @@ class KeePassKdbxService(
         } catch (e: Exception) {
             Result.failure(normalizeError(e))
         }
+    }
+
+    internal suspend fun readNativeDatabaseSettings(
+        databaseId: Long
+    ): Result<KeePassDatabaseSettingsSnapshot> = withContext(Dispatchers.IO) {
+        runCatching {
+            val loaded = getCachedLoadedDatabase(databaseId) ?: loadDatabase(databaseId)
+            KeePassDatabaseSettingsEditor.snapshot(
+                databaseId = databaseId,
+                database = loaded.keePassDatabase,
+                readOnly = accessPolicy.isReadOnly(databaseId)
+            )
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(normalizeError(it)) }
+        )
+    }
+
+    internal suspend fun updateNativeDatabaseSettings(
+        databaseId: Long,
+        update: KeePassDatabaseSettingsUpdate
+    ): Result<KeePassDatabaseSettingsSnapshot> = withContext(Dispatchers.IO) {
+        runCatching {
+            val readOnly = accessPolicy.isReadOnly(databaseId)
+            val snapshot = mutateDatabase(databaseId) { loaded ->
+                val updated = KeePassDatabaseSettingsEditor.apply(
+                    database = loaded.keePassDatabase,
+                    update = update
+                )
+                MutationPlan(
+                    updatedDatabase = updated,
+                    result = KeePassDatabaseSettingsEditor.snapshot(
+                        databaseId = databaseId,
+                        database = updated,
+                        readOnly = readOnly
+                    ),
+                    afterWrite = { registration, writtenDatabase ->
+                        updateStoredDatabaseMetadata(registration, writtenDatabase)
+                    }
+                )
+            }
+            invalidateLoadedDatabaseCache(databaseId)
+            snapshot
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(normalizeError(it)) }
+        )
+    }
+
+    internal suspend fun changeMasterCredentials(
+        databaseId: Long,
+        newPassword: String,
+        keyFileMode: KeePassKeyFileChangeMode,
+        replacementKeyFileUri: Uri? = null,
+        keepInternalKeyFileCopy: Boolean = false
+    ): Result<KeePassMasterCredentialChangeResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            withDatabaseMutationLocks(listOf(databaseId)) {
+                val loaded = getCachedLoadedDatabase(databaseId) ?: loadDatabase(databaseId)
+                accessPolicy.requireWritable(databaseId)
+                val registration = loaded.database
+                val keyFileBytes = when (keyFileMode) {
+                    KeePassKeyFileChangeMode.KEEP_CURRENT -> keyFileStore.read(registration)
+                    KeePassKeyFileChangeMode.REMOVE -> null
+                    KeePassKeyFileChangeMode.REPLACE -> {
+                        val uri = requireNotNull(replacementKeyFileUri) {
+                            "Replacement key file is required"
+                        }
+                        readKeyFileBytes(uri)
+                    }
+                }
+                require(newPassword.isNotBlank() || keyFileBytes != null) {
+                    "A master password or key file is required"
+                }
+
+                val keyFileName = when (keyFileMode) {
+                    KeePassKeyFileChangeMode.KEEP_CURRENT -> registration.keyFileName
+                    KeePassKeyFileChangeMode.REMOVE -> null
+                    KeePassKeyFileChangeMode.REPLACE -> replacementKeyFileUri
+                        ?.lastPathSegment
+                        ?.substringAfterLast('/')
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "keyfile"
+                }
+                val transitionCopy = credentialTransitionStore.prepare(
+                    databaseId = databaseId,
+                    password = newPassword,
+                    keyFileBytes = keyFileBytes,
+                    keyFileName = keyFileName
+                )
+                var writeMayHaveChangedSource = false
+                try {
+                    val newCredentials = buildExactCredentials(newPassword, keyFileBytes)
+                    val updatedDatabase = KeePassDatabaseCredentialEditor.replace(
+                        database = loaded.keePassDatabase,
+                        credentials = newCredentials
+                    )
+
+                    // Credential changes use a stricter verification path than normal edits:
+                    // encode and reopen in memory before touching either local or remote bytes.
+                    val previewBytes = encodeDatabase(updatedDatabase)
+                    decodeDatabase(
+                        bytes = previewBytes,
+                        credentials = newCredentials,
+                        sourceName = registration.resolvedActiveFilePath()
+                    )
+
+                    writeMayHaveChangedSource = true
+                    writeDatabase(
+                        database = registration,
+                        credentials = newCredentials,
+                        keePassDatabase = updatedDatabase,
+                        sourceEtag = loaded.sourceEtag,
+                        sourceLastModified = loaded.sourceLastModified,
+                        expectedSourceRevision = loaded.sourceRevision
+                    )
+
+                    val retainedKeyFile = when (keyFileMode) {
+                        KeePassKeyFileChangeMode.KEEP_CURRENT -> {
+                            if (registration.keyFileInternalPath.isNullOrBlank() &&
+                                keepInternalKeyFileCopy &&
+                                transitionCopy != null
+                            ) {
+                                transitionCopy
+                            } else {
+                                null
+                            }
+                        }
+                        KeePassKeyFileChangeMode.REMOVE -> null
+                        KeePassKeyFileChangeMode.REPLACE -> transitionCopy
+                            ?.takeIf { keepInternalKeyFileCopy }
+                    }
+                    replacementKeyFileUri?.let { uri ->
+                        context.contentResolver.persistKeePassKeyFileReadPermission(uri)
+                    }
+                    val options = inferCreationOptions(updatedDatabase)
+                    val updatedRegistration = registration.copy(
+                        encryptedPassword = newPassword
+                            .takeIf { it.isNotEmpty() }
+                            ?.let(securityManager::encryptData),
+                        keyFileUri = when (keyFileMode) {
+                            KeePassKeyFileChangeMode.KEEP_CURRENT -> registration.keyFileUri
+                            KeePassKeyFileChangeMode.REMOVE -> null
+                            KeePassKeyFileChangeMode.REPLACE -> replacementKeyFileUri?.toString()
+                        },
+                        keyFileInternalPath = when (keyFileMode) {
+                            KeePassKeyFileChangeMode.KEEP_CURRENT ->
+                                registration.keyFileInternalPath ?: retainedKeyFile?.relativePath
+                            KeePassKeyFileChangeMode.REMOVE -> null
+                            KeePassKeyFileChangeMode.REPLACE -> retainedKeyFile?.relativePath
+                        },
+                        keyFileName = when (keyFileMode) {
+                            KeePassKeyFileChangeMode.KEEP_CURRENT ->
+                                registration.keyFileName ?: retainedKeyFile?.fileName
+                            KeePassKeyFileChangeMode.REMOVE -> null
+                            KeePassKeyFileChangeMode.REPLACE -> keyFileName
+                        },
+                        keyFileFingerprint = keyFileBytes?.let(KeePassKeyFileStore::fingerprint),
+                        entryCount = countEntries(updatedDatabase.content.group),
+                        kdbxMajorVersion = options.formatVersion.majorVersion,
+                        cipherAlgorithm = options.cipherAlgorithm.name,
+                        kdfAlgorithm = options.kdfAlgorithm.name,
+                        kdfTransformRounds = options.transformRounds,
+                        kdfMemoryBytes = options.memoryBytes,
+                        kdfParallelism = options.parallelism,
+                        lastAccessedAt = System.currentTimeMillis()
+                    )
+                    dao.updateDatabase(updatedRegistration)
+                    credentialTransitionStore.clear(databaseId)
+                    invalidateLoadedDatabaseCache(databaseId)
+
+                    cleanupUnreferencedInternalKeyFile(
+                        registration.keyFileInternalPath,
+                        retainedPath = updatedRegistration.keyFileInternalPath,
+                        databaseId = databaseId
+                    )
+                    cleanupUnreferencedInternalKeyFile(
+                        transitionCopy?.relativePath,
+                        retainedPath = updatedRegistration.keyFileInternalPath,
+                        databaseId = databaseId
+                    )
+
+                    KeePassMasterCredentialChangeResult(
+                        settings = KeePassDatabaseSettingsEditor.snapshot(
+                            databaseId = databaseId,
+                            database = updatedDatabase,
+                            readOnly = false
+                        ),
+                        retainedInternalKeyFile = !updatedRegistration.keyFileInternalPath.isNullOrBlank()
+                    )
+                } catch (error: Throwable) {
+                    // Before writeDatabase starts, the original source is known to be untouched.
+                    // Once writing starts, retain the encrypted transition fallback because the
+                    // local or remote source may already contain the new master key.
+                    if (!writeMayHaveChangedSource) {
+                        credentialTransitionStore.clear(databaseId)
+                        cleanupUnreferencedInternalKeyFile(
+                            transitionCopy?.relativePath,
+                            retainedPath = registration.keyFileInternalPath,
+                            databaseId = databaseId
+                        )
+                    }
+                    throw error
+                }
+            }
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(normalizeError(it)) }
+        )
+    }
+
+    internal suspend fun openNativeSession(databaseId: Long): Result<KeePassNativeSession> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(loadDatabase(databaseId).nativeSession.value)
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal suspend fun openNativeBrowser(databaseId: Long): Result<KeePassNativeBrowserSnapshot> =
+        withContext(Dispatchers.IO) {
+            try {
+                Result.success(loadDatabase(databaseId).nativeBrowser.value)
+            } catch (e: Exception) {
+                Result.failure(normalizeError(e))
+            }
+        }
+
+    internal suspend fun searchNativeEntries(
+        databaseId: Long,
+        options: KeePassNativeSearchOptions,
+        now: Instant = Instant.now()
+    ): Result<KeePassNativeSearchResult> = withContext(Dispatchers.IO) {
+        try {
+            val browser = loadDatabase(databaseId).nativeBrowser.value
+            Result.success(KeePassNativeSearch.search(browser, options, now))
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal suspend fun replaceNativeEntryFields(
+        databaseId: Long,
+        entryUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = applyNativeEntryChange(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        expectedRevisionToken = expectedRevisionToken
+    ) { current ->
+        KeePassChangeSet(
+            databaseId = databaseId,
+            target = KeePassChangeTarget.UNKNOWN_ENTRY,
+            operation = KeePassChangeOperation.FIELD_PATCH,
+            entryUuid = entryUuid.toString(),
+            baseFingerprint = KeePassEntryFingerprint.build(current),
+            fieldPatch = KeePassFieldChangePatch(
+                managedScope = KeePassManagedFieldScope.EXPLICIT_ONLY,
+                replacementFields = fields,
+                baseFields = current.fields.map { (name, value) ->
+                    takagi.ru.monica.keepass.KeePassFieldBaseValue(
+                        name = name,
+                        value = runCatching { value.content }.getOrDefault(""),
+                        protected = value is EntryValue.Encrypted
+                    )
+                },
+                replaceAllFields = true
+            )
+        )
+    }
+
+    internal suspend fun replaceNativeEntryFieldsAndPresentation(
+        databaseId: Long,
+        entryUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        presentation: KeePassNativeEntryPresentationUpdate,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = applyNativeEntryChange(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        expectedRevisionToken = expectedRevisionToken,
+    ) { current ->
+        val generatedIcon = presentation.customIcon?.let { payload ->
+            val (uuid, icon) = KeePassCustomIconEditor.newIcon(
+                bytes = payload.bytes,
+                name = payload.name.orEmpty(),
+            )
+            KeePassCustomIconPoolItemPatch(
+                uuid = uuid.toString(),
+                dataBase64 = Base64.encodeToString(icon.data, Base64.NO_WRAP),
+                name = icon.name,
+                lastModifiedEpochMillis = icon.lastModified?.toEpochMilli(),
+            ) to uuid
+        }
+        val selectedUuid = presentation.customIconUuid ?: generatedIcon?.second
+        KeePassChangeSet(
+            databaseId = databaseId,
+            target = KeePassChangeTarget.UNKNOWN_ENTRY,
+            operation = KeePassChangeOperation.ENTRY_EDIT_PATCH,
+            entryUuid = entryUuid.toString(),
+            baseFingerprint = KeePassEntryFingerprint.build(current),
+            fieldPatch = KeePassFieldChangePatch(
+                managedScope = KeePassManagedFieldScope.EXPLICIT_ONLY,
+                replacementFields = fields,
+                baseFields = current.fields.map { (name, value) ->
+                    takagi.ru.monica.keepass.KeePassFieldBaseValue(
+                        name = name,
+                        value = runCatching { value.content }.getOrDefault(""),
+                        protected = value is EntryValue.Encrypted,
+                    )
+                },
+                replaceAllFields = true,
+            ),
+            entryPresentationPatch = KeePassEntryPresentationPatch(
+                predefinedIconName = presentation.predefinedIcon?.name,
+                customIconUuid = selectedUuid?.toString(),
+                clearCustomIcon = presentation.clearCustomIcon,
+                customIcon = generatedIcon?.first,
+                removeCustomIconUuid = presentation.removeCustomIconUuid?.toString(),
+                basePresentationSignature = KeePassEntryFingerprint.buildPresentation(current),
+                autoType = presentation.autoType,
+            ),
+        )
+    }
+
+    internal suspend fun replaceNativeEntryPresentation(
+        databaseId: Long,
+        entryUuid: UUID,
+        update: KeePassNativeEntryPresentationUpdate,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = applyNativeEntryChange(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        expectedRevisionToken = expectedRevisionToken,
+    ) { current ->
+        val generatedIcon = update.customIcon?.let { payload ->
+            val (uuid, icon) = KeePassCustomIconEditor.newIcon(
+                bytes = payload.bytes,
+                name = payload.name.orEmpty(),
+            )
+            KeePassCustomIconPoolItemPatch(
+                uuid = uuid.toString(),
+                dataBase64 = Base64.encodeToString(icon.data, Base64.NO_WRAP),
+                name = icon.name,
+                lastModifiedEpochMillis = icon.lastModified?.toEpochMilli(),
+            ) to uuid
+        }
+        val selectedUuid = update.customIconUuid ?: generatedIcon?.second
+        KeePassChangeSet(
+            databaseId = databaseId,
+            target = KeePassChangeTarget.UNKNOWN_ENTRY,
+            operation = KeePassChangeOperation.ENTRY_PRESENTATION_PATCH,
+            entryUuid = entryUuid.toString(),
+            baseFingerprint = KeePassEntryFingerprint.build(current),
+            entryPresentationPatch = KeePassEntryPresentationPatch(
+                predefinedIconName = update.predefinedIcon?.name,
+                customIconUuid = selectedUuid?.toString(),
+                clearCustomIcon = update.clearCustomIcon,
+                customIcon = generatedIcon?.first,
+                removeCustomIconUuid = update.removeCustomIconUuid?.toString(),
+                basePresentationSignature = KeePassEntryFingerprint.buildPresentation(current),
+                autoType = update.autoType,
+            ),
+        )
+    }
+
+    internal suspend fun updateNativeCustomIconPool(
+        databaseId: Long,
+        update: KeePassNativeCustomIconPoolUpdate,
+        expectedRevisionToken: String,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                val upsert = update.upsert.map { item ->
+                    val existing = loaded.keePassDatabase.content.meta.customIcons[item.uuid]
+                    val bytes = item.bytes ?: existing?.data
+                        ?: throw IllegalArgumentException("Custom icon not found: ${item.uuid}")
+                    KeePassCustomIconPoolItemPatch(
+                        uuid = item.uuid.toString(),
+                        dataBase64 = Base64.encodeToString(bytes, Base64.NO_WRAP),
+                        name = item.name ?: existing?.name,
+                        lastModifiedEpochMillis = item.lastModified?.toEpochMilli()
+                            ?: existing?.lastModified?.toEpochMilli(),
+                    )
+                }
+                val changeSet = KeePassChangeSet(
+                    databaseId = databaseId,
+                    target = KeePassChangeTarget.UNKNOWN_ENTRY,
+                    operation = KeePassChangeOperation.CUSTOM_ICON_POOL_PATCH,
+                    entryUuid = null,
+                    baseFingerprint = null,
+                    customIconPoolPatch = KeePassCustomIconPoolChangePatch(
+                        upsert = upsert,
+                        removeUuids = update.remove.map(UUID::toString),
+                    ),
+                )
+                MutationPlan(
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet,
+                    ).updatedDatabase,
+                    result = Unit,
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
+                    },
+                )
+            }
+            Result.success(Unit)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun restoreNativeEntryHistory(
+        databaseId: Long,
+        entryUuid: UUID,
+        historyIndex: Int,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = applyNativeEntryChange(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        expectedRevisionToken = expectedRevisionToken
+    ) { current ->
+        val snapshot = current.history.getOrNull(historyIndex)
+            ?: throw IllegalArgumentException("KeePass history version not found: $historyIndex")
+        KeePassChangeSet(
+            databaseId = databaseId,
+            target = KeePassChangeTarget.UNKNOWN_ENTRY,
+            operation = KeePassChangeOperation.RESTORE_HISTORY,
+            entryUuid = entryUuid.toString(),
+            baseFingerprint = KeePassEntryFingerprint.build(current),
+            historyPatch = KeePassHistoryChangePatch(
+                historyIndex = historyIndex,
+                expectedSnapshotFingerprint = KeePassEntryFingerprint.build(snapshot)
+            )
+        )
+    }
+
+    internal suspend fun deleteNativeEntryHistory(
+        databaseId: Long,
+        entryUuid: UUID,
+        historyIndex: Int,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = applyNativeEntryChange(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        expectedRevisionToken = expectedRevisionToken
+    ) { current ->
+        val snapshot = current.history.getOrNull(historyIndex)
+            ?: throw IllegalArgumentException("KeePass history version not found: $historyIndex")
+        KeePassChangeSet(
+            databaseId = databaseId,
+            target = KeePassChangeTarget.UNKNOWN_ENTRY,
+            operation = KeePassChangeOperation.DELETE_HISTORY,
+            entryUuid = entryUuid.toString(),
+            baseFingerprint = KeePassEntryFingerprint.build(current),
+            historyPatch = KeePassHistoryChangePatch(
+                historyIndex = historyIndex,
+                expectedSnapshotFingerprint = KeePassEntryFingerprint.build(snapshot)
+            )
+        )
+    }
+
+    internal suspend fun createNativeGroup(
+        databaseId: Long,
+        parentGroupUuid: UUID,
+        name: String,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedName = name.trim().takeIf { it.isNotEmpty() }
+                ?: throw IllegalArgumentException("KeePass group name cannot be empty")
+            val newGroupUuid = UUID.randomUUID()
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                val parent = requireUniqueNativeGroup(loaded.nativeSession.value, parentGroupUuid)
+                val changeSet = KeePassChangeSet(
+                    databaseId = databaseId,
+                    target = KeePassChangeTarget.GROUP,
+                    operation = KeePassChangeOperation.CREATE_GROUP,
+                    entryUuid = null,
+                    baseFingerprint = null,
+                    baseGroupPath = parent.legacyPath,
+                    baseGroupUuid = parentGroupUuid.toString(),
+                    structurePatch = KeePassStructureChangePatch(
+                        sourceGroupUuid = newGroupUuid.toString(),
+                        targetGroupUuid = parentGroupUuid.toString(),
+                        groupName = normalizedName
+                    )
+                )
+                MutationPlan(
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet
+                    ).updatedDatabase,
+                    result = Unit,
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
+                    }
+                )
+            }
+            Result.success(loadUniqueNativeGroupRecord(databaseId, newGroupUuid))
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal suspend fun renameNativeGroup(
+        databaseId: Long,
+        groupUuid: UUID,
+        newName: String,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedName = newName.trim().takeIf { it.isNotEmpty() }
+                ?: throw IllegalArgumentException("KeePass group name cannot be empty")
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                val current = requireUniqueNativeGroup(loaded.nativeSession.value, groupUuid)
+                val changeSet = KeePassChangeSet(
+                    databaseId = databaseId,
+                    target = KeePassChangeTarget.GROUP,
+                    operation = KeePassChangeOperation.RENAME_GROUP,
+                    entryUuid = null,
+                    baseFingerprint = null,
+                    baseGroupPath = current.legacyPath,
+                    baseGroupUuid = groupUuid.toString(),
+                    structurePatch = KeePassStructureChangePatch(
+                        sourceGroupPath = current.legacyPath,
+                        sourceGroupUuid = groupUuid.toString(),
+                        newGroupName = normalizedName
+                    )
+                )
+                MutationPlan(
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet
+                    ).updatedDatabase,
+                    result = Unit,
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
+                    }
+                )
+            }
+            Result.success(loadUniqueNativeGroupRecord(databaseId, groupUuid))
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal suspend fun moveNativeGroup(
+        databaseId: Long,
+        groupUuid: UUID,
+        targetParentGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                val current = requireUniqueNativeGroup(loaded.nativeSession.value, groupUuid)
+                val target = requireUniqueNativeGroup(loaded.nativeSession.value, targetParentGroupUuid)
+                if (current.parentGroup == target.identity) {
+                    return@mutateDatabase MutationPlan(loaded.keePassDatabase, Unit)
+                }
+                val changeSet = KeePassChangeSet(
+                    databaseId = databaseId,
+                    target = KeePassChangeTarget.GROUP,
+                    operation = KeePassChangeOperation.MOVE_GROUP,
+                    entryUuid = null,
+                    baseFingerprint = null,
+                    baseGroupPath = current.legacyPath,
+                    baseGroupUuid = current.parentGroup?.groupUuid?.toString(),
+                    structurePatch = KeePassStructureChangePatch(
+                        sourceGroupPath = current.legacyPath,
+                        sourceGroupUuid = groupUuid.toString(),
+                        targetGroupPath = target.legacyPath,
+                        targetGroupUuid = targetParentGroupUuid.toString(),
+                        groupName = current.group.name
+                    )
+                )
+                MutationPlan(
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet
+                    ).updatedDatabase,
+                    result = Unit,
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
+                    }
+                )
+            }
+            Result.success(loadUniqueNativeGroupRecord(databaseId, groupUuid))
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal suspend fun moveNativeGroups(
+        databaseId: Long,
+        groupUuids: Set<UUID>,
+        targetParentGroupUuid: UUID,
+        expectedRevisionToken: String,
+    ): Result<List<KeePassNativeGroupRecord>> = withContext(Dispatchers.IO) {
+        try {
+            require(groupUuids.isNotEmpty()) { "至少选择一个文件夹" }
+            var movedUuids = emptySet<UUID>()
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                groupUuids.forEach { uuid -> requireUniqueNativeGroup(loaded.nativeSession.value, uuid) }
+                val target = requireUniqueNativeGroup(loaded.nativeSession.value, targetParentGroupUuid)
+                movedUuids = groupUuids
+                val changeSets = groupUuids.sortedBy(UUID::toString).map { uuid ->
+                    val current = requireUniqueNativeGroup(loaded.nativeSession.value, uuid)
+                    KeePassChangeSet(
+                        databaseId = databaseId,
+                        target = KeePassChangeTarget.GROUP,
+                        operation = KeePassChangeOperation.MOVE_GROUP,
+                        entryUuid = null,
+                        baseFingerprint = null,
+                        baseGroupPath = current.legacyPath,
+                        baseGroupUuid = current.parentGroup?.groupUuid?.toString(),
+                        structurePatch = KeePassStructureChangePatch(
+                            sourceGroupPath = current.legacyPath,
+                            sourceGroupUuid = uuid.toString(),
+                            targetGroupPath = target.legacyPath,
+                            targetGroupUuid = targetParentGroupUuid.toString(),
+                            groupName = current.group.name,
+                        ),
+                    )
+                }
+                val updated = KeePassNativeManagement.moveGroups(
+                    database = loaded.keePassDatabase,
+                    groupUuids = groupUuids,
+                    targetParentGroupUuid = targetParentGroupUuid,
+                )
+                MutationPlan(
+                    updatedDatabase = updated,
+                    result = Unit,
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, changeSets, workingRevision)
+                    },
+                )
+            }
+            Result.success(movedUuids.map { loadUniqueNativeGroupRecord(databaseId, it) })
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal suspend fun deleteNativeGroup(
+        databaseId: Long,
+        groupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                val current = requireUniqueNativeGroup(loaded.nativeSession.value, groupUuid)
+                val changeSet = KeePassChangeSet(
+                    databaseId = databaseId,
+                    target = KeePassChangeTarget.GROUP,
+                    operation = KeePassChangeOperation.DELETE_GROUP,
+                    entryUuid = null,
+                    baseFingerprint = null,
+                    baseGroupPath = current.legacyPath,
+                    baseGroupUuid = current.parentGroup?.groupUuid?.toString(),
+                    structurePatch = KeePassStructureChangePatch(
+                        sourceGroupPath = current.legacyPath,
+                        sourceGroupUuid = groupUuid.toString(),
+                        groupName = current.group.name
+                    )
+                )
+                MutationPlan(
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet
+                    ).updatedDatabase,
+                    result = Unit,
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
+                    }
+                )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal suspend fun createNativeEntry(
+        databaseId: Long,
+        parentGroupUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            require(fields.isNotEmpty()) { "KeePass entry requires at least one field" }
+            val normalizedNames = fields.map { it.name.trim().lowercase(Locale.ROOT) }
+            require(normalizedNames.none { it.isBlank() }) { "KeePass field name cannot be blank" }
+            require(normalizedNames.size == normalizedNames.distinct().size) {
+                "KeePass field names must be unique"
+            }
+            val entryUuid = UUID.randomUUID()
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                requireUniqueNativeGroup(loaded.nativeSession.value, parentGroupUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.createEntry(
+                        database = loaded.keePassDatabase,
+                        targetGroupUuid = parentGroupUuid,
+                        fields = fields.map { field ->
+                            field.name.trim() to if (field.protected) {
+                                EntryValue.Encrypted(EncryptedValue.fromString(field.value))
+                            } else {
+                                EntryValue.Plain(field.value)
+                            }
+                        },
+                        entryUuid = entryUuid
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun duplicateNativeEntry(
+        databaseId: Long,
+        entryUuid: UUID,
+        targetGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            val copiedUuid = UUID.randomUUID()
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, entryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid)
+                requireUniqueNativeGroup(loaded.nativeSession.value, targetGroupUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.duplicateEntry(
+                        database = loaded.keePassDatabase,
+                        sourceEntryUuid = entryUuid,
+                        targetGroupUuid = targetGroupUuid,
+                        newEntryUuid = copiedUuid
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, copiedUuid))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    /** Saves a complete native entry as a KeePass entry template. */
+    internal suspend fun saveNativeEntryAsTemplate(
+        databaseId: Long,
+        entryUuid: UUID,
+        titleOverride: String? = null,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            var templateUuid: UUID? = null
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, entryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid)
+                val mutation = KeePassTemplateEngine.saveAsTemplate(
+                    database = loaded.keePassDatabase,
+                    sourceEntryUuid = entryUuid,
+                    titleOverride = titleOverride,
+                )
+                templateUuid = mutation.entryUuid
+                MutationPlan(
+                    updatedDatabase = mutation.database,
+                    result = Unit,
+                )
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, requireNotNull(templateUuid)))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    /** Creates a normal entry from a template while preserving all native metadata. */
+    internal suspend fun instantiateNativeTemplate(
+        databaseId: Long,
+        templateEntryUuid: UUID,
+        targetGroupUuid: UUID,
+        titleOverride: String? = null,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            var createdUuid: UUID? = null
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, templateEntryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, templateEntryUuid)
+                requireUniqueNativeGroup(loaded.nativeSession.value, targetGroupUuid)
+                val mutation = KeePassTemplateEngine.instantiate(
+                    database = loaded.keePassDatabase,
+                    templateEntryUuid = templateEntryUuid,
+                    targetGroupUuid = targetGroupUuid,
+                    titleOverride = titleOverride,
+                )
+                createdUuid = mutation.entryUuid
+                MutationPlan(
+                    updatedDatabase = mutation.database,
+                    result = Unit,
+                )
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, requireNotNull(createdUuid)))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun deleteNativeTemplate(
+        databaseId: Long,
+        templateEntryUuid: UUID,
+        expectedRevisionToken: String,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, templateEntryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, templateEntryUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassTemplateEngine.deleteTemplate(
+                        loaded.keePassDatabase,
+                        templateEntryUuid,
+                    ),
+                    result = Unit,
+                )
+            }
+            Result.success(Unit)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun moveNativeEntries(
+        databaseId: Long,
+        entryUuids: Set<UUID>,
+        targetGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<List<KeePassNativeEntryRecord>> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                entryUuids.forEach { uuid -> requireUniqueNativeEntry(loaded.nativeSession.value, uuid) }
+                requireUniqueNativeGroup(loaded.nativeSession.value, targetGroupUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.moveEntries(
+                        loaded.keePassDatabase,
+                        entryUuids,
+                        targetGroupUuid
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(entryUuids.map { uuid -> loadUniqueNativeEntryRecord(databaseId, uuid) })
+        } catch (error: Exception) {
+            Result.failure(logMutationFailure("moveNativeEntries", databaseId, error))
+        }
+    }
+
+    internal suspend fun deleteNativeEntries(
+        databaseId: Long,
+        entryUuids: Set<UUID>,
+        mode: KeePassNativeDeleteMode,
+        expectedRevisionToken: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                entryUuids.forEach { uuid -> requireUniqueNativeEntry(loaded.nativeSession.value, uuid) }
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.deleteEntries(
+                        loaded.keePassDatabase,
+                        entryUuids,
+                        mode
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(Unit)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun renameNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        attachmentHashHex: String,
+        newName: String,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = renameNativeAttachment(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        attachmentHashHex = attachmentHashHex,
+        currentName = null,
+        newName = newName,
+        expectedRevisionToken = expectedRevisionToken
+    )
+
+    internal suspend fun renameNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        attachmentHashHex: String,
+        currentName: String?,
+        newName: String,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, entryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.renameAttachment(
+                        loaded.keePassDatabase,
+                        entryUuid,
+                        attachmentHashHex.toByteStringHash(),
+                        currentName,
+                        newName
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun addNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        fileName: String,
+        bytes: ByteArray,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, entryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid)
+                requirePreflightAllowed(
+                    KeePassWritePreflight.evaluateRuntime(
+                        currentDatabaseBytes = loaded.sourceRevision.sizeBytes,
+                        incomingPayloadBytes = bytes.size.toLong()
+                    )
+                )
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.addAttachment(
+                        database = loaded.keePassDatabase,
+                        entryUuid = entryUuid,
+                        fileName = fileName,
+                        bytes = bytes
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+        } catch (error: OutOfMemoryError) {
+            Result.failure(error)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun addNativeAttachmentFromUri(
+        databaseId: Long,
+        entryUuid: UUID,
+        sourceUri: Uri,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            val metadata = AttachmentUriMetadata.resolve(context, sourceUri)
+            val loaded = loadDatabase(databaseId)
+            assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, entryUuid)
+            requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid)
+            val descriptorSize = runCatching {
+                context.contentResolver.openAssetFileDescriptor(sourceUri, "r")?.use { descriptor ->
+                    descriptor.length.takeIf { it >= 0L }
+                }
+            }.getOrNull()
+            val declaredSize = metadata.sizeBytes.takeIf { it >= 0L } ?: descriptorSize
+            if (declaredSize != null) {
+                requirePreflightAllowed(
+                    KeePassWritePreflight.evaluateRuntime(
+                        currentDatabaseBytes = loaded.sourceRevision.sizeBytes,
+                        incomingPayloadBytes = declaredSize
+                    )
+                )
+            }
+            val bytes = context.contentResolver.openInputStream(sourceUri)?.use { input -> input.readBytes() }
+                ?: throw IOException("Unable to read selected attachment")
+            Result.success(
+                addNativeAttachment(
+                    databaseId = databaseId,
+                    entryUuid = entryUuid,
+                    fileName = metadata.fileName,
+                    bytes = bytes,
+                    expectedRevisionToken = expectedRevisionToken
+                ).getOrThrow()
+            )
+        } catch (error: OutOfMemoryError) {
+            Result.failure(error)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun deleteNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        attachmentHashHex: String,
+        currentName: String?,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, entryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.deleteAttachment(
+                        database = loaded.keePassDatabase,
+                        entryUuid = entryUuid,
+                        hash = attachmentHashHex.toByteStringHash(),
+                        currentName = currentName
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun updateNativeGroupProperties(
+        databaseId: Long,
+        groupUuid: UUID,
+        update: KeePassNativeGroupUpdate,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                requireUniqueNativeGroup(loaded.nativeSession.value, groupUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassNativeManagement.updateGroup(
+                    loaded.keePassDatabase,
+                    groupUuid,
+                    update
+                ),
+                    result = Unit
+                )
+            }
+            Result.success(loadUniqueNativeGroupRecord(databaseId, groupUuid))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun inspectNativeDatabaseIntegrity(
+        databaseId: Long
+    ): Result<KeePassIntegrityReport> = withContext(Dispatchers.IO) {
+        runCatching { KeePassDatabaseMaintenance.inspect(loadDatabase(databaseId).keePassDatabase) }
+            .fold(
+                onSuccess = Result.Companion::success,
+                onFailure = { error -> Result.failure(normalizeError(error)) }
+            )
+    }
+
+    internal suspend fun repairNativeDatabase(
+        databaseId: Long,
+        options: KeePassMaintenanceOptions = KeePassMaintenanceOptions()
+    ): Result<KeePassMaintenanceExecution> = withContext(Dispatchers.IO) {
+        try {
+            accessPolicy.requireWritable(databaseId)
+            val registration = dao.getDatabaseById(databaseId)
+                ?: throw IllegalArgumentException("KeePass database not found: $databaseId")
+            val recovery = openDatabaseStreamSource(registration).use { source ->
+                recoveryStore.create(databaseId, source.openStream())
+            }
+            val repair = mutateDatabase(databaseId) { loaded ->
+                val result = KeePassDatabaseMaintenance.repair(loaded.keePassDatabase, options)
+                MutationPlan(updatedDatabase = result.database, result = result)
+            }
+            Result.success(
+                KeePassMaintenanceExecution(
+                    result = repair,
+                    recoveryRecord = recoveryStore.list(databaseId)
+                        .firstOrNull { record -> record.file == recovery.file }
+                        ?: KeePassRecoveryRecord(
+                            databaseId = databaseId,
+                            file = recovery.file,
+                            createdAt = recovery.createdAt,
+                            revision = recovery.revision,
+                            verified = recoveryStore.verify(recovery),
+                            expectedHashPrefix = recovery.revision.sha256.take(12)
+                        )
+                )
+            )
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal fun listRecoveryCopies(databaseId: Long): List<KeePassRecoveryRecord> =
+        recoveryStore.list(databaseId)
+
+    internal suspend fun exportRecoveryCopy(
+        record: KeePassRecoveryRecord,
+        destinationUri: Uri
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val revision = KeePassSourceSafety.revisionOf(record.file)
+            require(record.verified && revision.sha256.startsWith(record.expectedHashPrefix)) {
+                "KeePass recovery copy verification failed"
+            }
+            record.file.inputStream().use { input ->
+                writeUriCopyVerified(destinationUri, input, revision)
+            }
+        }.fold(
+            onSuccess = { Result.success(Unit) },
+            onFailure = { error -> Result.failure(normalizeError(error)) }
+        )
+    }
+
+    internal suspend fun deleteRecoveryCopy(record: KeePassRecoveryRecord): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                if (!recoveryStore.delete(record)) throw IOException("Unable to delete KeePass recovery copy")
+            }.fold(
+                onSuccess = { Result.success(Unit) },
+                onFailure = { error -> Result.failure(normalizeError(error)) }
+            )
+        }
+
+    internal suspend fun restoreRecoveryCopy(
+        databaseId: Long,
+        record: KeePassRecoveryRecord
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            accessPolicy.requireWritable(databaseId)
+            val loaded = loadDatabase(databaseId)
+            require(record.databaseId == databaseId) { "Recovery copy belongs to another database" }
+            val recoveryRevision = KeePassSourceSafety.revisionOf(record.file)
+            require(record.verified && recoveryRevision.sha256.startsWith(record.expectedHashPrefix)) {
+                "KeePass recovery copy verification failed"
+            }
+            val restoredDatabase = decodeDatabase(
+                input = record.file.inputStream(),
+                credentials = loaded.credentials,
+                header = readFileHeader(record.file),
+                sourceName = "recovery:${record.file.name}",
+            )
+            withDatabaseMutationLocks(listOf(databaseId)) {
+                writeRawDatabaseFile(
+                    database = loaded.database,
+                    credentials = loaded.credentials,
+                    keePassDatabase = restoredDatabase,
+                    file = record.file,
+                    sourceRevision = recoveryRevision,
+                    expectedSourceRevision = loaded.sourceRevision,
+                )
+            }
+            Result.success(Unit)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun saveNativeDatabaseCopy(
+        databaseId: Long,
+        destinationUri: Uri
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val database = dao.getDatabaseById(databaseId)
+                ?: throw IllegalArgumentException("KeePass database not found: $databaseId")
+            openDatabaseStreamSource(database).use { source ->
+                source.openStream().use { input ->
+                    writeUriCopyVerified(destinationUri, input, source.revision)
+                }
+            }
+            Result.success(Unit)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun mergeNativeDatabaseFrom(
+        databaseId: Long,
+        sourceUri: Uri,
+        sourcePassword: String,
+        sourceKeyFileUri: Uri?,
+        targetGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeBrowserSnapshot> = withContext(Dispatchers.IO) {
+        try {
+            accessPolicy.requireWritable(databaseId)
+            val sourceCredentials = buildCredentialsFromRaw(sourcePassword, sourceKeyFileUri)
+            val source = openUriStreamSource(
+                sourceUri,
+                "Unable to read the KeePass source database",
+            )
+            source.use {
+                val preflight = KeePassWritePreflight.evaluateRuntime(
+                    currentDatabaseBytes = loadDatabase(databaseId).sourceRevision.sizeBytes,
+                    incomingPayloadBytes = source.revision.sizeBytes,
+                )
+                requirePreflightAllowed(preflight)
+                val (sourceDatabase, _) = decodeDatabaseWithFallback(
+                    source = source,
+                    credentialsResolution = sourceCredentials,
+                    sourceLabel = "merge-from",
+                    sourceName = sourceUri.lastPathSegment,
+                )
+            val registration = dao.getDatabaseById(databaseId)
+                ?: throw IllegalArgumentException("KeePass database not found: $databaseId")
+            openDatabaseStreamSource(registration).use { current ->
+                current.openStream().use { input -> recoveryStore.create(databaseId, input) }
+            }
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                requireUniqueNativeGroup(loaded.nativeSession.value, targetGroupUuid)
+                MutationPlan(
+                    updatedDatabase = KeePassNativeDatabaseMerge.mergeFrom(
+                        loaded.keePassDatabase,
+                        sourceDatabase,
+                        targetGroupUuid
+                    ),
+                    result = Unit
+                )
+            }
+            Result.success(openNativeBrowser(databaseId).getOrThrow())
+            }
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    private suspend fun applyNativeEntryChange(
+        databaseId: Long,
+        entryUuid: UUID,
+        expectedRevisionToken: String,
+        buildChangeSet: (Entry) -> KeePassChangeSet
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(
+                    expectedRevisionToken = expectedRevisionToken,
+                    actualRevisionToken = loaded.nativeSession.value.revisionToken,
+                    entryUuid = entryUuid
+                )
+                val current = requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid).entry
+                val changeSet = buildChangeSet(current)
+                MutationPlan(
+                    updatedDatabase = KeePassChangeSetApplier().apply(
+                        loaded.keePassDatabase,
+                        changeSet
+                    ).updatedDatabase,
+                    result = Unit,
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
+                    }
+                )
+            }
+            val browser = loadDatabase(databaseId).nativeBrowser.value
+            val identity = KeePassNativeEntryIdentity(databaseId, entryUuid)
+            val records = browser.entriesByIdentity[identity].orEmpty()
+            if (records.size != 1) {
+                throw IllegalStateException("KeePass entry identity is ambiguous after mutation: $entryUuid")
+            }
+            Result.success(records.single())
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    private fun assertNativeRevision(
+        expectedRevisionToken: String,
+        actualRevisionToken: String,
+        entryUuid: UUID? = null
+    ) {
+        if (expectedRevisionToken.isBlank() || expectedRevisionToken != actualRevisionToken) {
+            throw KeePassChangeConflictException(
+                changeId = "native-editor",
+                entryUuid = entryUuid?.toString(),
+                reason = "Database changed after the native editor was opened"
+            )
+        }
+    }
+
+    private fun requireUniqueNativeEntry(
+        session: KeePassNativeSession,
+        entryUuid: UUID
+    ): takagi.ru.monica.keepass.KeePassNativeEntryNode {
+        val identity = KeePassNativeEntryIdentity(session.databaseId, entryUuid)
+        val nodes = session.entriesByIdentity[identity].orEmpty()
+        if (nodes.isEmpty()) throw NoSuchElementException("KeePass entry not found: $entryUuid")
+        if (nodes.size != 1) throw IllegalStateException("KeePass entry UUID is duplicated: $entryUuid")
+        return nodes.single()
+    }
+
+    private fun requireUniqueNativeGroup(
+        session: KeePassNativeSession,
+        groupUuid: UUID
+    ): takagi.ru.monica.keepass.KeePassNativeGroupNode {
+        val identity = KeePassNativeGroupIdentity(session.databaseId, groupUuid)
+        val nodes = session.groupsByIdentity[identity].orEmpty()
+        if (nodes.isEmpty()) throw NoSuchElementException("KeePass group not found: $groupUuid")
+        if (nodes.size != 1) throw IllegalStateException("KeePass group UUID is duplicated: $groupUuid")
+        return nodes.single()
+    }
+
+    private suspend fun loadUniqueNativeGroupRecord(
+        databaseId: Long,
+        groupUuid: UUID
+    ): KeePassNativeGroupRecord {
+        val browser = loadDatabase(databaseId).nativeBrowser.value
+        val records = browser.groupsByIdentity[KeePassNativeGroupIdentity(databaseId, groupUuid)].orEmpty()
+        if (records.size != 1) {
+            throw IllegalStateException("KeePass group identity is ambiguous after mutation: $groupUuid")
+        }
+        return records.single()
+    }
+
+    private suspend fun loadUniqueNativeEntryRecord(
+        databaseId: Long,
+        entryUuid: UUID
+    ): KeePassNativeEntryRecord {
+        val browser = loadDatabase(databaseId).nativeBrowser.value
+        val records = browser.entriesByIdentity[KeePassNativeEntryIdentity(databaseId, entryUuid)].orEmpty()
+        if (records.size != 1) {
+            throw IllegalStateException("KeePass entry identity is ambiguous after mutation: $entryUuid")
+        }
+        return records.single()
+    }
+
+    internal suspend fun projectionRefreshDecision(
+        databaseId: Long,
+        kind: KeePassProjectionKind,
+        forceRefresh: Boolean = false
+    ): Result<KeePassProjectionRefreshDecision> = withContext(Dispatchers.IO) {
+        try {
+            val revisionToken = loadDatabase(databaseId).nativeSession.value.revisionToken
+            Result.success(
+                KeePassProjectionRefreshDecision(
+                    revisionToken = revisionToken,
+                    needsRefresh = forceRefresh || projectionIndexGate.needsRefresh(
+                        databaseId = databaseId,
+                        revisionToken = revisionToken,
+                        kind = kind
+                    )
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    internal fun markProjectionIndexed(
+        databaseId: Long,
+        revisionToken: String,
+        kinds: Set<KeePassProjectionKind>
+    ) {
+        projectionIndexGate.markIndexed(databaseId, revisionToken, kinds)
+    }
+
+    suspend fun copyNativeEntry(
+        sourceDatabaseId: Long,
+        sourceEntryUuid: String,
+        targetDatabaseId: Long,
+        targetGroupPath: String? = null,
+        targetEntryUuid: String? = null
+    ): Result<KeePassNativeEntryTransferResult> {
+        return transferNativeEntry(
+            sourceDatabaseId = sourceDatabaseId,
+            sourceEntryUuid = sourceEntryUuid,
+            targetDatabaseId = targetDatabaseId,
+            targetGroupPath = targetGroupPath,
+            targetEntryUuid = targetEntryUuid,
+            moveSource = false
+        )
+    }
+
+    suspend fun moveNativeEntry(
+        sourceDatabaseId: Long,
+        sourceEntryUuid: String,
+        targetDatabaseId: Long,
+        targetGroupPath: String? = null
+    ): Result<KeePassNativeEntryTransferResult> {
+        return transferNativeEntry(
+            sourceDatabaseId = sourceDatabaseId,
+            sourceEntryUuid = sourceEntryUuid,
+            targetDatabaseId = targetDatabaseId,
+            targetGroupPath = targetGroupPath,
+            targetEntryUuid = sourceEntryUuid,
+            moveSource = true
+        )
+    }
+
+    private suspend fun transferNativeEntry(
+        sourceDatabaseId: Long,
+        sourceEntryUuid: String,
+        targetDatabaseId: Long,
+        targetGroupPath: String?,
+        targetEntryUuid: String?,
+        moveSource: Boolean
+    ): Result<KeePassNativeEntryTransferResult> = withContext(Dispatchers.IO) {
+        val sourceUuid = parseUuid(sourceEntryUuid)
+            ?: return@withContext Result.failure(IllegalArgumentException("Invalid source entry uuid"))
+        val resolvedTargetUuid = if (moveSource) {
+            sourceUuid
+        } else {
+            targetEntryUuid?.takeIf { it.isNotBlank() }?.let { requested ->
+                parseUuid(requested)
+                    ?: return@withContext Result.failure(IllegalArgumentException("Invalid target entry uuid"))
+            } ?: UUID.randomUUID()
+        }
+
+        try {
+            val result = withDatabaseMutationLocks(listOf(sourceDatabaseId, targetDatabaseId)) {
+                val sourceLoaded = getCachedLoadedDatabase(sourceDatabaseId) ?: loadDatabase(sourceDatabaseId)
+                val targetLoaded = if (sourceDatabaseId == targetDatabaseId) {
+                    sourceLoaded
+                } else {
+                    getCachedLoadedDatabase(targetDatabaseId) ?: loadDatabase(targetDatabaseId)
+                }
+                val targetGroupUuid = resolveNativeTargetGroupUuid(
+                    database = targetLoaded.keePassDatabase,
+                    groupPath = targetGroupPath
+                )
+                val payload = KeePassLosslessTransfer.captureEntry(
+                    sourceDatabase = sourceLoaded.keePassDatabase,
+                    sourceEntryUuid = sourceUuid,
+                    targetEntryUuid = resolvedTargetUuid
+                )
+                val transferResult = KeePassNativeEntryTransferResult(
+                    sourceDatabaseId = sourceDatabaseId,
+                    sourceEntryUuid = sourceUuid.toString(),
+                    targetDatabaseId = targetDatabaseId,
+                    targetEntryUuid = resolvedTargetUuid.toString(),
+                    targetGroupUuid = targetGroupUuid.toString(),
+                    moved = moveSource
+                )
+
+                if (sourceDatabaseId == targetDatabaseId) {
+                    val updatedDatabase = if (moveSource) {
+                        KeePassLosslessTransfer.relocateEntry(
+                            database = sourceLoaded.keePassDatabase,
+                            sourceEntryUuid = sourceUuid,
+                            targetGroupUuid = targetGroupUuid
+                        )
+                    } else {
+                        KeePassLosslessTransfer.insertEntry(
+                            targetDatabase = targetLoaded.keePassDatabase,
+                            targetGroupUuid = targetGroupUuid,
+                            payload = payload
+                        )
+                    }
+                    if (updatedDatabase != sourceLoaded.keePassDatabase) {
+                        writeDatabase(
+                            database = sourceLoaded.database,
+                            credentials = sourceLoaded.credentials,
+                            keePassDatabase = updatedDatabase,
+                            sourceEtag = sourceLoaded.sourceEtag,
+                            sourceLastModified = sourceLoaded.sourceLastModified,
+                            expectedSourceRevision = sourceLoaded.sourceRevision
+                        )
+                        updateStoredEntryCount(sourceLoaded.database.id, updatedDatabase)
+                    }
+                    verifyNativeEntryPersisted(
+                        loaded = sourceLoaded,
+                        targetGroupUuid = targetGroupUuid,
+                        payload = payload
+                    )
+                    return@withDatabaseMutationLocks transferResult
+                }
+
+                KeePassTargetFirstTransfer.execute(
+                    persistTarget = {
+                        val updatedTarget = KeePassLosslessTransfer.insertEntry(
+                            targetDatabase = targetLoaded.keePassDatabase,
+                            targetGroupUuid = targetGroupUuid,
+                            payload = payload
+                        )
+                        writeDatabase(
+                            database = targetLoaded.database,
+                            credentials = targetLoaded.credentials,
+                            keePassDatabase = updatedTarget,
+                            sourceEtag = targetLoaded.sourceEtag,
+                            sourceLastModified = targetLoaded.sourceLastModified,
+                            expectedSourceRevision = targetLoaded.sourceRevision
+                        )
+                        updateStoredEntryCount(targetLoaded.database.id, updatedTarget)
+                        transferResult
+                    },
+                    verifyTarget = {
+                        verifyNativeEntryPersisted(
+                            loaded = targetLoaded,
+                            targetGroupUuid = targetGroupUuid,
+                            payload = payload
+                        )
+                        requireRemoteTargetSynchronized(targetLoaded.database)
+                    },
+                    removeSource = {
+                        if (moveSource) {
+                            val updatedSource = KeePassLosslessTransfer.removeEntry(
+                                sourceDatabase = sourceLoaded.keePassDatabase,
+                                sourceEntryUuid = sourceUuid
+                            )
+                            writeDatabase(
+                                database = sourceLoaded.database,
+                                credentials = sourceLoaded.credentials,
+                                keePassDatabase = updatedSource,
+                                sourceEtag = sourceLoaded.sourceEtag,
+                                sourceLastModified = sourceLoaded.sourceLastModified,
+                                expectedSourceRevision = sourceLoaded.sourceRevision
+                            )
+                            updateStoredEntryCount(sourceLoaded.database.id, updatedSource)
+                        }
+                    }
+                )
+            }
+            Result.success(result)
+        } catch (e: Exception) {
+            invalidateLoadedDatabaseCache(sourceDatabaseId)
+            invalidateLoadedDatabaseCache(targetDatabaseId)
+            Result.failure(normalizeError(e))
+        }
+    }
+
+    private fun resolveNativeTargetGroupUuid(
+        database: KeePassDatabase,
+        groupPath: String?
+    ): UUID {
+        val resolvedPath = groupPath?.trim()?.takeIf { it.isNotBlank() }
+            ?: return database.content.group.uuid
+        return findGroupUuidByPath(
+            group = database.content.group,
+            currentPathKey = null,
+            targetPathKey = resolvedPath
+        ) ?: throw IllegalArgumentException("KeePass target group not found: $resolvedPath")
+    }
+
+    private suspend fun verifyNativeEntryPersisted(
+        loaded: LoadedDatabase,
+        targetGroupUuid: UUID,
+        payload: KeePassNativeEntryTransferPayload
+    ) {
+        val persistedDatabase = openDatabaseStreamSource(loaded.database).use { source ->
+            decodeDatabase(
+                input = source.openStream(),
+                credentials = loaded.credentials,
+                header = source.header,
+                sourceName = loaded.database.resolvedActiveFilePath(),
+            )
+        }
+        val persistedContext = collectEntryContexts(persistedDatabase).first
+            .firstOrNull { it.entry.uuid == payload.entry.uuid }
+            ?: throw IOException("KeePass target entry verification failed: ${payload.entry.uuid}")
+        if (persistedContext.groupUuid != targetGroupUuid ||
+            !KeePassLosslessTransfer.entriesEquivalent(payload.entry, persistedContext.entry)
+        ) {
+            throw IOException("KeePass target entry content verification failed: ${payload.entry.uuid}")
+        }
+        payload.binaryPool.forEach { (hash, expected) ->
+            val actual = persistedDatabase.binaries[hash]
+                ?: throw IOException("KeePass target binary verification failed: $hash")
+            if (actual.memoryProtection != expected.memoryProtection ||
+                !actual.rawContent.contentEquals(expected.rawContent)
+            ) {
+                throw IOException("KeePass target binary content verification failed: $hash")
+            }
+        }
+        payload.customIcons.forEach { (uuid, expected) ->
+            val actual = persistedDatabase.content.meta.customIcons[uuid]
+                ?: throw IOException("KeePass target custom icon verification failed: $uuid")
+            if (!actual.data.contentEquals(expected.data) ||
+                actual.name != expected.name ||
+                actual.lastModified != expected.lastModified
+            ) {
+                throw IOException("KeePass target custom icon content verification failed: $uuid")
+            }
+        }
+    }
+
+    private suspend fun requireRemoteTargetSynchronized(database: LocalKeePassDatabase) {
+        if (!database.isRemoteSource()) return
+        val state = PasswordDatabase.getDatabase(context)
+            .keepassRemoteSyncStateDao()
+            .getState(database.id)
+            ?: throw IOException("KeePass remote target has no verified synchronization state")
+        if (state.hasLocalChanges ||
+            state.hasRemoteChanges ||
+            state.syncPhase != KeePassSyncPhase.IDLE ||
+            state.failureCode != null
+        ) {
+            throw IOException(
+                state.failureMessage
+                    ?: "KeePass remote target is pending synchronization; source entry was retained"
+            )
+        }
+    }
+
+    private suspend fun updateStoredEntryCount(databaseId: Long, database: KeePassDatabase) {
+        dao.updateEntryCount(databaseId, countEntries(database.content.group))
     }
 
     // ================================================================
@@ -1535,6 +3293,14 @@ class KeePassKdbxService(
             val targetUuid = parseUuid(entryUuid)
                 ?: return@withContext Result.failure(IllegalArgumentException("Invalid entry uuid"))
 
+            val loadedForPreflight = loadDatabase(databaseId)
+            requirePreflightAllowed(
+                KeePassWritePreflight.evaluateRuntime(
+                    currentDatabaseBytes = loadedForPreflight.sourceRevision.sizeBytes,
+                    incomingPayloadBytes = bytes.size.toLong()
+                )
+            )
+
             val info = mutateDatabase(databaseId) { loaded ->
                 val oldDb = loaded.keePassDatabase
                 val existingEntry = findEntryByUuid(oldDb.content.group, targetUuid)
@@ -1588,8 +3354,8 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
                     result = resultInfo,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet))
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
                     }
                 )
             }
@@ -1659,8 +3425,8 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = compacted,
                     result = true,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet))
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
                     }
                 )
             }
@@ -1673,6 +3439,16 @@ class KeePassKdbxService(
     /** 仅判断 kdbx 是否已解锁（有 cache 命中），不会触发解密。 */
     fun isDatabaseUnlocked(databaseId: Long): Boolean {
         return synchronized(loadedDatabaseCache) { loadedDatabaseCache.containsKey(databaseId) }
+    }
+
+    internal fun isDatabaseReadOnly(databaseId: Long): Boolean = accessPolicy.isReadOnly(databaseId)
+
+    internal fun setDatabaseReadOnly(databaseId: Long, readOnly: Boolean) {
+        accessPolicy.setReadOnly(databaseId, readOnly)
+    }
+
+    internal fun lockDatabase(databaseId: Long) {
+        invalidateProcessCache(databaseId)
     }
 
     private fun findEntryByUuid(group: Group, uuid: UUID): Entry? {
@@ -1748,13 +3524,11 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = deleteResult.database,
                     result = deleteResult.changedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, deleteResult.changeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, deleteResult.changeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
@@ -1786,13 +3560,11 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = moveResult.database,
                     result = moveResult.changedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, moveResult.changeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, moveResult.changeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
@@ -1826,13 +3598,11 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = restoreResult.database,
                     result = restoreResult.targetsByRoomId,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, restoreResult.changeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, restoreResult.changeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
@@ -1847,11 +3617,11 @@ class KeePassKdbxService(
         allowedTypes: Set<ItemType>? = null
     ): Result<List<KeePassSecureItemData>> = withContext(Dispatchers.IO) {
         try {
-            val (_, _, keePassDatabase) = loadDatabase(databaseId)
-            val (entries, hasRecycleBinMeta) = collectEntryContexts(keePassDatabase)
-            val resolutionContext = KeePassFieldReferenceResolver.buildContext(entries.map { it.entry })
+            val loaded = loadDatabase(databaseId)
+            val keePassDatabase = loaded.keePassDatabase
+            val bundle = loaded.projectionBundle.value
             val data = mutableListOf<KeePassSecureItemData>()
-            entries.forEach { context ->
+            bundle.entries.forEach { context ->
                 entryToSecureItemData(
                     entry = context.entry,
                     keePassDatabase = keePassDatabase,
@@ -1859,9 +3629,9 @@ class KeePassKdbxService(
                     groupPath = context.groupPath,
                     groupUuid = context.groupUuid,
                     isInRecycleBinByMeta = context.isInRecycleBinByMeta,
-                    hasRecycleBinMeta = hasRecycleBinMeta,
+                    hasRecycleBinMeta = bundle.hasRecycleBinMeta,
                     allowedTypes = allowedTypes,
-                    resolutionContext = resolutionContext
+                    resolutionContext = bundle.resolutionContext
                 )?.let(data::add)
             }
             Result.success(data)
@@ -1872,16 +3642,14 @@ class KeePassKdbxService(
 
     suspend fun readPasskeyEntries(databaseId: Long): Result<List<PasskeyEntry>> = withContext(Dispatchers.IO) {
         try {
-            val (_, _, keePassDatabase) = loadDatabase(databaseId)
-            val (entries, _) = collectEntryContexts(keePassDatabase)
-            val resolutionContext = KeePassFieldReferenceResolver.buildContext(entries.map { it.entry })
-            val data = entries.mapNotNull { context ->
+            val bundle = loadDatabase(databaseId).projectionBundle.value
+            val data = bundle.entries.mapNotNull { context ->
                 entryToPasskey(
                     entry = context.entry,
                     databaseId = databaseId,
                     groupPath = context.groupPath,
                     groupUuid = context.groupUuid,
-                    resolutionContext = resolutionContext
+                    resolutionContext = bundle.resolutionContext
                 )
             }
             Result.success(data)
@@ -1950,8 +3718,8 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
                     result = addedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets, workingRevision)
                     }
                 )
             }
@@ -2000,8 +3768,8 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
                     result = addedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets, workingRevision)
                     }
                 )
             }
@@ -2059,8 +3827,8 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
                     result = Unit,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets, workingRevision)
                     }
                 )
             }
@@ -2103,8 +3871,8 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = updatedDatabase,
                     result = Unit,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, pendingChangeSets, workingRevision)
                     }
                 )
             }
@@ -2278,13 +4046,11 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = deleteResult.database,
                     result = deleteResult.changedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, deleteResult.changeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, deleteResult.changeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
@@ -2312,13 +4078,11 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = deleteResult.database,
                     result = deleteResult.changedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, deleteResult.changeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, deleteResult.changeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
@@ -2350,13 +4114,11 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = moveResult.database,
                     result = moveResult.changedCount,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, moveResult.changeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, moveResult.changeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
@@ -2390,13 +4152,11 @@ class KeePassKdbxService(
                 MutationPlan(
                     updatedDatabase = restoreResult.database,
                     result = restoreResult.targetsByRoomId,
-                    beforeRemoteUpload = { database, _ ->
-                        enqueuePendingChangeSetsIfRemote(database, restoreResult.changeSets)
+                    beforeRemoteUpload = { database, workingRevision ->
+                        enqueuePendingChangeSetsIfRemote(database, restoreResult.changeSets, workingRevision)
                     },
                     afterWrite = { database, writtenDatabase ->
-                        val allEntries = mutableListOf<Entry>()
-                        collectEntries(writtenDatabase.content.group, allEntries)
-                        dao.updateEntryCount(database.id, allEntries.size)
+                        dao.updateEntryCount(database.id, countEntries(writtenDatabase.content.group))
                     }
                 )
             }
@@ -2415,7 +4175,7 @@ class KeePassKdbxService(
             uuid = parseUuid(entry.keepassEntryUuid) ?: UUID.randomUUID(),
             fields = buildEntryFields(entry, plainPassword, customFields)
         )
-        return applyPasswordEntryPresentation(base, entry)
+        return nativeMutation.initializeEntry(applyPasswordEntryPresentation(base, entry))
     }
 
     private fun buildUpdatedEntry(
@@ -2660,9 +4420,11 @@ class KeePassKdbxService(
     }
 
     private fun buildSecureItemEntry(item: SecureItem): Entry {
-        return Entry(
-            uuid = parseUuid(item.keepassEntryUuid) ?: UUID.randomUUID(),
-            fields = buildSecureItemFields(item)
+        return nativeMutation.initializeEntry(
+            Entry(
+                uuid = parseUuid(item.keepassEntryUuid) ?: UUID.randomUUID(),
+                fields = buildSecureItemFields(item)
+            )
         )
     }
 
@@ -2940,18 +4702,10 @@ class KeePassKdbxService(
     ): KeePassEntryUpdateResult {
         val resolutionContext = buildResolutionContext(keePassDatabase)
         val (entryContexts, _) = collectEntryContexts(keePassDatabase)
-        var firstMatchedContext: EntryTraversalContext? = null
-        val matcher: (Entry) -> Boolean = { existing ->
-            val matches = matchesPasswordEntry(existing, entry, resolutionContext)
-            if (matches && firstMatchedContext == null) {
-                firstMatchedContext = entryContexts.firstOrNull { it.entry.uuid == existing.uuid }
-            }
-            matches
+        val matchedContext = entryContexts.firstOrNull { context ->
+            matchesPasswordEntry(context.entry, entry, resolutionContext)
         }
-        val rootGroup = keePassDatabase.content.group
-        val removeResult = removeEntryInGroup(rootGroup, matcher)
-        val removedCount = removeResult.second
-        if (removedCount <= 0) {
+        if (matchedContext == null) {
             return KeePassEntryUpdateResult(
                 database = keePassDatabase,
                 changed = false,
@@ -2959,32 +4713,30 @@ class KeePassKdbxService(
             )
         }
 
-        val matchedContext = firstMatchedContext
         val fieldPatch = buildPasswordEntryFieldPatch(entry, plainPassword, customFields)
-        val newEntry = matchedContext?.entry?.let { existing ->
-            applyPasswordEntryPresentation(fieldPatch.applyTo(existing), entry)
-        } ?: buildEntry(entry, plainPassword, customFields)
-        val updatedRoot = addEntryToGroupPath(
-            rootGroup = removeResult.first,
-            groupPath = entry.keepassGroupPath,
-            entry = newEntry
+        val resolvedDatabaseId = requireNotNull(databaseId) {
+            "Foreground KeePass password update requires a database id"
+        }
+        val changeSets = buildFieldUpdateChangeSets(
+            database = keePassDatabase,
+            databaseId = resolvedDatabaseId,
+            target = KeePassChangeTarget.PASSWORD,
+            matchedContext = matchedContext,
+            targetGroupPath = entry.keepassGroupPath,
+            fieldPatch = fieldPatch.toChangePatch(
+                managedScope = KeePassManagedFieldScope.PASSWORD,
+                baseEntry = matchedContext.entry
+            ),
+            includeMoveChange = true
         )
-        val updatedDatabase = keePassDatabase.modifyParentGroup { updatedRoot }
+        val updatedDatabase = KeePassChangeSetApplier().applyAll(
+            database = keePassDatabase,
+            changes = changeSets
+        ).updatedDatabase
         return KeePassEntryUpdateResult(
             database = updatedDatabase,
             changed = true,
-            changeSets = buildFieldUpdateChangeSets(
-                database = keePassDatabase,
-                databaseId = databaseId,
-                target = KeePassChangeTarget.PASSWORD,
-                matchedContext = matchedContext,
-                targetGroupPath = entry.keepassGroupPath,
-                fieldPatch = fieldPatch.toChangePatch(
-                    managedScope = KeePassManagedFieldScope.PASSWORD,
-                    baseEntry = matchedContext?.entry
-                ),
-                includeMoveChange = true
-            )
+            changeSets = changeSets
         )
     }
 
@@ -2999,68 +4751,51 @@ class KeePassKdbxService(
     ): KeePassEntryUpdateResult {
         val resolutionContext = buildResolutionContext(keePassDatabase)
         val (entryContexts, _) = collectEntryContexts(keePassDatabase)
-        var matchedContext: EntryTraversalContext? = null
+        val matchedContext = entryContexts.firstOrNull { context ->
+            matchesSecureItemEntry(context.entry, item, resolutionContext)
+        } ?: return KeePassEntryUpdateResult(
+            database = keePassDatabase,
+            changed = false,
+            changeSets = emptyList()
+        )
+        val resolvedDatabaseId = requireNotNull(databaseId) {
+            "Foreground KeePass secure-item update requires a database id"
+        }
         val fieldPatch = buildSecureItemEntryFieldPatch(item)
-        val matcher: (Entry) -> Boolean = { existing ->
-            val matches = matchesSecureItemEntry(existing, item, resolutionContext)
-            if (matches && matchedContext == null) {
-                matchedContext = entryContexts.firstOrNull { it.entry.uuid == existing.uuid }
-            }
-            matches
-        }
-        val updater: (Entry) -> Entry = { existing ->
-            fieldPatch.applyTo(existing)
-        }
-        val result = updateEntryInGroup(keePassDatabase.content.group, matcher, updater)
-        val fieldUpdatedDatabase = if (result.second) {
-            keePassDatabase.modifyParentGroup { result.first }
-        } else {
-            keePassDatabase
-        }
-        val matchedEntry = matchedContext?.entry
-        val photoSync = if (result.second && matchedEntry != null) {
-            KeePassSecureItemPhotoAttachments.synchronize(
-                database = fieldUpdatedDatabase,
-                entryUuid = matchedEntry.uuid,
-                itemType = item.itemType,
-                updates = photoUpdates
-            )
-        } else {
-            KeePassSecureItemPhotoAttachments.SyncResult(
-                database = fieldUpdatedDatabase,
-                changes = emptyList()
-            )
-        }
-        val fieldChangeSets = if (result.second) {
-            buildFieldUpdateChangeSets(
-                database = keePassDatabase,
-                databaseId = databaseId,
-                target = KeePassChangeTarget.SECURE_ITEM,
-                matchedContext = matchedContext,
-                targetGroupPath = item.keepassGroupPath,
-                fieldPatch = fieldPatch.toChangePatch(
-                    managedScope = KeePassManagedFieldScope.SECURE_ITEM,
-                    baseEntry = matchedContext?.entry
-                ),
-                includeMoveChange = false
-            )
-        } else {
-            emptyList()
-        }
-        val photoChangeSets = if (databaseId != null && matchedEntry != null) {
-            buildSecureItemPhotoChangeSets(
-                databaseId = databaseId,
-                entryUuid = matchedEntry.uuid,
-                baseFingerprint = buildConflictEntrySignature(matchedEntry),
-                changes = photoSync.changes
-            )
-        } else {
-            emptyList()
-        }
+        val matchedEntry = matchedContext.entry
+        val photoPreview = KeePassSecureItemPhotoAttachments.synchronize(
+            database = keePassDatabase,
+            entryUuid = matchedEntry.uuid,
+            itemType = item.itemType,
+            updates = photoUpdates
+        )
+        val fieldChangeSets = buildFieldUpdateChangeSets(
+            database = keePassDatabase,
+            databaseId = resolvedDatabaseId,
+            target = KeePassChangeTarget.SECURE_ITEM,
+            matchedContext = matchedContext,
+            targetGroupPath = item.keepassGroupPath,
+            fieldPatch = fieldPatch.toChangePatch(
+                managedScope = KeePassManagedFieldScope.SECURE_ITEM,
+                baseEntry = matchedContext.entry
+            ),
+            includeMoveChange = true
+        )
+        val photoChangeSets = buildSecureItemPhotoChangeSets(
+            databaseId = resolvedDatabaseId,
+            entryUuid = matchedEntry.uuid,
+            baseFingerprint = buildConflictEntrySignature(matchedEntry),
+            changes = photoPreview.changes
+        )
+        val changeSets = fieldChangeSets + photoChangeSets
+        val updatedDatabase = KeePassChangeSetApplier().applyAll(
+            database = keePassDatabase,
+            changes = changeSets
+        ).updatedDatabase
         return KeePassEntryUpdateResult(
-            database = photoSync.database,
-            changed = result.second,
-            changeSets = fieldChangeSets + photoChangeSets
+            database = updatedDatabase,
+            changed = true,
+            changeSets = changeSets
         )
     }
 
@@ -3071,69 +4806,42 @@ class KeePassKdbxService(
     ): KeePassEntryUpdateResult {
         val resolutionContext = buildResolutionContext(keePassDatabase)
         val (entryContexts, _) = collectEntryContexts(keePassDatabase)
-        var matchedContext: EntryTraversalContext? = null
-        val matcher: (Entry) -> Boolean = { existing ->
-            val matches = matchesPasskeyEntry(existing, passkey, resolutionContext)
-            if (matches && matchedContext == null) {
-                matchedContext = entryContexts.firstOrNull { it.entry.uuid == existing.uuid }
-            }
-            matches
+        val matchedContext = entryContexts.firstOrNull { context ->
+            matchesPasskeyEntry(context.entry, passkey, resolutionContext)
         }
-        val rootGroup = keePassDatabase.content.group
-        val removeResult = removeEntryInGroup(rootGroup, matcher)
-        if (removeResult.second <= 0) {
+        if (matchedContext == null) {
             return KeePassEntryUpdateResult(
                 database = keePassDatabase,
                 changed = false,
                 changeSets = emptyList()
             )
         }
-        val existingEntry = matchedContext?.entry
-            ?: throw IllegalStateException("Matched KeePass passkey entry context missing")
+        val existingEntry = matchedContext.entry
         val fieldPatch = buildPasskeyEntryFieldPatch(passkey, existingEntry)
-        val updatedEntry = fieldPatch.applyTo(existingEntry)
-        val updatedRoot = addEntryToGroupPath(
-            rootGroup = removeResult.first,
-            groupPath = passkey.keepassGroupPath,
-            entry = updatedEntry
+        val resolvedDatabaseId = requireNotNull(databaseId) {
+            "Foreground KeePass passkey update requires a database id"
+        }
+        val changeSets = buildFieldUpdateChangeSets(
+            database = keePassDatabase,
+            databaseId = resolvedDatabaseId,
+            target = KeePassChangeTarget.PASSKEY,
+            matchedContext = matchedContext,
+            targetGroupPath = passkey.keepassGroupPath,
+            fieldPatch = fieldPatch.toChangePatch(
+                managedScope = KeePassManagedFieldScope.PASSKEY,
+                baseEntry = matchedContext.entry
+            ),
+            includeMoveChange = true
         )
-        val updatedDatabase = keePassDatabase.modifyParentGroup { updatedRoot }
+        val updatedDatabase = KeePassChangeSetApplier().applyAll(
+            database = keePassDatabase,
+            changes = changeSets
+        ).updatedDatabase
         return KeePassEntryUpdateResult(
             database = updatedDatabase,
             changed = true,
-            changeSets = buildFieldUpdateChangeSets(
-                database = keePassDatabase,
-                databaseId = databaseId,
-                target = KeePassChangeTarget.PASSKEY,
-                matchedContext = matchedContext,
-                targetGroupPath = passkey.keepassGroupPath,
-                fieldPatch = fieldPatch.toChangePatch(
-                    managedScope = KeePassManagedFieldScope.PASSKEY,
-                    baseEntry = matchedContext?.entry
-                ),
-                includeMoveChange = true
-            )
+            changeSets = changeSets
         )
-    }
-
-    private fun upsertPasskey(
-        keePassDatabase: KeePassDatabase,
-        passkey: PasskeyEntry
-    ): KeePassDatabase {
-        val updateResult = updatePasskeyInternal(
-            keePassDatabase = keePassDatabase,
-            databaseId = null,
-            passkey = passkey
-        )
-        if (updateResult.changed) return updateResult.database
-
-        val newEntry = buildPasskeyEntry(passkey)
-        val updatedRoot = addEntryToGroupPath(
-            rootGroup = keePassDatabase.content.group,
-            groupPath = passkey.keepassGroupPath,
-            entry = newEntry
-        )
-        return keePassDatabase.modifyParentGroup { updatedRoot }
     }
 
     private fun buildFieldUpdateChangeSets(
@@ -3212,6 +4920,37 @@ class KeePassKdbxService(
                 targetPathKey = resolvedTargetPath
             )
         } ?: return null
+        val referencedBinaryHashes = linkedSetOf<String>()
+        val referencedCustomIconUuids = linkedSetOf<UUID>()
+        val nativeEntry = entry.toEntryTreeSnapshot(
+            referencedBinaryHashes = referencedBinaryHashes,
+            referencedCustomIconUuids = referencedCustomIconUuids,
+        )
+        val binaryPool = referencedBinaryHashes.map { hashHex ->
+            val hash = hashHex.toByteStringHash()
+            val binary = database.binaries[hash]
+                ?: throw IllegalStateException("KeePass binary pool is missing create-entry attachment: $hashHex")
+            KeePassBinaryPoolItemPatch(
+                hash = hashHex,
+                protected = binary.memoryProtection,
+                compressed = binary is BinaryData.Compressed,
+                contentBase64 = Base64.encodeToString(
+                    binary.rawContent,
+                    Base64.NO_WRAP,
+                ),
+                rawStorageContent = true,
+            )
+        }
+        val customIconPool = referencedCustomIconUuids.map { uuid ->
+            val icon = database.content.meta.customIcons[uuid]
+                ?: throw IllegalStateException("KeePass custom icon pool is missing create-entry icon: $uuid")
+            KeePassCustomIconPoolItemPatch(
+                uuid = uuid.toString(),
+                dataBase64 = Base64.encodeToString(icon.data, Base64.NO_WRAP),
+                name = icon.name,
+                lastModifiedEpochMillis = icon.lastModified?.toEpochMilli(),
+            )
+        }
         return KeePassChangeSet(
             databaseId = databaseId,
             target = target,
@@ -3228,8 +4967,17 @@ class KeePassKdbxService(
                         protected = value is EntryValue.Encrypted
                     )
                 },
-                iconName = entry.icon?.name
-            )
+                iconName = entry.icon?.name,
+                nativeEntry = nativeEntry,
+                binaryPool = binaryPool,
+                customIconPool = customIconPool,
+            ),
+            databaseMetaPatch = database.content.meta.entryTemplatesGroup?.let { uuid ->
+                KeePassDatabaseMetaPatch(
+                    entryTemplatesGroupUuid = uuid.toString(),
+                    entryTemplatesGroupChangedEpochMillis = database.content.meta.entryTemplatesGroupChanged?.toEpochMilli(),
+                )
+            },
         )
     }
 
@@ -3383,15 +5131,20 @@ class KeePassKdbxService(
             )
         }
 
-        val recycleBinUuid = if (operation == KeePassChangeOperation.MOVE_TO_RECYCLE_BIN) {
-            resolveRecycleBinUuid(loaded.keePassDatabase.content.meta)
-                ?: throw IllegalStateException("KeePass recycle bin unavailable")
+        val preparedDatabase = if (operation == KeePassChangeOperation.MOVE_TO_RECYCLE_BIN) {
+            KeePassRecycleBinPolicy().ensure(loaded.keePassDatabase).database
         } else {
-            resolveRecycleBinUuid(loaded.keePassDatabase.content.meta)
+            loaded.keePassDatabase
+        }
+        val recycleBinUuid = if (operation == KeePassChangeOperation.MOVE_TO_RECYCLE_BIN) {
+            resolveRecycleBinUuid(preparedDatabase.content.meta)
+                ?: throw IllegalStateException("KeePass recycle bin unavailable after repair")
+        } else {
+            resolveRecycleBinUuid(preparedDatabase.content.meta)
         }
         val recycleBinPath = recycleBinUuid?.let {
             findGroupPathByUuid(
-                group = loaded.keePassDatabase.content.group,
+                group = preparedDatabase.content.group,
                 currentPathKey = null,
                 targetUuid = it
             )
@@ -3400,10 +5153,10 @@ class KeePassKdbxService(
             throw IllegalStateException("KeePass recycle bin path unavailable")
         }
 
-        val (entryContexts, hasRecycleBinMeta) = collectEntryContexts(loaded.keePassDatabase)
+        val (entryContexts, hasRecycleBinMeta) = collectEntryContexts(preparedDatabase)
         val resolutionContext = KeePassFieldReferenceResolver.buildContext(entryContexts.map { it.entry })
         val applier = KeePassChangeSetApplier()
-        var currentDatabase = loaded.keePassDatabase
+        var currentDatabase = preparedDatabase
         var changedCount = 0
         val appliedChangeSets = mutableListOf<KeePassChangeSet>()
         val usedEntryUuids = mutableSetOf<UUID>()
@@ -3616,7 +5369,7 @@ class KeePassKdbxService(
         val childGroup = if (childIndex >= 0) {
             group.groups[childIndex]
         } else {
-            Group(uuid = UUID.randomUUID(), name = childName)
+            nativeMutation.initializeGroup(Group(uuid = UUID.randomUUID(), name = childName))
         }
 
         val updatedChild = addEntryToGroupPathSegments(
@@ -4004,7 +5757,7 @@ class KeePassKdbxService(
         databaseName: String,
         entries: List<EntryTraversalContext>,
         hasRecycleBinMeta: Boolean,
-        resolutionContext: KeePassEntryResolutionContext
+        resolutionContext: KeePassEntryResolutionContext?
     ): List<KeePassEntryData> {
         val skipCounts = mutableMapOf<KeePassPasswordSkipReason, Int>()
         var passkeyFieldCount = 0
@@ -4588,15 +6341,29 @@ class KeePassKdbxService(
         )
     }
 
-    private fun collectEntries(group: Group, entries: MutableList<Entry>) {
-        entries.addAll(group.entries)
-        group.groups.forEach { collectEntries(it, entries) }
+    private fun buildResolutionContext(
+        keePassDatabase: KeePassDatabase
+    ): KeePassEntryResolutionContext? {
+        val entries = { entrySequence(keePassDatabase.content.group) }
+        if (!entries().any(::containsReferenceToken)) return null
+        return KeePassFieldReferenceResolver.buildContext(entries().asIterable())
     }
 
-    private fun buildResolutionContext(keePassDatabase: KeePassDatabase): KeePassEntryResolutionContext {
-        val entries = mutableListOf<Entry>()
-        collectEntries(keePassDatabase.content.group, entries)
-        return KeePassFieldReferenceResolver.buildContext(entries)
+    private fun entrySequence(group: Group): Sequence<Entry> = sequence {
+        val pending = ArrayDeque<Group>()
+        pending.addLast(group)
+        while (pending.isNotEmpty()) {
+            val current = pending.removeLast()
+            yieldAll(current.entries)
+            current.groups.asReversed().forEach(pending::addLast)
+        }
+    }
+
+    private fun containsReferenceToken(entry: Entry): Boolean {
+        return entry.fields.values.any { value ->
+            runCatching { value.content.contains("{REF:", ignoreCase = true) }
+                .getOrDefault(false)
+        }
     }
 
     private fun buildGroupTraversalContextIndex(
@@ -4869,9 +6636,11 @@ class KeePassKdbxService(
                 )
             }
 
-            val newGroup = Group(
-                uuid = UUID.randomUUID(),
-                name = newGroupName
+            val newGroup = nativeMutation.initializeGroup(
+                Group(
+                    uuid = UUID.randomUUID(),
+                    name = newGroupName
+                )
             )
             val newPath = buildKeePassPathKey(currentPathKey, newGroupName)
             return group.copy(groups = group.groups + newGroup) to KeePassGroupInfo(
@@ -5078,7 +6847,11 @@ class KeePassKdbxService(
         targetParentGroupUuid: UUID?
     ): KeePassGroupTreeChangePatch {
         val referencedBinaryHashes = linkedSetOf<String>()
-        val snapshot = root.toGroupTreeSnapshot(referencedBinaryHashes)
+        val referencedCustomIconUuids = linkedSetOf<UUID>()
+        val snapshot = root.toGroupTreeSnapshot(
+            referencedBinaryHashes = referencedBinaryHashes,
+            referencedCustomIconUuids = referencedCustomIconUuids
+        )
         val binaryPool = referencedBinaryHashes.map { hashHex ->
             val hash = hashHex.toByteStringHash()
             val binaryData = database.binaries[hash]
@@ -5086,22 +6859,38 @@ class KeePassKdbxService(
             KeePassBinaryPoolItemPatch(
                 hash = hashHex,
                 protected = binaryData.memoryProtection,
-                compressed = true,
+                compressed = binaryData is BinaryData.Compressed,
                 contentBase64 = Base64.encodeToString(
-                    binaryData.inputStream().use { it.readBytes() },
+                    binaryData.rawContent,
                     Base64.NO_WRAP
-                )
+                ),
+                rawStorageContent = true,
+            )
+        }
+        val customIconPool = referencedCustomIconUuids.map { uuid ->
+            val customIcon = database.content.meta.customIcons[uuid]
+                ?: throw IllegalStateException("KeePass custom icon pool is missing group tree icon: $uuid")
+            KeePassCustomIconPoolItemPatch(
+                uuid = uuid.toString(),
+                dataBase64 = Base64.encodeToString(customIcon.data, Base64.NO_WRAP),
+                name = customIcon.name,
+                lastModifiedEpochMillis = customIcon.lastModified?.toEpochMilli()
             )
         }
         return KeePassGroupTreeChangePatch(
             root = snapshot,
             binaryPool = binaryPool,
+            customIconPool = customIconPool,
             sourceRootGroupUuid = sourceRootGroupUuid?.toString(),
             targetParentGroupUuid = targetParentGroupUuid?.toString()
         )
     }
 
-    private fun Group.toGroupTreeSnapshot(referencedBinaryHashes: MutableSet<String>): KeePassGroupTreeSnapshot {
+    private fun Group.toGroupTreeSnapshot(
+        referencedBinaryHashes: MutableSet<String>,
+        referencedCustomIconUuids: MutableSet<UUID>
+    ): KeePassGroupTreeSnapshot {
+        customIconUuid?.let(referencedCustomIconUuids::add)
         return KeePassGroupTreeSnapshot(
             uuid = uuid.toString(),
             name = name,
@@ -5117,12 +6906,20 @@ class KeePassKdbxService(
             tags = tags,
             times = times?.toKeePassTimesPatch(),
             customData = customData.toKeePassCustomDataPatchList(),
-            entries = entries.map { it.toEntryTreeSnapshot(referencedBinaryHashes) },
-            groups = groups.map { it.toGroupTreeSnapshot(referencedBinaryHashes) }
+            entries = entries.map {
+                it.toEntryTreeSnapshot(referencedBinaryHashes, referencedCustomIconUuids)
+            },
+            groups = groups.map {
+                it.toGroupTreeSnapshot(referencedBinaryHashes, referencedCustomIconUuids)
+            }
         )
     }
 
-    private fun Entry.toEntryTreeSnapshot(referencedBinaryHashes: MutableSet<String>): KeePassEntryTreeSnapshot {
+    private fun Entry.toEntryTreeSnapshot(
+        referencedBinaryHashes: MutableSet<String>,
+        referencedCustomIconUuids: MutableSet<UUID>
+    ): KeePassEntryTreeSnapshot {
+        customIconUuid?.let(referencedCustomIconUuids::add)
         return KeePassEntryTreeSnapshot(
             uuid = uuid.toString(),
             fields = fields.map { (name, value) ->
@@ -5140,7 +6937,9 @@ class KeePassKdbxService(
                     hash = hashHex
                 )
             },
-            history = history.map { it.toEntryTreeSnapshot(referencedBinaryHashes) },
+            history = history.map {
+                it.toEntryTreeSnapshot(referencedBinaryHashes, referencedCustomIconUuids)
+            },
             iconName = icon.name,
             customIconUuid = customIconUuid?.toString(),
             foregroundColor = foregroundColor,
@@ -5227,13 +7026,14 @@ class KeePassKdbxService(
                     keePassDatabase = plan.updatedDatabase,
                     sourceEtag = loaded.sourceEtag,
                     sourceLastModified = loaded.sourceLastModified,
+                    expectedSourceRevision = loaded.sourceRevision,
                     beforeRemoteUpload = plan.beforeRemoteUpload
                 )
                 plan.afterWrite?.invoke(loaded.database, plan.updatedDatabase)
                 plan.result
             } catch (e: Exception) {
                 invalidateLoadedDatabaseCache(databaseId)
-                throw e
+                throw logMutationFailure("mutateDatabase", databaseId, e)
             }
         }
     }
@@ -5249,23 +7049,38 @@ class KeePassKdbxService(
             getCachedLoadedDatabase(databaseId)?.let { return@withLock it }
             val database = dao.getDatabaseById(databaseId) ?: throw Exception("数据库不存在")
             val credentials = buildCredentials(database)
-            val snapshot = readDatabaseSnapshot(database)
-            val (keePassDatabase, resolvedCredentials) = decodeDatabaseWithFallback(
-                bytes = snapshot.bytes,
-                credentialsResolution = credentials,
-                sourceLabel = "databaseId=$databaseId",
-                sourceName = database.resolvedActiveFilePath()
+            val source = openDatabaseStreamSource(database)
+            try {
+                val (keePassDatabase, resolvedCredentials) = decodeDatabaseWithFallback(
+                    source = source,
+                    credentialsResolution = credentials,
+                    sourceLabel = "databaseId=$databaseId",
+                    sourceName = database.resolvedActiveFilePath()
+                )
+            val nativeSession = nativeSessionCache.deferred(
+                databaseId = database.id,
+                sourceRevision = source.revision,
+                database = keePassDatabase
             )
             val loaded = LoadedDatabase(
                 database = database,
                 credentials = resolvedCredentials,
                 keePassDatabase = keePassDatabase,
-                sourceEtag = snapshot.etag,
-                sourceLastModified = snapshot.lastModified,
-                sourceSignature = snapshot.signature
+                nativeSession = nativeSession,
+                nativeBrowser = lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+                    KeePassNativeBrowserBuilder.build(nativeSession.value)
+                },
+                projectionBundle = nativeProjectionBundleCache.deferred(nativeSession),
+                sourceEtag = source.etag,
+                sourceLastModified = source.lastModified,
+                sourceSignature = currentSourceSignature(database),
+                sourceRevision = source.revision
             )
-            cacheLoadedDatabase(loaded)
-            loaded
+                cacheLoadedDatabase(loaded)
+                loaded
+            } finally {
+                source.close()
+            }
         }
     }
 
@@ -5357,6 +7172,54 @@ class KeePassKdbxService(
         ))
     }
 
+    private suspend fun decodeDatabaseWithFallback(
+        source: DatabaseStreamSource,
+        credentialsResolution: CredentialsResolution,
+        sourceLabel: String,
+        sourceName: String? = null,
+    ): Pair<KeePassDatabase, Credentials> {
+        val candidates = credentialsResolution.candidates
+        if (candidates.isEmpty()) throw IllegalStateException("无可用凭据")
+        var lastError: Throwable? = null
+        val attemptedLabels = mutableListOf<String>()
+        candidates.forEachIndexed { index, candidate ->
+            val isLast = index == candidates.lastIndex
+            attemptedLabels += candidate.label
+            try {
+                val database = decodeDatabase(
+                    input = source.openStream(),
+                    credentials = candidate.credentials,
+                    header = source.header,
+                    sourceName = sourceName,
+                    logFailure = isLast,
+                )
+                if (index > 0) {
+                    Log.w(TAG, "KDBX stream decoded using credential fallback ($sourceLabel, candidate=${candidate.label})")
+                }
+                return database to candidate.credentials
+            } catch (error: Throwable) {
+                val mapped = normalizeError(error)
+                lastError = mapped
+                val invalid = mapped is KeePassOperationException &&
+                    mapped.code == KeePassErrorCode.INVALID_CREDENTIAL
+                if (!invalid || isLast) throw mapped
+            }
+        }
+        if (lastError is KeePassOperationException &&
+            (lastError as KeePassOperationException).code == KeePassErrorCode.INVALID_CREDENTIAL
+        ) {
+            throw KeePassOperationException(
+                code = KeePassErrorCode.INVALID_CREDENTIAL,
+                message = KeePassCredentialSupport.buildInvalidCredentialMessage(attemptedLabels),
+                cause = lastError,
+            )
+        }
+        throw (lastError ?: KeePassOperationException(
+            code = KeePassErrorCode.IO_READ_WRITE_FAILED,
+            message = "KDBX 解码失败",
+        ))
+    }
+
     private fun databaseHeaderSummary(bytes: ByteArray): String {
         val headerLength = bytes.size.coerceAtMost(16)
         val headerHex = buildString {
@@ -5375,18 +7238,36 @@ class KeePassKdbxService(
     ): CredentialsResolution {
         val encryptedDbPassword = database.encryptedPassword
         val kdbxPassword = passwordOverride ?: (encryptedDbPassword?.let { securityManager.decryptData(it) } ?: "")
-        val keyFileBytes = keyFileUriOverride?.let { uri ->
-            readKeyFileBytes(uri)
-        } ?: runCatching { keyFileStore.read(database) }.getOrElse { error ->
-            throw KeePassOperationException(
-                code = KeePassErrorCode.KEY_FILE_UNAVAILABLE,
-                message = context.getString(
-                    takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
-                ),
-                cause = error,
-            )
+        val pending = if (passwordOverride == null && keyFileUriOverride == null) {
+            credentialTransitionStore.read(database.id)
+        } else {
+            null
         }
-        return resolveCredentials(kdbxPassword, keyFileBytes)
+        val currentCandidates = runCatching {
+            val keyFileBytes = keyFileUriOverride?.let(::readKeyFileBytes) ?: keyFileStore.read(database)
+            resolveCredentials(kdbxPassword, keyFileBytes).candidates
+        }.getOrElse { error ->
+            if (pending == null) {
+                throw KeePassOperationException(
+                    code = KeePassErrorCode.KEY_FILE_UNAVAILABLE,
+                    message = context.getString(
+                        takagi.ru.monica.R.string.local_keepass_key_file_unavailable_error
+                    ),
+                    cause = error,
+                )
+            }
+            Log.w(TAG, "Registered KeePass key file is unavailable; trying pending credential transition", error)
+            emptyList()
+        }
+        val pendingCandidates = pending
+            ?.let { credentials ->
+                KeePassCredentialSupport.buildCredentialCandidates(
+                    password = credentials.password,
+                    keyFileBytes = credentials.keyFileBytes
+                ).map { candidate -> candidate.copy(label = "pending/${candidate.label}") }
+            }
+            .orEmpty()
+        return CredentialsResolution(candidates = currentCandidates + pendingCandidates)
     }
 
     private fun buildCredentialsFromRaw(password: String, keyFileUri: Uri? = null): CredentialsResolution {
@@ -5429,12 +7310,182 @@ class KeePassKdbxService(
         return context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
     }
 
+    private fun openExternalInputStream(uri: Uri): InputStream? {
+        val descriptor = runCatching {
+            context.contentResolver.openFileDescriptor(uri, "r")?.let { fd ->
+                ParcelFileDescriptor.AutoCloseInputStream(fd)
+            }
+        }.getOrNull()
+        return descriptor ?: context.contentResolver.openInputStream(uri)
+    }
+
+    private fun openDatabaseStreamSource(database: LocalKeePassDatabase): DatabaseStreamSource {
+        return try {
+            if (database.resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) {
+                val file = File(context.filesDir, database.resolvedActiveFilePath())
+                if (!file.isFile) throw FileNotFoundException("数据库文件不存在")
+                DatabaseStreamSource(
+                    openStream = { file.inputStream() },
+                    header = readFileHeader(file),
+                    revision = KeePassSourceSafety.revisionOf(file),
+                )
+            } else {
+                val uri = Uri.parse(database.resolvedActiveFilePath())
+                openUriStreamSource(uri, "无法打开数据库文件")
+            }
+        } catch (t: Throwable) {
+            throw normalizeError(t)
+        }
+    }
+
+    private fun openUriStreamSource(uri: Uri, missingMessage: String): DatabaseStreamSource {
+        val temporary = File.createTempFile("keepass-source-", ".kdbx", context.cacheDir)
+        try {
+            val input = openExternalInputStream(uri) ?: throw FileNotFoundException(missingMessage)
+            val revision = copyStreamAndRevision(input, temporary.outputStream())
+            return DatabaseStreamSource(
+                openStream = { temporary.inputStream() },
+                header = readFileHeader(temporary),
+                revision = revision,
+                temporaryFile = temporary,
+            )
+        } catch (error: Throwable) {
+            temporary.delete()
+            throw error
+        }
+    }
+
+    private suspend fun decodeDatabase(
+        input: InputStream,
+        credentials: Credentials,
+        header: ByteArray,
+        sourceName: String? = null,
+        logFailure: Boolean = true,
+    ): KeePassDatabase {
+        return withContext(decodeDispatcher) {
+            withGlobalDecodeLock {
+                try {
+                    KeePassFormatInspector.ensureKdbxSupportedHeader(header, sourceName)
+                    input.use { stream ->
+                        KeePassDatabase.decode(
+                            stream,
+                            credentials,
+                            cipherProviders = KeePassCodecSupport.cipherProviders,
+                        )
+                    }
+                } catch (t: Throwable) {
+                    val mapped = normalizeError(t)
+                    if (logFailure) {
+                        Log.e(
+                            TAG,
+                            "KDBX stream decode failed code=${(mapped as? KeePassOperationException)?.code ?: KeePassErrorCode.IO_READ_WRITE_FAILED}. ${databaseHeaderSummary(header)}",
+                            mapped,
+                        )
+                    }
+                    throw mapped
+                }
+            }
+        }
+    }
+
+    private fun readFileHeader(file: File, maxBytes: Int = 32): ByteArray {
+        file.inputStream().use { input ->
+            val buffer = ByteArray(maxBytes)
+            val count = input.read(buffer)
+            return if (count <= 0) ByteArray(0) else buffer.copyOf(count)
+        }
+    }
+
+    /** Streams a source to a destination while hashing both sides. */
+    private fun copyStreamAndRevision(input: InputStream, output: OutputStream): KeePassSourceRevision {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var size = 0L
+        input.use { source ->
+            output.use { target ->
+                while (true) {
+                    val read = source.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    target.write(buffer, 0, read)
+                    digest.update(buffer, 0, read)
+                    size += read
+                }
+                target.flush()
+            }
+        }
+        return KeePassSourceRevision(
+            sha256 = digest.digest().joinToString(separator = "") { byte ->
+                "%02x".format(byte.toInt() and 0xff)
+            },
+            sizeBytes = size
+        )
+    }
+
     private fun resolveCredentials(password: String, keyFileBytes: ByteArray?): CredentialsResolution {
         val candidates = KeePassCredentialSupport.buildCredentialCandidates(
             password = password,
             keyFileBytes = keyFileBytes
         )
         return CredentialsResolution(candidates = candidates)
+    }
+
+    private fun buildExactCredentials(password: String, keyFileBytes: ByteArray?): Credentials {
+        return when {
+            keyFileBytes == null -> Credentials.from(EncryptedValue.fromString(password))
+            password.isBlank() -> Credentials.from(keyFileBytes)
+            else -> Credentials.from(EncryptedValue.fromString(password), keyFileBytes)
+        }
+    }
+
+    private fun countEntries(group: Group): Int {
+        var count = 0
+        val pending = ArrayDeque<Group>()
+        pending.addLast(group)
+        while (pending.isNotEmpty()) {
+            val current = pending.removeLast()
+            count += current.entries.size
+            current.groups.forEach(pending::addLast)
+        }
+        return count
+    }
+
+    private fun cleanupUnreferencedInternalKeyFile(
+        candidatePath: String?,
+        retainedPath: String?,
+        databaseId: Long
+    ) {
+        val path = candidatePath?.takeIf { it.isNotBlank() } ?: return
+        if (path == retainedPath) return
+        val stillReferenced = dao.getAllDatabasesSync().any { database ->
+            database.id != databaseId && database.keyFileInternalPath == path
+        }
+        if (!stillReferenced) {
+            runCatching { keyFileStore.deleteInternal(path) }
+                .onFailure { error -> Log.w(TAG, "Unable to clean unused KeePass key-file copy", error) }
+        }
+    }
+
+    private suspend fun updateStoredDatabaseMetadata(
+        registration: LocalKeePassDatabase,
+        database: KeePassDatabase
+    ) {
+        val options = inferCreationOptions(database)
+        val meta = database.content.meta
+        dao.updateDatabase(
+            registration.copy(
+                name = meta.name.ifBlank { registration.name },
+                description = meta.description.takeIf { it.isNotBlank() },
+                entryCount = countEntries(database.content.group),
+                kdbxMajorVersion = options.formatVersion.majorVersion,
+                cipherAlgorithm = options.cipherAlgorithm.name,
+                kdfAlgorithm = options.kdfAlgorithm.name,
+                kdfTransformRounds = options.transformRounds,
+                kdfMemoryBytes = options.memoryBytes,
+                kdfParallelism = options.parallelism,
+                lastAccessedAt = System.currentTimeMillis()
+            )
+        )
     }
 
     private fun readDatabaseBytes(database: LocalKeePassDatabase): ByteArray {
@@ -5450,16 +7501,24 @@ class KeePassKdbxService(
                     sizeBytes = file.length(),
                     lastModifiedEpochMs = file.lastModified()
                 )
+                val bytes = file.readBytes()
                 DatabaseSnapshot(
-                    bytes = file.readBytes(),
+                    bytes = bytes,
                     etag = null,
                     lastModified = null,
-                    signature = signature
+                    signature = signature,
+                    revision = KeePassSourceSafety.revisionOf(bytes)
                 )
             } else {
                 val uri = Uri.parse(database.resolvedActiveFilePath())
                 val bytes = readBytesFromUri(uri, "无法打开数据库文件")
-                DatabaseSnapshot(bytes = bytes, etag = null, lastModified = null, signature = null)
+                DatabaseSnapshot(
+                    bytes = bytes,
+                    etag = null,
+                    lastModified = null,
+                    signature = null,
+                    revision = KeePassSourceSafety.revisionOf(bytes)
+                )
             }
         } catch (t: Throwable) {
             throw normalizeError(t)
@@ -5472,46 +7531,90 @@ class KeePassKdbxService(
         keePassDatabase: KeePassDatabase,
         sourceEtag: String? = null,
         sourceLastModified: String? = null,
-        beforeRemoteUpload: (suspend (LocalKeePassDatabase, KeePassDatabase) -> Unit)? = null
+        expectedSourceRevision: KeePassSourceRevision? = null,
+        beforeRemoteUpload: (suspend (LocalKeePassDatabase, KeePassSourceRevision) -> Unit)? = null
     ) {
-        val bytes = encodeDatabase(keePassDatabase)
-        if (ENABLE_POST_WRITE_DECODE_VERIFICATION) {
-            decodeDatabase(bytes, credentials)
-        }
-        if (database.resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) {
-            writeInternal(database, bytes)
-        } else {
-            writeExternal(database, bytes)
-        }
-        var resolvedSourceEtag = sourceEtag
-        var resolvedSourceLastModified = sourceLastModified
-        var resolvedDatabase = keePassDatabase
-        if (database.isRemoteSource()) {
-            beforeRemoteUpload?.invoke(database, resolvedDatabase)
-            val syncOutcome = syncRemoteWorkingCopy(
+        accessPolicy.requireWritable(database.id)
+        encodeDatabaseArtifact(keePassDatabase).use { artifact ->
+            val encodedRevision = artifact.revision
+            if (ENABLE_POST_WRITE_DECODE_VERIFICATION) {
+                decodeDatabase(
+                    input = artifact.file.inputStream(),
+                    credentials = credentials,
+                    header = readFileHeader(artifact.file),
+                )
+            }
+            if (database.resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) {
+                writeInternal(database, artifact.file)
+            } else {
+                writeExternal(
+                    database = database,
+                    encodedFile = artifact.file,
+                    targetRevision = encodedRevision,
+                    expectedSourceRevision = expectedSourceRevision,
+                )
+            }
+            var resolvedSourceEtag = sourceEtag
+            var resolvedSourceLastModified = sourceLastModified
+            var resolvedDatabase = keePassDatabase
+            var persistedRevision = encodedRevision
+            if (database.isRemoteSource()) {
+                beforeRemoteUpload?.invoke(database, encodedRevision)
+                val bytes = artifact.readBytes()
+                val syncOutcome = syncRemoteWorkingCopy(
+                    database = database,
+                    credentials = credentials,
+                    bytes = bytes,
+                    sourceRevision = encodedRevision,
+                )
+                if (syncOutcome != null) {
+                    resolvedSourceEtag = syncOutcome.writeResult.etag
+                    resolvedSourceLastModified = syncOutcome.writeResult.lastModified?.toString()
+                    resolvedDatabase = syncOutcome.finalDatabase
+                    persistedRevision = syncOutcome.finalRevision
+                } else {
+                    markRemoteWritePending(database, encodedRevision)
+                    enqueueRemoteWorkingCopyUpload(database.id)
+                }
+            }
+            cachePersistedDatabase(
                 database = database,
                 credentials = credentials,
-                localDatabase = resolvedDatabase,
-                bytes = bytes
+                keePassDatabase = resolvedDatabase,
+                sourceRevision = persistedRevision,
+                sourceEtag = resolvedSourceEtag,
+                sourceLastModified = resolvedSourceLastModified,
             )
-            if (syncOutcome != null) {
-                resolvedSourceEtag = syncOutcome.writeResult.etag
-                resolvedSourceLastModified = syncOutcome.writeResult.lastModified?.toString()
-                resolvedDatabase = syncOutcome.finalDatabase
-            } else {
-                markRemoteWritePending(database, bytes)
-                enqueueRemoteWorkingCopyUpload(database.id)
-            }
         }
-        val updatedSignature = currentSourceSignature(database)
+    }
+
+    private fun cachePersistedDatabase(
+        database: LocalKeePassDatabase,
+        credentials: Credentials,
+        keePassDatabase: KeePassDatabase,
+        sourceRevision: KeePassSourceRevision,
+        sourceEtag: String?,
+        sourceLastModified: String?,
+    ) {
+        val nativeSession = nativeSessionCache.deferred(
+            databaseId = database.id,
+            sourceRevision = sourceRevision,
+            database = keePassDatabase,
+        )
         cacheLoadedDatabase(
             LoadedDatabase(
                 database = database,
                 credentials = credentials,
-                keePassDatabase = resolvedDatabase,
-                sourceEtag = resolvedSourceEtag,
-                sourceLastModified = resolvedSourceLastModified,
-                sourceSignature = updatedSignature
+                keePassDatabase = keePassDatabase,
+                nativeSession = nativeSession,
+                nativeBrowser = lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+                    KeePassNativeBrowserBuilder.build(nativeSession.value)
+                },
+                projectionBundle = nativeProjectionBundleCache.deferred(nativeSession),
+                sourceEtag = sourceEtag,
+                sourceLastModified = sourceLastModified,
+                sourceSignature = currentSourceSignature(database),
+                sourceRevision = sourceRevision,
             )
         )
     }
@@ -5524,22 +7627,20 @@ class KeePassKdbxService(
 
     private suspend fun enqueuePendingChangeSetsIfRemote(
         database: LocalKeePassDatabase,
-        changeSets: List<KeePassChangeSet>
+        changeSets: List<KeePassChangeSet>,
+        workingRevision: KeePassSourceRevision
     ) {
         if (changeSets.isEmpty() || !database.isRemoteSource() || database.sourceId == null) {
             return
         }
         val remoteDb = PasswordDatabase.getDatabase(context)
         val syncState = remoteDb.keepassRemoteSyncStateDao().getState(database.id)
-        val workingHashAtChange = runCatching {
-            GoogleDriveKeePassSupport.sha256Hex(readDatabaseSnapshot(database).bytes)
-        }.getOrNull()
         val baseSnapshot = KeePassPendingChangeBaseSnapshot(
             remoteVersionToken = syncState?.remoteVersionToken,
             remoteEtag = syncState?.remoteEtag,
             remoteLastModified = syncState?.remoteLastModified,
             baseHash = syncState?.baseHash,
-            workingHashAtChange = workingHashAtChange
+            workingHashAtChange = workingRevision.sha256
         )
         val repository = keePassPendingChangeRepository()
         changeSets.forEach { changeSet ->
@@ -5550,8 +7651,8 @@ class KeePassKdbxService(
     private suspend fun syncRemoteWorkingCopy(
         database: LocalKeePassDatabase,
         credentials: Credentials,
-        localDatabase: KeePassDatabase,
-        bytes: ByteArray
+        bytes: ByteArray,
+        sourceRevision: KeePassSourceRevision
     ): RemoteSyncOutcome? {
         if (!database.isRemoteSource() || database.sourceId == null) {
             return null
@@ -5564,8 +7665,6 @@ class KeePassKdbxService(
             syncStateDao = remoteDb.keepassRemoteSyncStateDao()
         )
         val syncStateDao = remoteDb.keepassRemoteSyncStateDao()
-        val workingHash = GoogleDriveKeePassSupport.sha256Hex(bytes)
-
         return try {
             when (database.sourceType) {
                 KeePassDatabaseSourceType.REMOTE_WEBDAV -> {
@@ -5581,6 +7680,7 @@ class KeePassKdbxService(
                         fileSource = fileSource,
                         credentials = credentials,
                         expectedBytes = bytes,
+                        expectedRevision = sourceRevision,
                         sourceLabel = "foreground-webdav"
                     )
                     database.cacheCopyPath?.let { cachePath ->
@@ -5596,7 +7696,8 @@ class KeePassKdbxService(
                     RemoteSyncOutcome(
                         writeResult = writeResult,
                         finalBytes = verifiedRemote.bytes,
-                        finalDatabase = verifiedRemote.database
+                        finalDatabase = verifiedRemote.database,
+                        finalRevision = verifiedRemote.revision
                     )
                 }
                 KeePassDatabaseSourceType.REMOTE_ONEDRIVE -> {
@@ -5614,48 +7715,21 @@ class KeePassKdbxService(
                             fileSource = fileSource,
                             credentials = credentials,
                             expectedBytes = bytes,
+                            expectedRevision = sourceRevision,
                             sourceLabel = "foreground-onedrive"
                         )
                         RemoteSyncOutcome(
                             writeResult = writeResult,
                             finalBytes = verifiedRemote.bytes,
-                            finalDatabase = verifiedRemote.database
+                            finalDatabase = verifiedRemote.database,
+                            finalRevision = verifiedRemote.revision
                         )
                     } catch (error: Exception) {
                         if (!isRemoteVersionConflict(error)) {
                             throw error
                         }
-                        val remoteStat = runCatching { fileSource.stat() }.getOrDefault(FileSourceStat())
-                        val currentRemoteVersion = remoteStat.etag ?: remoteStat.versionToken
-                        if (currentRemoteVersion.isNullOrBlank()) {
-                            throw error
-                        }
-                        val remoteBytes = fileSource.read()
-                        val mergeResult = resolveRemoteConflictInternal(
-                            database = database,
-                            credentials = credentials,
-                            localDatabase = localDatabase,
-                            remoteBytes = remoteBytes
-                        )
-                        val retriedWrite = fileSource.write(
-                            mergeResult.mergedBytes,
-                            expectedVersion = currentRemoteVersion
-                        )
-                        val verifiedRemote = verifyRemoteKdbxWrite(
-                            database = database,
-                            fileSource = fileSource,
-                            credentials = credentials,
-                            expectedBytes = mergeResult.mergedBytes,
-                            sourceLabel = "foreground-onedrive-merge"
-                        )
-                        database.workingCopyPath?.let { workingCopyPath ->
-                            writeInternalRelative(workingCopyPath, verifiedRemote.bytes)
-                        }
-                        RemoteSyncOutcome(
-                            writeResult = retriedWrite,
-                            finalBytes = verifiedRemote.bytes,
-                            finalDatabase = verifiedRemote.database,
-                            conflictCopyCount = mergeResult.conflictCopyCount
+                        throw KeePassSourceChangedException(
+                            "远端文件已变化，且本地工作副本也有修改，请先处理冲突"
                         )
                     }
                     if ((remoteSource.itemId.isNullOrBlank() || remoteSource.driveId.isNullOrBlank()) &&
@@ -5672,26 +7746,32 @@ class KeePassKdbxService(
                     database.cacheCopyPath?.let { cachePath ->
                         writeInternalRelative(cachePath, syncOutcome.finalBytes)
                     }
-                    val finalWorkingHash = GoogleDriveKeePassSupport.sha256Hex(syncOutcome.finalBytes)
                     syncService.markSynchronized(
                         databaseId = database.id,
                         versionToken = syncOutcome.writeResult.versionToken,
                         etag = syncOutcome.writeResult.etag,
-                        baseHash = finalWorkingHash,
-                        workingHash = finalWorkingHash
+                        baseHash = syncOutcome.finalRevision.sha256,
+                        workingHash = syncOutcome.finalRevision.sha256
                     )
                     syncOutcome
                 }
                 KeePassDatabaseSourceType.REMOTE_GOOGLE_DRIVE -> {
                     val remoteSource = remoteDb.keepassRemoteSourceDao().getSourceById(database.sourceId)
                         ?: throw IllegalStateException("远端来源不存在")
+                    val expectedRemoteVersion = syncStateDao.getState(database.id)?.let { state ->
+                        KeePassRemoteVersionPolicy.preferred(
+                            versionToken = state.remoteVersionToken,
+                            etag = state.remoteEtag
+                        )
+                    }
                     val fileSource = GoogleDriveKeePassSupport.createFileSource(context, remoteSource)
-                    val writeResult = fileSource.write(bytes)
+                    val writeResult = fileSource.write(bytes, expectedVersion = expectedRemoteVersion)
                     val verifiedRemote = verifyRemoteKdbxWrite(
                         database = database,
                         fileSource = fileSource,
                         credentials = credentials,
                         expectedBytes = bytes,
+                        expectedRevision = sourceRevision,
                         sourceLabel = "foreground-googledrive"
                     )
                     database.cacheCopyPath?.let { cachePath ->
@@ -5707,18 +7787,27 @@ class KeePassKdbxService(
                     RemoteSyncOutcome(
                         writeResult = writeResult,
                         finalBytes = verifiedRemote.bytes,
-                        finalDatabase = verifiedRemote.database
+                        finalDatabase = verifiedRemote.database,
+                        finalRevision = verifiedRemote.revision
                     )
                 }
                 else -> null
             }
         } catch (error: Exception) {
-            syncService.markLocalChanges(database.id, workingHash)
-            syncService.markSyncFailure(
-                databaseId = database.id,
-                failureCode = "REMOTE_WRITE_FAILED",
-                failureMessage = error.message ?: "远端同步失败"
-            )
+            if (isRemoteVersionConflict(error)) {
+                syncService.markConflict(
+                    databaseId = database.id,
+                    workingHash = sourceRevision.sha256,
+                    failureMessage = error.message ?: "远端文件已变化，且本地工作副本也有修改，请先处理冲突"
+                )
+            } else {
+                syncService.markLocalChanges(database.id, sourceRevision.sha256)
+                syncService.markSyncFailure(
+                    databaseId = database.id,
+                    failureCode = "REMOTE_WRITE_FAILED",
+                    failureMessage = error.message ?: "远端同步失败"
+                )
+            }
             Log.w(TAG, "Remote working copy sync failed for db=${database.id}", error)
             null
         }
@@ -5726,7 +7815,7 @@ class KeePassKdbxService(
 
     private suspend fun markRemoteWritePending(
         database: LocalKeePassDatabase,
-        bytes: ByteArray
+        sourceRevision: KeePassSourceRevision
     ) {
         if (!database.isRemoteSource() || database.sourceId == null) {
             return
@@ -5739,7 +7828,7 @@ class KeePassKdbxService(
         )
         syncService.markLocalChanges(
             databaseId = database.id,
-            workingHash = GoogleDriveKeePassSupport.sha256Hex(bytes)
+            workingHash = sourceRevision.sha256
         )
     }
 
@@ -6097,13 +8186,14 @@ class KeePassKdbxService(
         fileSource: KeePassFileSource,
         credentials: Credentials,
         expectedBytes: ByteArray,
+        expectedRevision: KeePassSourceRevision = KeePassSourceSafety.revisionOf(expectedBytes),
         sourceLabel: String
     ): RemoteKdbxVerification {
-        val expectedHash = GoogleDriveKeePassSupport.sha256Hex(expectedBytes)
+        val expectedHash = expectedRevision.sha256
         return try {
             val remoteBytes = fileSource.read()
-            val remoteHash = GoogleDriveKeePassSupport.sha256Hex(remoteBytes)
-            if (remoteHash != expectedHash) {
+            val remoteRevision = KeePassSourceSafety.revisionOf(remoteBytes)
+            if (remoteRevision != expectedRevision) {
                 throw IOException(
                     "远端写入校验失败：上传后内容不一致 (${remoteBytes.size}/${expectedBytes.size})"
                 )
@@ -6115,12 +8205,12 @@ class KeePassKdbxService(
             )
             Log.i(
                 TAG,
-                "Remote KDBX write verified db=${database.id} source=${database.sourceType} label=$sourceLabel bytes=${remoteBytes.size} hash=${remoteHash.take(12)}"
+                "Remote KDBX write verified db=${database.id} source=${database.sourceType} label=$sourceLabel bytes=${remoteBytes.size} hash=${remoteRevision.sha256.take(12)}"
             )
             RemoteKdbxVerification(
                 bytes = remoteBytes,
                 database = decoded,
-                hash = remoteHash
+                revision = remoteRevision
             )
         } catch (error: Exception) {
             Log.e(
@@ -6200,12 +8290,39 @@ class KeePassKdbxService(
         synchronized(loadedDatabaseCache) {
             loadedDatabaseCache.remove(databaseId)
         }
+        nativeSessionCache.invalidate(databaseId)
+        nativeProjectionBundleCache.invalidate(databaseId)
     }
 
-    private fun encodeDatabase(keePassDatabase: KeePassDatabase): ByteArray {
-        return ByteArrayOutputStream().use { output ->
+    private fun encodeDatabase(
+        keePassDatabase: KeePassDatabase,
+        estimatedSizeBytes: Long? = null
+    ): ByteArray {
+        return ByteArrayOutputStream(
+            KeePassEncodeBufferPolicy.initialCapacity(estimatedSizeBytes)
+        ).use { output ->
             keePassDatabase.encode(output, cipherProviders = KeePassCodecSupport.cipherProviders)
             output.toByteArray()
+        }
+    }
+
+    private fun encodeDatabaseArtifact(keePassDatabase: KeePassDatabase): EncodedDatabaseArtifact {
+        val file = File.createTempFile("keepass-encoded-", ".kdbx", context.cacheDir)
+        try {
+            val revision = encodeKeePassDatabaseArtifactFile(keePassDatabase, file)
+            return EncodedDatabaseArtifact(file, revision)
+        } catch (error: Throwable) {
+            file.delete()
+            throw error
+        }
+    }
+
+    private fun writeInternal(database: LocalKeePassDatabase, encodedFile: File) {
+        try {
+            val file = File(context.filesDir, database.resolvedActiveFilePath())
+            writeInternalFile(file, encodedFile)
+        } catch (t: Throwable) {
+            throw normalizeError(t)
         }
     }
 
@@ -6255,16 +8372,99 @@ class KeePassKdbxService(
         if (backupFile.exists()) backupFile.delete()
     }
 
-    private fun writeExternal(database: LocalKeePassDatabase, bytes: ByteArray) {
-        val uri = Uri.parse(database.resolvedActiveFilePath())
-        val originalBytes = runCatching { readDatabaseBytes(database) }.getOrNull()
-        try {
-            writeExternalBytes(uri, bytes)
-        } catch (e: Exception) {
-            if (originalBytes != null) {
-                runCatching {
-                    writeExternalBytes(uri, originalBytes)
+    private fun writeInternalFile(file: File, encodedFile: File) {
+        val parent = file.parentFile ?: throw IOException("无效的文件路径")
+        if (!parent.exists() && !parent.mkdirs()) throw IOException("无法创建数据库目录")
+        val tempFile = File(parent, "${file.name}.tmp")
+        val backupFile = File(parent, "${file.name}.bak")
+        encodedFile.inputStream().use { input ->
+            FileOutputStream(tempFile).use { output ->
+                input.copyTo(output)
+                output.flush()
+                output.fd.sync()
+            }
+        }
+        if (file.exists()) {
+            if (backupFile.exists()) backupFile.delete()
+            if (!file.renameTo(backupFile)) backupFile.delete()
+        }
+        if (!tempFile.renameTo(file)) {
+            tempFile.inputStream().use { input ->
+                FileOutputStream(file).use { output ->
+                    input.copyTo(output)
+                    output.flush()
+                    output.fd.sync()
                 }
+            }
+            tempFile.delete()
+        }
+        if (backupFile.exists()) backupFile.delete()
+    }
+
+    private fun writeExternal(
+        database: LocalKeePassDatabase,
+        bytes: ByteArray,
+        targetRevision: KeePassSourceRevision,
+        expectedSourceRevision: KeePassSourceRevision?,
+    ) {
+        val temporary = File.createTempFile("keepass-raw-write-", ".kdbx", context.cacheDir)
+        try {
+            FileOutputStream(temporary).use { output ->
+                output.write(bytes)
+                output.flush()
+                output.fd.sync()
+            }
+            writeExternal(database, temporary, targetRevision, expectedSourceRevision)
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    private fun writeExternal(
+        database: LocalKeePassDatabase,
+        encodedFile: File,
+        targetRevision: KeePassSourceRevision,
+        expectedSourceRevision: KeePassSourceRevision?
+    ) {
+        val uri = Uri.parse(database.resolvedActiveFilePath())
+        val originalRevision = openExternalInputStream(uri)?.use(KeePassSourceSafety::revisionOf)
+            ?: throw IOException("无法读取数据库文件")
+        expectedSourceRevision?.let { expected ->
+            KeePassSourceSafety.requireUnchanged(
+                expectedRevision = expected,
+                currentRevision = originalRevision,
+                sourceLabel = uri.toString()
+            )
+        }
+        val recoveryCopy = openExternalInputStream(uri)?.use { input ->
+            recoveryStore.create(database.id, input)
+        } ?: throw IOException("无法创建 KeePass 恢复副本")
+        try {
+            writeExternalFile(uri, encodedFile)
+            val writtenRevision = openExternalInputStream(uri)?.use(KeePassSourceSafety::revisionOf)
+                ?: throw IOException("无法校验数据库文件")
+            if (writtenRevision != targetRevision) {
+                throw IOException("外部 KeePass 文件写入后校验失败")
+            }
+            if (!recoveryStore.deleteVerified(recoveryCopy)) {
+                Log.w(TAG, "Verified KeePass recovery copy could not be removed: ${recoveryCopy.file}")
+            }
+            recoveryStore.prune(database.id)
+        } catch (e: Exception) {
+            val restored = runCatching {
+                writeExternalFile(uri, recoveryCopy.file)
+                val restoredRevision = openExternalInputStream(uri)?.use(KeePassSourceSafety::revisionOf)
+                if (restoredRevision != originalRevision) {
+                    throw IOException("外部 KeePass 文件回滚校验失败")
+                }
+            }.isSuccess
+            if (restored) {
+                recoveryStore.deleteVerified(recoveryCopy)
+            } else {
+                Log.e(
+                    TAG,
+                    "External KeePass restore failed; retained recovery copy at ${recoveryCopy.file}"
+                )
             }
             throw normalizeError(e)
         }
@@ -6284,6 +8484,350 @@ class KeePassKdbxService(
             Log.w(TAG, "openOutputStream wt failed, retry with rwt", e)
             context.contentResolver.openOutputStream(uri, "rwt")
         }
+
+    internal suspend fun inspectCurrentRemoteConflict(
+        databaseId: Long
+    ): Result<KeePassRemoteConflictPreview> = withContext(Dispatchers.IO) {
+        try {
+            val context = loadCurrentRemoteConflictContext(databaseId)
+            Result.success(
+                KeePassRemoteConflictPreview(
+                    snapshot = KeePassConflictCenter.inspect(
+                        context.baseDatabase,
+                        context.localDatabase,
+                        context.remoteDatabase
+                    ),
+                    localRevision = KeePassSourceSafety.revisionOf(context.localBytes),
+                    remoteRevision = KeePassSourceSafety.revisionOf(context.remoteBytes),
+                    baseRevision = KeePassSourceSafety.revisionOf(context.baseBytes),
+                    remoteVersionToken = context.remoteStat.etag ?: context.remoteStat.versionToken,
+                    remoteSizeBytes = context.remoteBytes.size.toLong()
+                )
+            )
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    private fun writeExternalFile(uri: Uri, sourceFile: File) {
+        openExternalOutputStream(uri)?.use { output ->
+            sourceFile.inputStream().use { input -> input.copyTo(output) }
+            output.flush()
+        } ?: throw IOException("无法写入数据库文件")
+    }
+
+    internal suspend fun resolveCurrentRemoteConflict(
+        databaseId: Long,
+        decision: KeePassConflictDecision,
+        expectedLocalRevision: String,
+        expectedRemoteRevision: String,
+        selections: Map<String, KeePassConflictResolutionSide> = emptyMap()
+    ): Result<KeePassRemoteConflictResolution> = withContext(Dispatchers.IO) {
+        try {
+            val context = loadCurrentRemoteConflictContext(databaseId)
+            val localRevision = KeePassSourceSafety.revisionOf(context.localBytes)
+            val remoteRevision = KeePassSourceSafety.revisionOf(context.remoteBytes)
+            require(localRevision.sha256 == expectedLocalRevision) {
+                "The local KeePass database changed after conflict review; reopen the conflict center"
+            }
+            require(remoteRevision.sha256 == expectedRemoteRevision) {
+                "The remote KeePass database changed after conflict review; reopen the conflict center"
+            }
+            val resolved = if (decision == KeePassConflictDecision.MERGE && selections.isNotEmpty()) {
+                KeePassConflictCenter.resolveSelected(
+                    baseDatabase = context.baseDatabase,
+                    localDatabase = context.localDatabase,
+                    remoteDatabase = context.remoteDatabase,
+                    selections = selections
+                )
+            } else {
+                KeePassConflictCenter.resolve(
+                    baseDatabase = context.baseDatabase,
+                    localDatabase = context.localDatabase,
+                    remoteDatabase = context.remoteDatabase,
+                    decision = decision
+                )
+            }
+            if (resolved.cancelled || resolved.database == null) {
+                return@withContext Result.success(
+                    KeePassRemoteConflictResolution(
+                        decision = decision,
+                        conflictCopyCount = 0,
+                        finalRevision = null,
+                        cancelled = true,
+                        retainedRecoveryCopies = 0
+                    )
+                )
+            }
+
+            accessPolicy.requireWritable(databaseId)
+            val finalDatabase = resolved.database
+            val finalBytes = encodeDatabase(finalDatabase)
+            requirePreflightAllowed(
+                KeePassWritePreflight.evaluateRuntime(
+                    currentDatabaseBytes = maxOf(context.localBytes.size, context.remoteBytes.size).toLong(),
+                    incomingPayloadBytes = finalBytes.size.toLong()
+                )
+            )
+            decodeDatabase(finalBytes, context.credentials, sourceName = "conflict-resolution-preview")
+            val retainedCopies = listOf(context.localBytes, context.remoteBytes)
+                .distinctBy { bytes -> KeePassSourceSafety.revisionOf(bytes).sha256 }
+                .map { bytes -> recoveryStore.create(databaseId, bytes) }
+
+            val remoteDb = PasswordDatabase.getDatabase(this@KeePassKdbxService.context)
+            val syncService = RemoteKeePassSyncService(
+                databaseDao = dao,
+                remoteSourceDao = remoteDb.keepassRemoteSourceDao(),
+                syncStateDao = remoteDb.keepassRemoteSyncStateDao()
+            )
+            val finalWriteResult = if (decision == KeePassConflictDecision.USE_REMOTE) {
+                FileSourceWriteResult(
+                    versionToken = context.remoteStat.versionToken,
+                    etag = context.remoteStat.etag,
+                    lastModified = context.remoteStat.lastModified,
+                    remoteId = context.remoteStat.remoteId,
+                    driveId = context.remoteStat.driveId
+                )
+            } else {
+                context.fileSource.write(
+                    finalBytes,
+                    expectedVersion = context.remoteStat.etag ?: context.remoteStat.versionToken
+                )
+            }
+            val verifiedBytes = if (decision == KeePassConflictDecision.USE_REMOTE) {
+                context.remoteBytes
+            } else {
+                verifyRemoteKdbxWrite(
+                    database = context.database,
+                    fileSource = context.fileSource,
+                    credentials = context.credentials,
+                    expectedBytes = finalBytes,
+                    sourceLabel = "conflict-center"
+                ).bytes
+            }
+            val verifiedDatabase = if (decision == KeePassConflictDecision.USE_REMOTE) {
+                context.remoteDatabase
+            } else {
+                decodeDatabase(verifiedBytes, context.credentials, sourceName = "conflict-center-verified")
+            }
+            context.database.workingCopyPath?.let { workingPath ->
+                writeInternalRelative(workingPath, verifiedBytes)
+            }
+            context.database.cacheCopyPath?.let { cachePath ->
+                writeInternalRelative(cachePath, verifiedBytes)
+            }
+            updateOneDriveRemoteSourceBindingIfNeeded(context.database, finalWriteResult)
+            val finalRevision = KeePassSourceSafety.revisionOf(verifiedBytes)
+            syncService.markSynchronized(
+                databaseId = databaseId,
+                versionToken = finalWriteResult.versionToken,
+                etag = finalWriteResult.etag,
+                baseHash = finalRevision.sha256,
+                workingHash = finalRevision.sha256
+            )
+            updateStoredDatabaseMetadata(context.database, verifiedDatabase)
+            recoveryStore.prune(databaseId, keepNewest = 6)
+            invalidateProcessCache(databaseId)
+            Result.success(
+                KeePassRemoteConflictResolution(
+                    decision = decision,
+                    conflictCopyCount = resolved.conflictCopyCount,
+                    finalRevision = finalRevision,
+                    cancelled = false,
+                    retainedRecoveryCopies = retainedCopies.size
+                )
+            )
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    private suspend fun loadCurrentRemoteConflictContext(
+        databaseId: Long
+    ): CurrentRemoteConflictContext {
+        val database = dao.getDatabaseById(databaseId)
+            ?: throw IllegalArgumentException("KeePass database not found: $databaseId")
+        require(database.isRemoteSource() && database.sourceId != null) {
+            "The selected KeePass database is not a remote database"
+        }
+        val remoteDb = PasswordDatabase.getDatabase(context)
+        val remoteSource = remoteDb.keepassRemoteSourceDao().getSourceById(database.sourceId)
+            ?: throw IllegalStateException("KeePass remote source not found")
+        val fileSource = createRemoteFileSource(database, remoteSource)
+        val remoteStat = fileSource.stat()
+        val remoteBytes = fileSource.read()
+        val loaded = loadDatabase(databaseId)
+        val localBytes = readDatabaseSnapshot(database).bytes
+        val cachePath = database.cacheCopyPath
+            ?: throw IllegalStateException("KeePass conflict base copy is unavailable")
+        val cacheFile = File(context.filesDir, cachePath)
+        if (!cacheFile.isFile) throw IllegalStateException("KeePass conflict base copy is unavailable")
+        val baseBytes = cacheFile.readBytes()
+        return CurrentRemoteConflictContext(
+            database = database,
+            credentials = loaded.credentials,
+            localDatabase = loaded.keePassDatabase,
+            localBytes = localBytes,
+            baseDatabase = decodeDatabase(
+                baseBytes,
+                loaded.credentials,
+                sourceName = "databaseId=$databaseId:conflict-base",
+                logFailure = false
+            ),
+            baseBytes = baseBytes,
+            remoteDatabase = decodeDatabase(
+                remoteBytes,
+                loaded.credentials,
+                sourceName = "databaseId=$databaseId:conflict-remote"
+            ),
+            remoteBytes = remoteBytes,
+            remoteStat = remoteStat,
+            fileSource = fileSource
+        )
+    }
+
+    private suspend fun writeRawDatabaseBytes(
+        database: LocalKeePassDatabase,
+        credentials: Credentials,
+        keePassDatabase: KeePassDatabase,
+        bytes: ByteArray,
+        expectedSourceRevision: KeePassSourceRevision?
+    ) {
+        accessPolicy.requireWritable(database.id)
+        val sourceRevision = KeePassSourceSafety.revisionOf(bytes)
+        decodeDatabase(bytes, credentials, sourceName = "databaseId=${database.id}:raw-write-verify")
+        if (database.resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) {
+            writeInternal(database, bytes)
+        } else {
+            writeExternal(
+                database = database,
+                bytes = bytes,
+                targetRevision = sourceRevision,
+                expectedSourceRevision = expectedSourceRevision
+            )
+        }
+        var resolvedDatabase = keePassDatabase
+        var persistedRevision = sourceRevision
+        var sourceEtag: String? = null
+        var sourceLastModified: String? = null
+        if (database.isRemoteSource()) {
+            val outcome = syncRemoteWorkingCopy(
+                database = database,
+                credentials = credentials,
+                bytes = bytes,
+                sourceRevision = sourceRevision
+            )
+            if (outcome != null) {
+                resolvedDatabase = outcome.finalDatabase
+                persistedRevision = outcome.finalRevision
+                sourceEtag = outcome.writeResult.etag
+                sourceLastModified = outcome.writeResult.lastModified?.toString()
+            } else {
+                markRemoteWritePending(database, sourceRevision)
+                enqueueRemoteWorkingCopyUpload(database.id)
+            }
+        }
+        cachePersistedDatabase(
+            database = database,
+            credentials = credentials,
+            keePassDatabase = resolvedDatabase,
+            sourceRevision = persistedRevision,
+            sourceEtag = sourceEtag,
+            sourceLastModified = sourceLastModified,
+        )
+        updateStoredDatabaseMetadata(database, resolvedDatabase)
+    }
+
+    /** Restores a verified raw KDBX file without first materialising it as a ByteArray. */
+    private suspend fun writeRawDatabaseFile(
+        database: LocalKeePassDatabase,
+        credentials: Credentials,
+        keePassDatabase: KeePassDatabase,
+        file: File,
+        sourceRevision: KeePassSourceRevision,
+        expectedSourceRevision: KeePassSourceRevision?,
+    ) {
+        accessPolicy.requireWritable(database.id)
+        require(KeePassSourceSafety.revisionOf(file) == sourceRevision) {
+            "KeePass recovery source changed before restore"
+        }
+        if (database.resolvedActiveStorageLocation() == KeePassStorageLocation.INTERNAL) {
+            writeInternal(database, file)
+        } else {
+            writeExternal(
+                database = database,
+                encodedFile = file,
+                targetRevision = sourceRevision,
+                expectedSourceRevision = expectedSourceRevision,
+            )
+        }
+        var sourceEtag: String? = null
+        var sourceLastModified: String? = null
+        if (database.isRemoteSource()) {
+            // Existing remote source APIs still accept byte arrays. Keep that allocation
+            // at the actual network boundary while local restore remains fully streamed.
+            val outcome = syncRemoteWorkingCopy(
+                database = database,
+                credentials = credentials,
+                bytes = file.readBytes(),
+                sourceRevision = sourceRevision,
+            )
+            if (outcome != null) {
+                sourceEtag = outcome.writeResult.etag
+                sourceLastModified = outcome.writeResult.lastModified?.toString()
+            } else {
+                markRemoteWritePending(database, sourceRevision)
+                enqueueRemoteWorkingCopyUpload(database.id)
+            }
+        }
+        cachePersistedDatabase(
+            database = database,
+            credentials = credentials,
+            keePassDatabase = keePassDatabase,
+            sourceRevision = sourceRevision,
+            sourceEtag = sourceEtag,
+            sourceLastModified = sourceLastModified,
+        )
+        updateStoredDatabaseMetadata(database, keePassDatabase)
+    }
+
+    private fun writeUriCopyVerified(uri: Uri, bytes: ByteArray) {
+        openExternalOutputStream(uri)?.use { output ->
+            output.write(bytes)
+            output.flush()
+        } ?: throw IOException("Unable to write the KeePass destination")
+        val written = readBytesFromUri(uri, "Unable to verify the KeePass destination")
+        if (KeePassSourceSafety.revisionOf(written) != KeePassSourceSafety.revisionOf(bytes)) {
+            throw IOException("KeePass destination verification failed")
+        }
+    }
+
+    private fun writeUriCopyVerified(
+        uri: Uri,
+        input: InputStream,
+        expectedRevision: KeePassSourceRevision,
+    ) {
+        openExternalOutputStream(uri)?.use { output ->
+            val copiedRevision = KeePassSourceSafety.copyAndRevision(input, output)
+            output.flush()
+            if (copiedRevision != expectedRevision) {
+                throw IOException("KeePass source changed while copying")
+            }
+        } ?: throw IOException("Unable to write the KeePass destination")
+        val writtenRevision = openExternalInputStream(uri)?.use(KeePassSourceSafety::revisionOf)
+            ?: throw IOException("Unable to verify the KeePass destination")
+        if (writtenRevision != expectedRevision) {
+            throw IOException("KeePass destination verification failed")
+        }
+    }
+
+    private fun requirePreflightAllowed(result: KeePassWritePreflightResult) {
+        if (result.allowed) return
+        val requiredMiB = (result.additionalBytesRequired + MIB_BYTES - 1L) / MIB_BYTES
+        throw IOException(
+            "Insufficient memory for this KeePass operation; approximately $requiredMiB MiB more is required"
+        )
+    }
 
     suspend fun resolveRemoteConflict(
         databaseId: Long,
@@ -6309,7 +8853,10 @@ class KeePassKdbxService(
     }
 
     private fun isRemoteVersionConflict(error: Throwable): Boolean {
-        return error.message?.contains("远端文件已变化", ignoreCase = true) == true
+        return error is KeePassSourceChangedException ||
+            error.message?.contains("远端文件已变化", ignoreCase = true) == true ||
+            error.message?.contains("remote file changed", ignoreCase = true) == true ||
+            error.message?.contains("version conflict", ignoreCase = true) == true
     }
 
     private suspend fun resolveRemoteConflictInternal(
@@ -6336,15 +8883,18 @@ class KeePassKdbxService(
             sourceName = "databaseId=${database.id}:base-conflict",
             logFailure = false
         )
-        val mergedResult = mergeDatabasesForConflictResolution(
+        val mergedResult = KeePassConflictCenter.resolve(
             baseDatabase = baseDatabase,
             localDatabase = localDatabase,
-            remoteDatabase = remoteDatabase
+            remoteDatabase = remoteDatabase,
+            decision = KeePassConflictDecision.MERGE
         )
+        val mergedDatabase = mergedResult.database
+            ?: throw IllegalStateException("KeePass conflict merge was cancelled")
         return InternalConflictResolutionResult(
-            mergedDatabase = mergedResult.first,
-            mergedBytes = encodeDatabase(mergedResult.first),
-            conflictCopyCount = mergedResult.second
+            mergedDatabase = mergedDatabase,
+            mergedBytes = encodeDatabase(mergedDatabase),
+            conflictCopyCount = mergedResult.conflictCopyCount
         )
     }
 
@@ -6526,5 +9076,22 @@ class KeePassKdbxService(
             return throwable
         }
         return throwable.toKeePassOperationException()
+    }
+
+    private fun logMutationFailure(
+        operation: String,
+        databaseId: Long,
+        error: Throwable,
+    ): Throwable {
+        val normalized = normalizeError(error)
+        val root = normalized.rootCause()
+        val code = (normalized as? KeePassOperationException)?.code
+            ?: KeePassErrorCode.IO_READ_WRITE_FAILED
+        Log.e(
+            TAG,
+            "$operation failed db=$databaseId code=$code root=${root.javaClass.name}: ${root.message.orEmpty()}",
+            normalized,
+        )
+        return normalized
     }
 }

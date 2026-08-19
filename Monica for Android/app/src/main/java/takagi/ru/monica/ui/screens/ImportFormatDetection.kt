@@ -155,6 +155,7 @@ fun keepassImportSuggestion(context: Context, code: KeePassErrorCode): String {
         KeePassErrorCode.INVALID_CREDENTIAL ->
             context.getString(R.string.import_data_keepass_tip_invalid_credential)
         KeePassErrorCode.KEY_FILE_UNAVAILABLE,
+        KeePassErrorCode.DATABASE_READ_ONLY,
         KeePassErrorCode.URI_PERMISSION_DENIED ->
             context.getString(R.string.import_data_keepass_tip_permission)
         KeePassErrorCode.ONEDRIVE_REDIRECT_CONFLICT ->

@@ -122,6 +122,32 @@ class KeePassPendingFlushPlanner(
                 message = "FIELD_PATCH requires fieldPatch"
             )
         }
+        if (changeSet.operation == KeePassChangeOperation.ENTRY_EDIT_PATCH &&
+            (changeSet.fieldPatch == null || changeSet.entryPresentationPatch == null)
+        ) {
+            return pending.blocked(
+                reason = KeePassPendingFlushBlockReason.MISSING_PATCH,
+                message = "ENTRY_EDIT_PATCH requires fieldPatch and entryPresentationPatch"
+            )
+        }
+        if (
+            changeSet.operation == KeePassChangeOperation.ENTRY_PRESENTATION_PATCH &&
+            changeSet.entryPresentationPatch == null
+        ) {
+            return pending.blocked(
+                reason = KeePassPendingFlushBlockReason.MISSING_PATCH,
+                message = "ENTRY_PRESENTATION_PATCH requires entryPresentationPatch"
+            )
+        }
+        if (
+            changeSet.operation == KeePassChangeOperation.CUSTOM_ICON_POOL_PATCH &&
+            changeSet.customIconPoolPatch == null
+        ) {
+            return pending.blocked(
+                reason = KeePassPendingFlushBlockReason.MISSING_PATCH,
+                message = "CUSTOM_ICON_POOL_PATCH requires customIconPoolPatch"
+            )
+        }
         if (changeSet.operation.isStructureOperation() && changeSet.structurePatch == null) {
             return pending.blocked(
                 reason = KeePassPendingFlushBlockReason.MISSING_PATCH,
@@ -138,6 +164,12 @@ class KeePassPendingFlushPlanner(
             return pending.blocked(
                 reason = KeePassPendingFlushBlockReason.MISSING_PATCH,
                 message = "${changeSet.operation.name} requires groupTreePatch"
+            )
+        }
+        if (changeSet.operation.isHistoryOperation() && changeSet.historyPatch == null) {
+            return pending.blocked(
+                reason = KeePassPendingFlushBlockReason.MISSING_PATCH,
+                message = "${changeSet.operation.name} requires historyPatch"
             )
         }
         if (changeSet.operation == KeePassChangeOperation.ADD_ATTACHMENT &&

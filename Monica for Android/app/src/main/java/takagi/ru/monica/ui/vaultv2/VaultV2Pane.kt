@@ -90,6 +90,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -135,6 +136,7 @@ import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.data.model.OtpType
 import takagi.ru.monica.data.model.PasskeyBindingCodec
 import takagi.ru.monica.data.UnmatchedIconHandlingStrategy
+import takagi.ru.monica.data.VaultV2LayoutMode
 import takagi.ru.monica.notes.domain.NoteContentCodec
 import takagi.ru.monica.repository.MdbxStoredFolderEntry
 import takagi.ru.monica.security.SecurityManager
@@ -172,12 +174,18 @@ import takagi.ru.monica.ui.mdbxPathPendingSyncCount
 import takagi.ru.monica.ui.mdbxPathShouldFlushPendingUpload
 import takagi.ru.monica.ui.PasswordQuickFilterChipCallbacks
 import takagi.ru.monica.ui.PasswordQuickFilterChipState
-import takagi.ru.monica.ui.applyPasswordPagePasskeyStorageTarget
+import takagi.ru.monica.ui.PasswordBatchMoveViewModels
+import takagi.ru.monica.ui.PasswordBatchTransferNotificationHelper
+import takagi.ru.monica.ui.buildMoveTargetLabel
+import takagi.ru.monica.ui.executeMixedPasswordBatchMove
+import takagi.ru.monica.ui.resolvePasswordBatchMoveAction
+import takagi.ru.monica.ui.shouldForceSupplementaryKeePassCopy
 import takagi.ru.monica.ui.supportsQuickFolders
 import takagi.ru.monica.ui.components.ExpressiveTopBar
 import takagi.ru.monica.ui.components.QuickStatusBar
 import takagi.ru.monica.ui.common.selection.SelectionActionBar
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
+import takagi.ru.monica.ui.components.toUnifiedMoveInitialSource
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.gestures.SwipeActions
@@ -188,6 +196,7 @@ import takagi.ru.monica.ui.password.BitwardenReunlockTopActionsMenuItem
 import takagi.ru.monica.ui.password.BitwardenSyncTopActionsMenuItem
 import takagi.ru.monica.ui.password.CommonPasswordTopActionsMenuItems
 import takagi.ru.monica.ui.password.KeepassRefreshTopActionsMenuItem
+import takagi.ru.monica.ui.password.KeepassNativeManagerTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxCommitHistoryTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxCreateSnapshotTopActionsMenuItem
 import takagi.ru.monica.ui.password.MdbxSyncTopActionsMenuItem
@@ -449,7 +458,11 @@ private fun VaultV2PaneState.toUnifiedCategoryFilterSelection(): UnifiedCategory
 			val databaseId = storageFilterPrimaryId
 			val groupPath = storageFilterSecondaryKey
 			if (databaseId != null && !groupPath.isNullOrBlank()) {
-				UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, groupPath)
+                UnifiedCategoryFilterSelection.KeePassGroupFilter(
+                    databaseId = databaseId,
+                    groupPath = groupPath,
+                    groupUuid = storageFilterIdentityKey
+                )
 			} else if (databaseId != null) {
 				UnifiedCategoryFilterSelection.KeePassDatabaseFilter(databaseId)
 			} else {
@@ -535,6 +548,7 @@ private fun VaultV2PaneState.updateStorageFilter(selection: UnifiedCategoryFilte
 				type = VAULT_V2_STORAGE_FILTER_KEEPASS_GROUP,
 				primaryId = selection.databaseId,
 				secondaryKey = selection.groupPath,
+				identityKey = selection.groupUuid,
 			)
 		}
 		is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter -> {
@@ -601,7 +615,7 @@ private fun UnifiedCategoryFilterSelection.toCategoryFilterOrNull(): CategoryFil
 		is UnifiedCategoryFilterSelection.Custom -> CategoryFilter.Custom(categoryId)
 		is UnifiedCategoryFilterSelection.KeePassDatabaseFilter -> CategoryFilter.KeePassDatabase(databaseId)
 		is UnifiedCategoryFilterSelection.KeePassGroupFilter -> {
-			CategoryFilter.KeePassGroupFilter(databaseId, groupPath)
+			CategoryFilter.KeePassGroupFilter(databaseId, groupPath, groupUuid)
 		}
 		is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter -> {
 			CategoryFilter.KeePassDatabaseStarred(databaseId)
@@ -638,7 +652,7 @@ private fun CategoryFilter.toUnifiedCategoryFilterSelectionOrNull(): UnifiedCate
 		is CategoryFilter.Custom -> UnifiedCategoryFilterSelection.Custom(categoryId)
 		is CategoryFilter.KeePassDatabase -> UnifiedCategoryFilterSelection.KeePassDatabaseFilter(databaseId)
 		is CategoryFilter.KeePassGroupFilter -> {
-			UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, groupPath)
+			UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, groupPath, groupUuid)
 		}
 		is CategoryFilter.KeePassDatabaseStarred -> {
 			UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter(databaseId)
@@ -666,6 +680,7 @@ private data class VaultV2SavedStorageFilter(
 	val type: String,
 	val primaryId: Long? = null,
 	val secondaryKey: String? = null,
+	val identityKey: String? = null,
 )
 
 private fun SavedCategoryFilterState.toVaultV2SavedStorageFilter(): VaultV2SavedStorageFilter {
@@ -719,6 +734,7 @@ private fun SavedCategoryFilterState.toVaultV2SavedStorageFilter(): VaultV2Saved
 					type = VAULT_V2_STORAGE_FILTER_KEEPASS_GROUP,
 					primaryId = databaseId,
 					secondaryKey = groupPath,
+					identityKey = groupUuid,
 				)
 			} else {
 				VaultV2SavedStorageFilter(VAULT_V2_STORAGE_FILTER_ALL)
@@ -829,6 +845,7 @@ private fun VaultV2PaneState.toSavedCategoryFilterState(): SavedCategoryFilterSt
 					type = VAULT_V2_STORAGE_FILTER_KEEPASS_GROUP,
 					primaryId = storageFilterPrimaryId,
 					text = storageFilterSecondaryKey,
+					groupUuid = storageFilterIdentityKey,
 				)
 			} else {
 				SavedCategoryFilterState(type = VAULT_V2_STORAGE_FILTER_ALL)
@@ -992,7 +1009,15 @@ private fun VaultV2Item.matchesStorageFilter(selection: UnifiedCategoryFilterSel
 			keepassDatabaseId() == selection.databaseId
 		}
 		is UnifiedCategoryFilterSelection.KeePassGroupFilter -> {
-			keepassDatabaseId() == selection.databaseId && keepassGroupPath() == selection.groupPath
+			takagi.ru.monica.ui.KeePassGroupFilterIdentity(
+				databaseId = selection.databaseId,
+				groupPath = selection.groupPath,
+				groupUuid = selection.groupUuid
+			).matches(
+				itemDatabaseId = keepassDatabaseId(),
+				itemGroupPath = keepassGroupPath(),
+				itemGroupUuid = keepassGroupUuid()
+			)
 		}
 		is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter -> {
 			keepassDatabaseId() == selection.databaseId && isFavorite
@@ -1021,7 +1046,7 @@ private fun VaultV2Item.matchesStorageFilter(selection: UnifiedCategoryFilterSel
 	}
 }
 
-private fun VaultV2Item.isLocalOnly(): Boolean {
+internal fun VaultV2Item.isLocalOnly(): Boolean {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.isVaultV2LocalOnly() == true
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.isVaultV2LocalOnly() == true
@@ -1032,7 +1057,7 @@ private fun VaultV2Item.isLocalOnly(): Boolean {
 	}
 }
 
-private fun VaultV2Item.categoryId(): Long? {
+internal fun VaultV2Item.categoryId(): Long? {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.categoryId
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.categoryId
@@ -1043,7 +1068,7 @@ private fun VaultV2Item.categoryId(): Long? {
 	}
 }
 
-private fun VaultV2Item.keepassDatabaseId(): Long? {
+internal fun VaultV2Item.keepassDatabaseId(): Long? {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.keepassDatabaseId
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.keepassDatabaseId
@@ -1054,7 +1079,7 @@ private fun VaultV2Item.keepassDatabaseId(): Long? {
 	}
 }
 
-private fun VaultV2Item.keepassGroupPath(): String? {
+internal fun VaultV2Item.keepassGroupPath(): String? {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.keepassGroupPath
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.keepassGroupPath
@@ -1065,7 +1090,18 @@ private fun VaultV2Item.keepassGroupPath(): String? {
 	}
 }
 
-private fun VaultV2Item.bitwardenVaultId(): Long? {
+internal fun VaultV2Item.keepassGroupUuid(): String? {
+	return when (type) {
+		VaultV2ItemType.PASSWORD -> passwordEntry?.keepassGroupUuid
+		VaultV2ItemType.AUTHENTICATOR -> totpItem?.keepassGroupUuid
+		VaultV2ItemType.NOTE,
+		VaultV2ItemType.BANK_CARD,
+		VaultV2ItemType.DOCUMENT -> secureItem?.keepassGroupUuid
+		VaultV2ItemType.PASSKEY -> null
+	}
+}
+
+internal fun VaultV2Item.bitwardenVaultId(): Long? {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.bitwardenVaultId
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.bitwardenVaultId
@@ -1076,7 +1112,7 @@ private fun VaultV2Item.bitwardenVaultId(): Long? {
 	}
 }
 
-private fun VaultV2Item.bitwardenFolderId(): String? {
+internal fun VaultV2Item.bitwardenFolderId(): String? {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.bitwardenFolderId
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.bitwardenFolderId
@@ -1087,7 +1123,7 @@ private fun VaultV2Item.bitwardenFolderId(): String? {
 	}
 }
 
-private fun VaultV2Item.mdbxDatabaseId(): Long? {
+internal fun VaultV2Item.mdbxDatabaseId(): Long? {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.mdbxDatabaseId
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.mdbxDatabaseId
@@ -1098,7 +1134,7 @@ private fun VaultV2Item.mdbxDatabaseId(): Long? {
 	}
 }
 
-private fun VaultV2Item.mdbxFolderId(): String? {
+internal fun VaultV2Item.mdbxFolderId(): String? {
 	return when (type) {
 		VaultV2ItemType.PASSWORD -> passwordEntry?.mdbxFolderId
 		VaultV2ItemType.AUTHENTICATOR -> totpItem?.mdbxFolderId
@@ -1109,7 +1145,7 @@ private fun VaultV2Item.mdbxFolderId(): String? {
 	}
 }
 
-private fun VaultV2Item.matchesMdbxFolder(databaseId: Long, folderId: String): Boolean {
+internal fun VaultV2Item.matchesMdbxFolder(databaseId: Long, folderId: String): Boolean {
 	if (mdbxDatabaseId() != databaseId) return false
 	val normalizedFolderId = folderId.trim()
 	val explicitFolderId = mdbxFolderId()?.trim().orEmpty()
@@ -1421,22 +1457,20 @@ fun VaultV2Pane(
 	}
 	val selectedKeys = remember { mutableStateListOf<String>() }
 	var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+	var pendingFolderScrollRestore by remember {
+		mutableStateOf<VaultV2FolderNavigationEntry?>(null)
+	}
+	var observedLayoutModeName by rememberSaveable {
+		mutableStateOf(appSettings.vaultV2LayoutMode.name)
+	}
 	LaunchedEffect(state.isArchiveView) {
 		selectedKeys.clear()
+		state.clearFolderNavigationHistory()
+		pendingFolderScrollRestore = null
 		isStorageFilterSheetVisible = false
 		isTopActionsMenuExpanded = false
 		isSearchExpanded = false
 		searchQuery = ""
-	}
-	BackHandler(enabled = state.isArchiveView || isSearchExpanded) {
-		when {
-			selectedKeys.isNotEmpty() -> selectedKeys.clear()
-			isSearchExpanded -> {
-				isSearchExpanded = false
-				searchQuery = ""
-			}
-			else -> state.closeArchiveView()
-		}
 	}
 	val listState = rememberLazyListState(
 		initialFirstVisibleItemIndex = state.scrollIndex,
@@ -1498,6 +1532,7 @@ fun VaultV2Pane(
 		savedCategoryFilterState.primaryId,
 		savedCategoryFilterState.secondaryId,
 		savedCategoryFilterState.text,
+		savedCategoryFilterState.groupUuid,
 	) {
 		if (state.hasInitializedStorageFilter) return@LaunchedEffect
 		val restoredFilter = savedCategoryFilterState.toVaultV2SavedStorageFilter()
@@ -1505,12 +1540,18 @@ fun VaultV2Pane(
 			type = restoredFilter.type,
 			primaryId = restoredFilter.primaryId,
 			secondaryKey = restoredFilter.secondaryKey,
+			identityKey = restoredFilter.identityKey,
 		)
 	}
 	LaunchedEffect(state.hasInitializedStorageFilter) {
 		if (!state.hasInitializedStorageFilter) return@LaunchedEffect
 		snapshotFlow {
-			state.storageFilterType to state.storageFilterPrimaryId
+			listOf(
+				state.storageFilterType,
+				state.storageFilterPrimaryId,
+				state.storageFilterSecondaryKey,
+				state.storageFilterIdentityKey,
+			)
 		}.distinctUntilChanged()
 		 .drop(1) // skip the initial value (matches what Block A just restored)
 		 .collect {
@@ -1525,6 +1566,7 @@ fun VaultV2Pane(
 		state.storageFilterType,
 		state.storageFilterPrimaryId,
 		state.storageFilterSecondaryKey,
+		state.storageFilterIdentityKey,
 	) {
 		state.toUnifiedCategoryFilterSelection()
 	}
@@ -1568,6 +1610,7 @@ fun VaultV2Pane(
 	// 防御：如果当前筛选指向已删除的 Bitwarden vault，自动重置为 All
 	LaunchedEffect(selectedBitwardenVaultId, bitwardenVaults) {
 		if (selectedBitwardenVaultId != null && bitwardenVaults.none { it.id == selectedBitwardenVaultId }) {
+			state.clearFolderNavigationHistory()
 			state.updateStorageFilter(UnifiedCategoryFilterSelection.All)
 		}
 	}
@@ -1640,6 +1683,7 @@ fun VaultV2Pane(
 	LaunchedEffect(selectedKeePassDatabaseId, keepassDatabases.map { it.id }) {
 		val databaseId = selectedKeePassDatabaseId ?: return@LaunchedEffect
 		if (keepassDatabases.none { it.id == databaseId }) {
+			state.clearFolderNavigationHistory()
 			state.updateStorageFilter(UnifiedCategoryFilterSelection.All)
 			return@LaunchedEffect
 		}
@@ -1754,6 +1798,7 @@ fun VaultV2Pane(
 		{ filter ->
 			filter.toUnifiedCategoryFilterSelectionOrNull()?.let { selection ->
 				selectedKeys.clear()
+				state.clearFolderNavigationHistory()
 				state.updateStorageFilter(selection)
 			}
 		}
@@ -2256,6 +2301,86 @@ fun VaultV2Pane(
 	}
 
 	val normalizedQuery = remember(searchQuery) { searchQuery.trim() }
+	val hasHierarchyBreakingQuickFilter = remember(
+		quickFilterFavorite,
+		quickFilter2fa,
+		quickFilterNotes,
+		quickFilterPasskey,
+		quickFilterBoundNote,
+		quickFilterAttachments,
+		quickFilterUncategorized,
+		quickFilterLocalOnly,
+		quickFilterManualStackOnly,
+		quickFilterNeverStack,
+		quickFilterUnstacked,
+		selectedAggregateTypes,
+	) {
+		quickFilterFavorite ||
+			quickFilter2fa ||
+			quickFilterNotes ||
+			quickFilterPasskey ||
+			quickFilterBoundNote ||
+			quickFilterAttachments ||
+			quickFilterUncategorized ||
+			quickFilterLocalOnly ||
+			quickFilterManualStackOnly ||
+			quickFilterNeverStack ||
+			quickFilterUnstacked ||
+			selectedAggregateTypes.isNotEmpty()
+	}
+	val useHierarchicalLayout = remember(
+		appSettings.vaultV2LayoutMode,
+		normalizedQuery,
+		state.isArchiveView,
+		storageSelection,
+		hasHierarchyBreakingQuickFilter,
+	) {
+		appSettings.vaultV2LayoutMode == VaultV2LayoutMode.HIERARCHICAL &&
+			normalizedQuery.isBlank() &&
+			!state.isArchiveView &&
+			!hasHierarchyBreakingQuickFilter &&
+			storageSelection.supportsVaultV2FolderHierarchy()
+	}
+
+	LaunchedEffect(appSettings.vaultV2LayoutMode) {
+		val currentModeName = appSettings.vaultV2LayoutMode.name
+		if (observedLayoutModeName != currentModeName) {
+			observedLayoutModeName = currentModeName
+			state.clearFolderNavigationHistory()
+			pendingFolderScrollRestore = null
+			state.requestScrollToTop()
+		}
+	}
+	val onOpenKeePassNativeManager: () -> Unit = {
+		selectedKeePassDatabaseId?.let(localKeePassViewModel::openNativeManager)
+	}
+
+	BackHandler(
+		enabled = selectedKeys.isNotEmpty() ||
+			state.isArchiveView ||
+			isSearchExpanded ||
+			(useHierarchicalLayout && state.hasFolderNavigationHistory)
+	) {
+		when {
+			selectedKeys.isNotEmpty() -> selectedKeys.clear()
+			isSearchExpanded -> {
+				isSearchExpanded = false
+				searchQuery = ""
+			}
+			useHierarchicalLayout && state.hasFolderNavigationHistory -> {
+				state.popFolderNavigationPosition()?.let { entry ->
+					pendingFolderScrollRestore = entry
+					state.updateStorageFilter(
+						type = entry.storageFilterType,
+						primaryId = entry.storageFilterPrimaryId,
+						secondaryKey = entry.storageFilterSecondaryKey,
+						identityKey = entry.storageFilterIdentityKey,
+					)
+				}
+			}
+			else -> state.closeArchiveView()
+		}
+	}
 	val visibleSnapshotKey = remember(
 		storageSelection,
 		displayedContentTypes,
@@ -2410,20 +2535,83 @@ fun VaultV2Pane(
 			)
 		}
 	}
-	val filteredItems = visibleListState.filteredItems
-	val sectionedItems = visibleListState.sectionedItems
-	val sectionLayouts = visibleListState.sectionLayouts
+	val baseFilteredItems = visibleListState.filteredItems
+	val baseSectionedItems = visibleListState.sectionedItems
+	val baseSectionLayouts = visibleListState.sectionLayouts
+	val hierarchyLocalSourceTitle = stringResource(R.string.vault_v2_hierarchy_local_source)
+	val hierarchicalContent = remember(
+		useHierarchicalLayout,
+		storageSelection,
+		allItemsForVisibleList,
+		baseFilteredItems,
+		categoryMenuQuickFolderShortcuts,
+		quickFolderNodes,
+		keepassDatabases,
+		bitwardenVaults,
+		mdbxDatabases,
+		selectedMdbxFolders,
+		hierarchyLocalSourceTitle,
+		showOnlyLocalData,
+	) {
+		if (useHierarchicalLayout) {
+			buildVaultV2HierarchicalContent(
+				storageSelection = storageSelection,
+				allItems = allItemsForVisibleList,
+				filteredItems = baseFilteredItems,
+				folderShortcuts = categoryMenuQuickFolderShortcuts,
+				quickFolderNodes = quickFolderNodes,
+				keepassDatabases = keepassDatabases,
+				bitwardenVaults = bitwardenVaults,
+				mdbxDatabases = mdbxDatabases,
+				selectedMdbxFolders = selectedMdbxFolders,
+				localSourceTitle = hierarchyLocalSourceTitle,
+				includeExternalSources = !showOnlyLocalData,
+			)
+		} else {
+			VaultV2HierarchicalContent()
+		}
+	}
+	val folderRows = if (useHierarchicalLayout) hierarchicalContent.folderRows else emptyList()
+	val filteredItems = if (useHierarchicalLayout) {
+		hierarchicalContent.directItems
+	} else {
+		baseFilteredItems
+	}
+	val sectionedItems = if (useHierarchicalLayout) {
+		hierarchicalContent.sections
+	} else {
+		baseSectionedItems
+	}
+	val showQuickFiltersInList = !state.isArchiveView && hasVisibleQuickFilters
+	val showCategoryQuickFiltersInList =
+		!state.isArchiveView && !useHierarchicalLayout && categoryMenuQuickFolderShortcuts.isNotEmpty()
+	val hierarchyLeadingItemCount = if (useHierarchicalLayout) {
+		(if (showQuickFiltersInList) 1 else 0) +
+			folderRows.size +
+			(if (sectionedItems.isNotEmpty()) 1 else 0)
+	} else {
+		0
+	}
+	val sectionLayouts = if (useHierarchicalLayout) {
+		buildVaultV2SectionLayouts(
+			sections = sectionedItems,
+			leadingItemCount = hierarchyLeadingItemCount,
+		)
+	} else {
+		baseSectionLayouts
+	}
+	val hasDisplayedContent = folderRows.isNotEmpty() || sectionedItems.isNotEmpty()
 	val isVaultListLoading = remember(
 		computedListStateAsync.isComputing,
 		pendingAllItems,
-		sectionedItems,
+		hasDisplayedContent,
 		normalizedQuery,
 		selectedPasswordEntriesReady,
 		visibleSnapshotSeed.hasSnapshot,
 	) {
 		shouldShowVaultV2InitialLoading(
 			queryIsBlank = normalizedQuery.isBlank(),
-			hasVisibleSections = sectionedItems.isNotEmpty(),
+			hasVisibleSections = hasDisplayedContent,
 			hasRetainedSnapshot = visibleSnapshotSeed.hasSnapshot,
 			passwordEntriesReady = selectedPasswordEntriesReady,
 			computedListIsComputing = computedListStateAsync.isComputing,
@@ -2433,11 +2621,12 @@ fun VaultV2Pane(
 	var showVaultEmptyState by remember(visibleSnapshotKey) {
 		mutableStateOf(
 			visibleSnapshotSeed.hasSnapshot &&
-				visibleSnapshotSeed.value.sectionedItems.isEmpty()
+				visibleSnapshotSeed.value.sectionedItems.isEmpty() &&
+				folderRows.isEmpty()
 		)
 	}
-	LaunchedEffect(sectionedItems, normalizedQuery, isVaultListLoading) {
-		if (sectionedItems.isNotEmpty()) {
+	LaunchedEffect(hasDisplayedContent, normalizedQuery, isVaultListLoading) {
+		if (hasDisplayedContent) {
 			showVaultEmptyState = false
 			return@LaunchedEffect
 		}
@@ -2452,7 +2641,7 @@ fun VaultV2Pane(
 		delay(VAULT_V2_EMPTY_STATE_DEBOUNCE_MS)
 		showVaultEmptyState = true
 	}
-	val showVaultLoadingIndicator = sectionedItems.isEmpty() && isVaultListLoading
+	val showVaultLoadingIndicator = !hasDisplayedContent && isVaultListLoading
 
 	val selectedCount by remember { derivedStateOf { selectedKeys.size } }
 	val selectedItems by remember(allItems) {
@@ -2461,10 +2650,19 @@ fun VaultV2Pane(
 			allItems.filter { it.key in keySet }
 		}
 	}
-	val currentSectionIndicatorLabel by remember(listState, sectionLayouts) {
+	val currentSectionIndicatorLabel by remember(
+		listState,
+		sectionLayouts,
+		useHierarchicalLayout,
+		storageFilterLabel,
+	) {
 		derivedStateOf {
 			if (sectionLayouts.isEmpty()) {
-				"#"
+				if (useHierarchicalLayout) {
+					storageFilterLabel.trim().take(2).uppercase(Locale.ROOT).ifBlank { "#" }
+				} else {
+					"#"
+				}
 			} else {
 				vaultV2SectionTitleForLazyIndex(
 					sectionLayouts = sectionLayouts,
@@ -2514,6 +2712,24 @@ fun VaultV2Pane(
 			.collect { (index, offset) ->
 				state.updateScrollPosition(index, offset)
 			}
+	}
+
+	LaunchedEffect(
+		storageSelection,
+		pendingFolderScrollRestore,
+		folderRows.size,
+		sectionedItems,
+	) {
+		val restore = pendingFolderScrollRestore ?: return@LaunchedEffect
+		pendingFolderScrollRestore = null
+		runCatching {
+			listState.scrollToItem(
+				index = restore.scrollIndex,
+				scrollOffset = restore.scrollOffset,
+			)
+		}.onFailure {
+			runCatching { listState.scrollToItem(0) }
+		}
 	}
 
 	LaunchedEffect(fastScrollRequestKey, fastScrollProgress, sectionLayouts, filteredItems.size) {
@@ -2679,6 +2895,7 @@ fun VaultV2Pane(
 									onSelectFilter = { filter ->
 										filter.toUnifiedCategoryFilterSelectionOrNull()?.let { selection ->
 											selectedKeys.clear()
+											state.clearFolderNavigationHistory()
 											state.updateStorageFilter(selection)
 										}
 										isStorageFilterSheetVisible = false
@@ -2792,6 +3009,12 @@ fun VaultV2Pane(
 										bankCardViewModel.syncKeePassCards(keepassDatabaseId)
 										documentViewModel.syncKeePassDocuments(keepassDatabaseId)
 										noteViewModel.syncKeePassNotes(keepassDatabaseId)
+									}
+								)
+								KeepassNativeManagerTopActionsMenuItem(
+									onClick = {
+										isTopActionsMenuExpanded = false
+										onOpenKeePassNativeManager()
 									}
 								)
 							}
@@ -2953,7 +3176,7 @@ fun VaultV2Pane(
 				.offset { IntOffset(x = 0, y = contentPullOffset) }
 				.nestedScroll(pullAction.nestedScrollConnection)
 				.then(
-					if (sectionedItems.isEmpty()) {
+					if (sectionedItems.isEmpty() && folderRows.isEmpty()) {
 						Modifier.pointerInput(Unit) {
 							detectVerticalDragGestures(
 								onVerticalDrag = { _, dragAmount ->
@@ -2969,14 +3192,28 @@ fun VaultV2Pane(
 				)
 
 			VaultV2List(
-				hasVisibleQuickFilters = !state.isArchiveView && hasVisibleQuickFilters,
-				hasVisibleCategoryQuickFilters = !state.isArchiveView && categoryMenuQuickFolderShortcuts.isNotEmpty(),
+				hasVisibleQuickFilters = showQuickFiltersInList,
+				hasVisibleCategoryQuickFilters = showCategoryQuickFiltersInList,
 				configuredQuickFilterItems = configuredQuickFilterItems,
 				quickFilterChipState = quickFilterBindings.state,
 				quickFilterChipCallbacks = quickFilterBindings.callbacks,
 				categoryQuickFilterShortcuts = categoryMenuQuickFolderShortcuts,
 				currentFilter = categoryMenuFilter,
 				onNavigateFilter = navigateCategoryFilter,
+				folderRows = folderRows,
+				showCurrentFolderHeader = useHierarchicalLayout && sectionedItems.isNotEmpty(),
+				onOpenFolder = { filter ->
+					filter.toUnifiedCategoryFilterSelectionOrNull()?.let { selection ->
+						state.pushFolderNavigationPosition(
+							index = listState.firstVisibleItemIndex,
+							offset = listState.firstVisibleItemScrollOffset,
+						)
+						selectedKeys.clear()
+						pendingFolderScrollRestore = null
+						state.updateStorageFilter(selection)
+						state.requestScrollToTop()
+					}
+				},
 				sections = sectionedItems,
 				showLoadingIndicator = showVaultLoadingIndicator,
 				showEmptyState = showVaultEmptyState,
@@ -3024,6 +3261,7 @@ fun VaultV2Pane(
 				selected = storageSelection,
 				onSelect = { selection ->
 					selectedKeys.clear()
+					state.clearFolderNavigationHistory()
 					state.updateStorageFilter(selection)
 					isStorageFilterSheetVisible = false
 				},
@@ -3351,6 +3589,7 @@ fun VaultV2Pane(
 			UnifiedMoveToCategoryBottomSheet(
 				visible = showVaultMoveSheet,
 				onDismiss = { showVaultMoveSheet = false },
+				initialSource = storageSelection.toUnifiedMoveInitialSource(),
 				categories = categories,
 				keepassDatabases = keepassDatabases,
 				mdbxDatabases = mdbxDatabases,
@@ -3363,188 +3602,129 @@ fun VaultV2Pane(
 				allowArchiveTarget = false,
 				onTargetSelected = { target, _ ->
 					showVaultMoveSheet = false
-					val passwordIds = selectedItems
-						.filter { it.type == VaultV2ItemType.PASSWORD }
-						.mapNotNull { it.passwordEntry?.id }
-					val totpIds = selectedItems
-						.filter { it.type == VaultV2ItemType.AUTHENTICATOR }
-						.mapNotNull { it.totpItem?.id?.takeIf { id -> id > 0 } }
-					val noteItems = selectedItems
-						.filter { it.type == VaultV2ItemType.NOTE }
-						.mapNotNull { it.secureItem }
-					val bankCardIds = selectedItems
-						.filter { it.type == VaultV2ItemType.BANK_CARD }
-						.mapNotNull { it.secureItem?.id }
-					val documentIds = selectedItems
-						.filter { it.type == VaultV2ItemType.DOCUMENT }
-						.mapNotNull { it.secureItem?.id }
-					val passkeyEntries = selectedItems
-						.filter { it.type == VaultV2ItemType.PASSKEY }
-						.mapNotNull { it.passkeyEntry }
-
-					when (target) {
-						is UnifiedMoveCategoryTarget.Uncategorized -> {
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToCategory(passwordIds, null)
-							if (totpIds.isNotEmpty()) totpViewModel.moveToCategory(totpIds, null)
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-							}
+					val movePlan = buildVaultV2BatchMovePlan(selectedItems.toList())
+					if (movePlan.totalCount <= 0) {
+						selectedKeys.clear()
+					} else {
+						val targetLabel = buildMoveTargetLabel(
+							context = context,
+							target = target,
+							categories = categories,
+							keepassDatabases = keepassDatabases,
+							mdbxDatabases = mdbxDatabases,
+						)
+						val actionResolution = resolvePasswordBatchMoveAction(
+							requestedAction = UnifiedMoveAction.MOVE,
+							selectedEntries = movePlan.passwordEntries,
+							target = target,
+						)
+						val effectiveAction = if (
+							actionResolution.effectiveAction == UnifiedMoveAction.COPY ||
+							shouldForceSupplementaryKeePassCopy(
+								requestedAction = UnifiedMoveAction.MOVE,
+								hasKeePassOwnedItems = movePlan.aggregateSelection.hasKeePassOwned,
+								target = target,
+							)
+						) {
+							UnifiedMoveAction.COPY
+						} else {
+							UnifiedMoveAction.MOVE
 						}
-						is UnifiedMoveCategoryTarget.MonicaCategory -> {
-							val catId = target.categoryId
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToCategory(passwordIds, catId)
-							if (totpIds.isNotEmpty()) totpViewModel.moveToCategory(totpIds, catId)
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = catId, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = catId, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = catId, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-							}
+						val notificationId =
+							PasswordBatchTransferNotificationHelper.createNotificationId()
+						val aggregateViewModels = PasswordBatchMoveViewModels(
+							totpViewModel = totpViewModel,
+							bankCardViewModel = bankCardViewModel,
+							documentViewModel = documentViewModel,
+							noteViewModel = noteViewModel,
+							passkeyViewModel = passkeyViewModel,
+						)
+						val onProgressUpdate: (Int, Int) -> Unit = { processed, total ->
+							val safeTotal = total.coerceAtLeast(movePlan.totalCount)
+							val safeProcessed = processed.coerceIn(0, safeTotal)
+							PasswordBatchTransferProgressTracker.update(
+								action = effectiveAction,
+								targetLabel = targetLabel,
+								processed = safeProcessed,
+								total = safeTotal,
+							)
+							PasswordBatchTransferNotificationHelper.showProgress(
+								context = context,
+								notificationId = notificationId,
+								action = effectiveAction,
+								processed = safeProcessed,
+								total = safeTotal,
+								targetLabel = targetLabel,
+							)
 						}
-						is UnifiedMoveCategoryTarget.KeePassDatabaseTarget -> {
-							val dbId = target.databaseId
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToKeePassDatabase(passwordIds, dbId)
-							if (totpIds.isNotEmpty()) totpViewModel.moveToKeePassDatabase(totpIds, dbId)
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = null, keepassDatabaseId = dbId, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = null, keepassDatabaseId = dbId, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = null, keepassDatabaseId = dbId, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-							}
-						}
-						is UnifiedMoveCategoryTarget.KeePassGroupTarget -> {
-							val dbId = target.databaseId
-							val groupPath = target.groupPath
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToKeePassGroup(passwordIds, dbId, groupPath)
-							if (totpIds.isNotEmpty()) totpViewModel.moveToKeePassGroup(totpIds, dbId, groupPath)
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = null, keepassDatabaseId = dbId, keepassGroupPath = groupPath, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = null, keepassDatabaseId = dbId, keepassGroupPath = groupPath, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = null, keepassDatabaseId = dbId, keepassGroupPath = groupPath, bitwardenVaultId = null, bitwardenFolderId = null)
-								}
-							}
-						}
-						is UnifiedMoveCategoryTarget.BitwardenVaultTarget -> {
-							val vaultId = target.vaultId
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToBitwardenFolder(passwordIds, vaultId, "")
-							if (totpIds.isNotEmpty()) totpViewModel.moveToBitwardenFolder(totpIds, vaultId, "")
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = vaultId, bitwardenFolderId = null)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = vaultId, bitwardenFolderId = null)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = vaultId, bitwardenFolderId = null)
-								}
-							}
-						}
-						is UnifiedMoveCategoryTarget.BitwardenFolderTarget -> {
-							val vaultId = target.vaultId
-							val folderId = target.folderId
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToBitwardenFolder(passwordIds, vaultId, folderId)
-							if (totpIds.isNotEmpty()) totpViewModel.moveToBitwardenFolder(totpIds, vaultId, folderId)
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = vaultId, bitwardenFolderId = folderId)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = vaultId, bitwardenFolderId = folderId)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = vaultId, bitwardenFolderId = folderId)
-								}
-							}
-						}
-						is UnifiedMoveCategoryTarget.MdbxDatabaseTarget -> {
-							val dbId = target.databaseId
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToMdbxDatabase(passwordIds, dbId)
-							if (totpIds.isNotEmpty()) totpViewModel.moveToMdbxDatabase(totpIds, dbId)
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null, mdbxDatabaseId = dbId)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null, mdbxDatabaseId = dbId)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null, mdbxDatabaseId = dbId)
-								}
-							}
-						}
-						is UnifiedMoveCategoryTarget.MdbxFolderTarget -> {
-							val dbId = target.databaseId
-							val folderId = target.folderId
-							if (passwordIds.isNotEmpty()) passwordViewModel.movePasswordsToMdbxDatabase(passwordIds, dbId, folderId)
-							if (totpIds.isNotEmpty()) totpViewModel.moveToMdbxDatabase(totpIds, dbId, folderId)
-							scope.launch {
-								noteItems.forEach { note ->
-									noteViewModel.moveNoteToStorage(note, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null, mdbxDatabaseId = dbId, mdbxFolderId = folderId)
-								}
-								bankCardIds.forEach { id ->
-									bankCardViewModel.moveCardToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null, mdbxDatabaseId = dbId, mdbxFolderId = folderId)
-								}
-								documentIds.forEach { id ->
-									documentViewModel.moveDocumentToStorage(id, categoryId = null, keepassDatabaseId = null, keepassGroupPath = null, bitwardenVaultId = null, bitwardenFolderId = null, mdbxDatabaseId = dbId, mdbxFolderId = folderId)
-								}
-							}
-						}
-					}
-					if (passkeyEntries.isNotEmpty()) {
-						scope.launch {
-							passkeyEntries
-								.filter { it.boundPasswordId == null && it.syncStatus != "REFERENCE" }
-								.forEach { passkey ->
-									val updateResult = applyPasswordPagePasskeyStorageTarget(
-										passkey = passkey,
-										target = target,
-										bitwardenRepository = bitwardenRepository,
-										context = context
+						onProgressUpdate(0, movePlan.totalCount)
+						selectedKeys.clear()
+						passwordViewModel.viewModelScope.launch {
+							runCatching {
+								executeMixedPasswordBatchMove(
+									context = context,
+									action = UnifiedMoveAction.MOVE,
+									target = target,
+									selectedEntries = movePlan.passwordEntries,
+									aggregateSelection = movePlan.aggregateSelection,
+									categories = categories,
+									keepassDatabases = keepassDatabases,
+									localKeePassViewModel = localKeePassViewModel,
+									securityManager = securityManager,
+									viewModel = passwordViewModel,
+									aggregateViewModels = aggregateViewModels,
+									bitwardenRepository = bitwardenRepository,
+									onProgress = onProgressUpdate,
+								)
+							}.onSuccess { result ->
+								if (result.successCount > 0) {
+									PasswordBatchTransferProgressTracker.complete(
+										action = effectiveAction,
+										targetLabel = targetLabel,
+										successCount = result.successCount,
 									)
-									if (updateResult.isFailure) {
-										Toast.makeText(
-											context,
-											context.getString(R.string.passkey_bitwarden_move_failed),
-											Toast.LENGTH_SHORT
-										).show()
-										return@forEach
-									}
-									val persistedResult = passkeyViewModel.updatePasskey(updateResult.getOrThrow())
-									if (persistedResult.isFailure) {
-										Toast.makeText(
-											context,
-											context.getString(R.string.passkey_bitwarden_move_failed),
-											Toast.LENGTH_SHORT
-										).show()
-									}
+								} else {
+									PasswordBatchTransferProgressTracker.clear()
 								}
+								PasswordBatchTransferNotificationHelper.showCompleted(
+									context = context,
+									notificationId = notificationId,
+									action = effectiveAction,
+									successCount = result.successCount,
+									failedCount = result.failedCount,
+								)
+								if (result.failedCount > 0) {
+									Toast.makeText(
+										context,
+										context.getString(
+											R.string.password_batch_transfer_partial_result,
+											result.successCount,
+											result.failedCount,
+										),
+										Toast.LENGTH_SHORT,
+									).show()
+								}
+							}.onFailure { error ->
+								Log.e("VaultV2BatchMove", "Unified vault move failed", error)
+								PasswordBatchTransferProgressTracker.clear()
+								PasswordBatchTransferNotificationHelper.showCompleted(
+									context = context,
+									notificationId = notificationId,
+									action = effectiveAction,
+									successCount = 0,
+									failedCount = movePlan.totalCount,
+								)
+								Toast.makeText(
+									context,
+									context.getString(
+										R.string.webdav_operation_failed,
+										error.message.orEmpty(),
+									),
+									Toast.LENGTH_SHORT,
+								).show()
+							}
 						}
 					}
-					selectedKeys.clear()
 				}
 			)
 		}
@@ -3640,6 +3820,9 @@ private fun VaultV2List(
 	categoryQuickFilterShortcuts: List<PasswordQuickFolderShortcut>,
 	currentFilter: CategoryFilter,
 	onNavigateFilter: (CategoryFilter) -> Unit,
+	folderRows: List<VaultV2FolderRowModel>,
+	showCurrentFolderHeader: Boolean,
+	onOpenFolder: (CategoryFilter) -> Unit,
 	sections: List<Pair<String, List<VaultV2Item>>>,
 	showLoadingIndicator: Boolean,
 	showEmptyState: Boolean,
@@ -3691,7 +3874,27 @@ private fun VaultV2List(
 			}
 		}
 
-		if (sections.isEmpty() && showLoadingIndicator) {
+		items(folderRows, key = VaultV2FolderRowModel::key) { folderRow ->
+			VaultV2FolderRow(
+				row = folderRow,
+				onClick = { onOpenFolder(folderRow.targetFilter) },
+			)
+		}
+
+		if (showCurrentFolderHeader && sections.isNotEmpty()) {
+			item(key = "current_folder_header") {
+				Text(
+					text = stringResource(R.string.vault_v2_hierarchy_current_folder),
+					style = MaterialTheme.typography.titleSmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 2.dp),
+				)
+			}
+		}
+
+		if (folderRows.isEmpty() && sections.isEmpty() && showLoadingIndicator) {
 			item(key = "loading") {
 				Box(
 					modifier = Modifier
@@ -3704,7 +3907,7 @@ private fun VaultV2List(
 			}
 		}
 
-		if (sections.isEmpty() && showEmptyState) {
+		if (folderRows.isEmpty() && sections.isEmpty() && showEmptyState) {
 			item(key = "empty") {
 				Box(
 					modifier = Modifier
@@ -4510,7 +4713,7 @@ private fun normalizeVaultV2PasskeyWebsite(rpId: String?): String {
 	}
 }
 
-private fun firstLetterGroup(raw: String): String {
+internal fun firstLetterGroup(raw: String): String {
 	val first = raw.trim().firstOrNull()?.uppercaseChar() ?: return "#"
 	return if (first in 'A'..'Z') first.toString() else "#"
 }

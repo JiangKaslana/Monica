@@ -80,7 +80,11 @@ sealed class TotpCategoryFilter {
     object LocalUncategorized : TotpCategoryFilter()
     data class Custom(val categoryId: Long) : TotpCategoryFilter()
     data class KeePassDatabase(val databaseId: Long) : TotpCategoryFilter()
-    data class KeePassGroupFilter(val databaseId: Long, val groupPath: String) : TotpCategoryFilter()
+    data class KeePassGroupFilter(
+        val databaseId: Long,
+        val groupPath: String,
+        val groupUuid: String? = null
+    ) : TotpCategoryFilter()
     data class KeePassDatabaseStarred(val databaseId: Long) : TotpCategoryFilter()
     data class KeePassDatabaseUncategorized(val databaseId: Long) : TotpCategoryFilter()
     data class BitwardenVault(val vaultId: Long) : TotpCategoryFilter()
@@ -399,8 +403,15 @@ class TotpViewModel(
                 (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId == filter.databaseId
             }
             is TotpCategoryFilter.KeePassGroupFilter -> allTotps.filter {
-                (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId == filter.databaseId &&
-                    it.keepassGroupPath == filter.groupPath
+                takagi.ru.monica.ui.KeePassGroupFilterIdentity(
+                    filter.databaseId,
+                    filter.groupPath,
+                    filter.groupUuid
+                ).matches(
+                    itemDatabaseId = (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId,
+                    itemGroupPath = it.keepassGroupPath,
+                    itemGroupUuid = it.keepassGroupUuid
+                )
             }
             is TotpCategoryFilter.KeePassDatabaseStarred -> allTotps.filter {
                 (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId == filter.databaseId &&
@@ -730,7 +741,12 @@ class TotpViewModel(
         TotpCategoryFilter.LocalUncategorized -> SavedCategoryFilterState(type = FILTER_LOCAL_UNCATEGORIZED)
         is TotpCategoryFilter.Custom -> SavedCategoryFilterState(type = FILTER_CUSTOM, primaryId = filter.categoryId)
         is TotpCategoryFilter.KeePassDatabase -> SavedCategoryFilterState(type = FILTER_KEEPASS_DATABASE, primaryId = filter.databaseId)
-        is TotpCategoryFilter.KeePassGroupFilter -> SavedCategoryFilterState(type = FILTER_KEEPASS_GROUP, primaryId = filter.databaseId, text = filter.groupPath)
+        is TotpCategoryFilter.KeePassGroupFilter -> SavedCategoryFilterState(
+            type = FILTER_KEEPASS_GROUP,
+            primaryId = filter.databaseId,
+            text = filter.groupPath,
+            groupUuid = filter.groupUuid
+        )
         is TotpCategoryFilter.KeePassDatabaseStarred -> SavedCategoryFilterState(type = FILTER_KEEPASS_DATABASE_STARRED, primaryId = filter.databaseId)
         is TotpCategoryFilter.KeePassDatabaseUncategorized -> SavedCategoryFilterState(type = FILTER_KEEPASS_DATABASE_UNCATEGORIZED, primaryId = filter.databaseId)
         is TotpCategoryFilter.BitwardenVault -> SavedCategoryFilterState(type = FILTER_BITWARDEN_VAULT, primaryId = filter.vaultId)
@@ -753,7 +769,11 @@ class TotpViewModel(
             FILTER_KEEPASS_GROUP -> {
                 val databaseId = state.primaryId
                 val groupPath = state.text
-                if (databaseId != null && !groupPath.isNullOrBlank()) TotpCategoryFilter.KeePassGroupFilter(databaseId, groupPath) else TotpCategoryFilter.All
+                if (databaseId != null && !groupPath.isNullOrBlank()) {
+                    TotpCategoryFilter.KeePassGroupFilter(databaseId, groupPath, state.groupUuid)
+                } else {
+                    TotpCategoryFilter.All
+                }
             }
             FILTER_KEEPASS_DATABASE_STARRED -> state.primaryId?.let { TotpCategoryFilter.KeePassDatabaseStarred(it) } ?: TotpCategoryFilter.All
             FILTER_KEEPASS_DATABASE_UNCATEGORIZED -> state.primaryId?.let { TotpCategoryFilter.KeePassDatabaseUncategorized(it) } ?: TotpCategoryFilter.All
@@ -798,8 +818,20 @@ class TotpViewModel(
         SyncDiagnostics.queued(taskId, target, trigger)
         val startedAt = SyncDiagnostics.start(taskId, target, trigger)
         try {
-            val snapshots = keepassBridge
-                ?.readLegacySecureItems(databaseId, setOf(ItemType.TOTP))
+            val bridge = keepassBridge ?: run {
+                SyncDiagnostics.skipped(taskId, target, trigger, "bridge_unavailable", startedAt)
+                return
+            }
+            val decision = bridge.legacyProjectionRefreshDecision(
+                databaseId,
+                takagi.ru.monica.keepass.KeePassProjectionKind.TOTP
+            ).getOrThrow()
+            if (!decision.needsRefresh) {
+                SyncDiagnostics.skipped(taskId, target, trigger, "native_revision_unchanged", startedAt)
+                return
+            }
+            val snapshots = bridge
+                .readLegacySecureItems(databaseId, setOf(ItemType.TOTP))
                 ?.getOrNull()
                 ?: run {
                     SyncDiagnostics.skipped(taskId, target, trigger, "bridge_or_read_unavailable", startedAt)
@@ -851,6 +883,11 @@ class TotpViewModel(
                     }
                 }
             }
+            bridge.markLegacyProjectionIndexed(
+                databaseId,
+                decision.revisionToken,
+                setOf(takagi.ru.monica.keepass.KeePassProjectionKind.TOTP)
+            )
             SyncDiagnostics.success(
                 taskId = taskId,
                 target = target,

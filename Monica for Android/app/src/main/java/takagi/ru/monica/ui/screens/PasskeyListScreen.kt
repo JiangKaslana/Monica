@@ -98,6 +98,7 @@ import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
+import takagi.ru.monica.ui.components.toUnifiedMoveInitialSource
 import takagi.ru.monica.ui.gestures.SwipeActions
 import takagi.ru.monica.ui.haptic.rememberHapticFeedback
 import takagi.ru.monica.utils.BiometricHelper
@@ -1580,6 +1581,7 @@ fun PasskeyListScreen(
     UnifiedMoveToCategoryBottomSheet(
         visible = passkeyToMoveCategory != null,
         onDismiss = { passkeyToMoveCategory = null },
+        initialSource = selectedCategoryFilter.toUnifiedMoveInitialSource(),
         categories = categories,
         keepassDatabases = keepassDatabases,
         mdbxDatabases = mdbxDatabases,
@@ -1631,6 +1633,7 @@ fun PasskeyListScreen(
     UnifiedMoveToCategoryBottomSheet(
         visible = showBatchMoveCategoryDialog,
         onDismiss = { showBatchMoveCategoryDialog = false },
+        initialSource = selectedCategoryFilter.toUnifiedMoveInitialSource(),
         categories = categories,
         keepassDatabases = keepassDatabases,
         mdbxDatabases = mdbxDatabases,
@@ -1729,7 +1732,12 @@ private fun encodePasskeyCategoryFilter(filter: UnifiedCategoryFilterSelection):
     is UnifiedCategoryFilterSelection.BitwardenVaultStarredFilter -> SavedCategoryFilterState(type = "bitwarden_vault_starred", primaryId = filter.vaultId)
     is UnifiedCategoryFilterSelection.BitwardenVaultUncategorizedFilter -> SavedCategoryFilterState(type = "bitwarden_vault_uncategorized", primaryId = filter.vaultId)
     is UnifiedCategoryFilterSelection.KeePassDatabaseFilter -> SavedCategoryFilterState(type = "keepass_database", primaryId = filter.databaseId)
-    is UnifiedCategoryFilterSelection.KeePassGroupFilter -> SavedCategoryFilterState(type = "keepass_group", primaryId = filter.databaseId, text = filter.groupPath)
+    is UnifiedCategoryFilterSelection.KeePassGroupFilter -> SavedCategoryFilterState(
+        type = "keepass_group",
+        primaryId = filter.databaseId,
+        text = filter.groupPath,
+        groupUuid = filter.groupUuid
+    )
     is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter -> SavedCategoryFilterState(type = "keepass_database_starred", primaryId = filter.databaseId)
     is UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter -> SavedCategoryFilterState(type = "keepass_database_uncategorized", primaryId = filter.databaseId)
     is UnifiedCategoryFilterSelection.MdbxDatabaseFilter -> SavedCategoryFilterState(type = "mdbx_database", primaryId = filter.databaseId)
@@ -1762,7 +1770,7 @@ private fun decodePasskeyCategoryFilter(state: SavedCategoryFilterState): Unifie
             val databaseId = state.primaryId
             val groupPath = state.text
             if (databaseId != null && !groupPath.isNullOrBlank()) {
-                UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, groupPath)
+                UnifiedCategoryFilterSelection.KeePassGroupFilter(databaseId, groupPath, state.groupUuid)
             } else {
                 UnifiedCategoryFilterSelection.All
             }

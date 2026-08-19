@@ -38,6 +38,7 @@ import takagi.ru.monica.data.ThemeMode
 import takagi.ru.monica.data.UnifiedProgressBarMode
 import takagi.ru.monica.data.AutofillSource
 import takagi.ru.monica.data.AuthenticatorLayoutMode
+import takagi.ru.monica.data.VaultV2LayoutMode
 
 private val Context.dataStore by preferencesDataStore("settings")
 
@@ -55,7 +56,8 @@ data class SavedCategoryFilterState(
     val type: String = "all",
     val primaryId: Long? = null,
     val secondaryId: Long? = null,
-    val text: String? = null
+    val text: String? = null,
+    val groupUuid: String? = null
 )
 
 data class PageAdjustmentPasswordFieldVisibilitySnapshot(
@@ -114,6 +116,7 @@ data class PageAdjustmentSettingsSnapshot(
     val authenticatorCardDisplayFields: List<String> = emptyList(),
     val authenticatorCardHideCodeByDefault: Boolean = false,
     val authenticatorLayoutMode: String = AuthenticatorLayoutMode.STANDARD.name,
+    val vaultV2LayoutMode: String = VaultV2LayoutMode.CLASSIC.name,
     val validatorProgressBarStyle: String = ProgressBarStyle.LINEAR.name,
     val validatorUnifiedProgressBar: String = UnifiedProgressBarMode.ENABLED.name,
     val validatorSmoothProgress: Boolean = true,
@@ -221,6 +224,7 @@ class SettingsManager(private val context: Context) {
         private val AUTHENTICATOR_CARD_DISPLAY_FIELDS_KEY = stringPreferencesKey("authenticator_card_display_fields") // 验证器卡片显示字段
         private val AUTHENTICATOR_CARD_HIDE_CODE_BY_DEFAULT_KEY = booleanPreferencesKey("authenticator_card_hide_code_by_default") // 验证器卡片默认隐藏验证码
         private val AUTHENTICATOR_LAYOUT_MODE_KEY = stringPreferencesKey("authenticator_layout_mode")
+        private val VAULT_V2_LAYOUT_MODE_KEY = stringPreferencesKey("vault_v2_layout_mode")
         private val PASSWORD_LIST_QUICK_FILTERS_ENABLED_KEY = booleanPreferencesKey("password_list_quick_filters_enabled") // 密码列表快捷筛选开关
         private val PASSWORD_LIST_QUICK_FILTER_ITEMS_KEY = stringPreferencesKey("password_list_quick_filter_items") // 密码列表快捷筛选显示内容
         private val PASSWORD_LIST_CATEGORY_QUICK_FILTERS_ENABLED_KEY = booleanPreferencesKey("password_list_category_quick_filters_enabled") // 密码列表分类快捷筛选开关
@@ -272,6 +276,7 @@ class SettingsManager(private val context: Context) {
         private val LAST_PASSWORD_CATEGORY_FILTER_PRIMARY_ID_KEY = longPreferencesKey("last_password_category_filter_primary_id")
         private val LAST_PASSWORD_CATEGORY_FILTER_SECONDARY_ID_KEY = longPreferencesKey("last_password_category_filter_secondary_id")
         private val LAST_PASSWORD_CATEGORY_FILTER_TEXT_KEY = stringPreferencesKey("last_password_category_filter_text")
+        private val LAST_PASSWORD_CATEGORY_FILTER_GROUP_UUID_KEY = stringPreferencesKey("last_password_category_filter_group_uuid")
 
         // Bitwarden 同步范围
         private val BITWARDEN_UPLOAD_ALL_KEY = booleanPreferencesKey("bitwarden_upload_all")
@@ -316,6 +321,7 @@ class SettingsManager(private val context: Context) {
     private fun categoryFilterPrimaryKey(scope: String) = longPreferencesKey("last_category_filter_${scope}_primary_id")
     private fun categoryFilterSecondaryKey(scope: String) = longPreferencesKey("last_category_filter_${scope}_secondary_id")
     private fun categoryFilterTextKey(scope: String) = stringPreferencesKey("last_category_filter_${scope}_text")
+    private fun categoryFilterGroupUuidKey(scope: String) = stringPreferencesKey("last_category_filter_${scope}_group_uuid")
 
     private fun fieldsFromMode(
         mode: takagi.ru.monica.data.PasswordCardDisplayMode
@@ -629,6 +635,9 @@ class SettingsManager(private val context: Context) {
             authenticatorLayoutMode = AuthenticatorLayoutMode.fromStoredValue(
                 preferences[AUTHENTICATOR_LAYOUT_MODE_KEY]
             ),
+            vaultV2LayoutMode = VaultV2LayoutMode.fromStoredValue(
+                preferences[VAULT_V2_LAYOUT_MODE_KEY]
+            ),
             passwordListQuickFiltersEnabled = preferences[PASSWORD_LIST_QUICK_FILTERS_ENABLED_KEY] ?: false,
             passwordListQuickFilterItems = parsedQuickFilterItems,
             passwordListCategoryQuickFiltersEnabled =
@@ -699,6 +708,7 @@ class SettingsManager(private val context: Context) {
             lastPasswordCategoryFilterPrimaryId = preferences[LAST_PASSWORD_CATEGORY_FILTER_PRIMARY_ID_KEY],
             lastPasswordCategoryFilterSecondaryId = preferences[LAST_PASSWORD_CATEGORY_FILTER_SECONDARY_ID_KEY],
             lastPasswordCategoryFilterText = preferences[LAST_PASSWORD_CATEGORY_FILTER_TEXT_KEY],
+            lastPasswordCategoryFilterGroupUuid = preferences[LAST_PASSWORD_CATEGORY_FILTER_GROUP_UUID_KEY],
             bitwardenUploadAll = preferences[BITWARDEN_UPLOAD_ALL_KEY] ?: false,
             autofillSources = runCatching {
                 val sourcesStr = preferences[AUTOFILL_SOURCES_KEY] ?: AutofillSource.V1_LOCAL.name
@@ -1095,6 +1105,12 @@ class SettingsManager(private val context: Context) {
         }
     }
 
+    suspend fun updateVaultV2LayoutMode(mode: VaultV2LayoutMode) {
+        dataStore.edit { preferences ->
+            preferences[VAULT_V2_LAYOUT_MODE_KEY] = mode.name
+        }
+    }
+
     suspend fun updatePasswordListQuickFiltersEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PASSWORD_LIST_QUICK_FILTERS_ENABLED_KEY] = enabled
@@ -1290,6 +1306,7 @@ class SettingsManager(private val context: Context) {
             authenticatorCardDisplayFields = settings.authenticatorCardDisplayFields.map { it.name },
             authenticatorCardHideCodeByDefault = settings.authenticatorCardHideCodeByDefault,
             authenticatorLayoutMode = settings.authenticatorLayoutMode.name,
+            vaultV2LayoutMode = settings.vaultV2LayoutMode.name,
             validatorProgressBarStyle = settings.validatorProgressBarStyle.name,
             validatorUnifiedProgressBar = settings.validatorUnifiedProgressBar.name,
             validatorSmoothProgress = settings.validatorSmoothProgress,
@@ -1469,6 +1486,8 @@ class SettingsManager(private val context: Context) {
                 snapshot.authenticatorCardHideCodeByDefault
             preferences[AUTHENTICATOR_LAYOUT_MODE_KEY] =
                 AuthenticatorLayoutMode.fromStoredValue(snapshot.authenticatorLayoutMode).name
+            preferences[VAULT_V2_LAYOUT_MODE_KEY] =
+                VaultV2LayoutMode.fromStoredValue(snapshot.vaultV2LayoutMode).name
             preferences[VALIDATOR_PROGRESS_BAR_STYLE_KEY] = parsedValidatorProgressBarStyle.name
             preferences[VALIDATOR_UNIFIED_PROGRESS_BAR_KEY] = parsedValidatorUnifiedProgressBar.name
             preferences[VALIDATOR_SMOOTH_PROGRESS_KEY] = snapshot.validatorSmoothProgress
@@ -1627,7 +1646,8 @@ class SettingsManager(private val context: Context) {
         type: String,
         primaryId: Long? = null,
         secondaryId: Long? = null,
-        text: String? = null
+        text: String? = null,
+        groupUuid: String? = null
     ) {
         dataStore.edit { preferences ->
             preferences[LAST_PASSWORD_CATEGORY_FILTER_TYPE_KEY] = type
@@ -1645,6 +1665,11 @@ class SettingsManager(private val context: Context) {
                 preferences.remove(LAST_PASSWORD_CATEGORY_FILTER_TEXT_KEY)
             } else {
                 preferences[LAST_PASSWORD_CATEGORY_FILTER_TEXT_KEY] = text
+            }
+            if (groupUuid.isNullOrBlank()) {
+                preferences.remove(LAST_PASSWORD_CATEGORY_FILTER_GROUP_UUID_KEY)
+            } else {
+                preferences[LAST_PASSWORD_CATEGORY_FILTER_GROUP_UUID_KEY] = groupUuid
             }
         }
     }
@@ -1686,7 +1711,8 @@ class SettingsManager(private val context: Context) {
             type = preferences[categoryFilterTypeKey(scope)] ?: "all",
             primaryId = preferences[categoryFilterPrimaryKey(scope)],
             secondaryId = preferences[categoryFilterSecondaryKey(scope)],
-            text = preferences[categoryFilterTextKey(scope)]
+            text = preferences[categoryFilterTextKey(scope)],
+            groupUuid = preferences[categoryFilterGroupUuidKey(scope)]
         )
     }
 
@@ -1696,11 +1722,13 @@ class SettingsManager(private val context: Context) {
             val primaryKey = categoryFilterPrimaryKey(scope)
             val secondaryKey = categoryFilterSecondaryKey(scope)
             val textKey = categoryFilterTextKey(scope)
+            val groupUuidKey = categoryFilterGroupUuidKey(scope)
 
             preferences[typeKey] = state.type
             if (state.primaryId != null) preferences[primaryKey] = state.primaryId else preferences.remove(primaryKey)
             if (state.secondaryId != null) preferences[secondaryKey] = state.secondaryId else preferences.remove(secondaryKey)
             if (state.text.isNullOrBlank()) preferences.remove(textKey) else preferences[textKey] = state.text
+            if (state.groupUuid.isNullOrBlank()) preferences.remove(groupUuidKey) else preferences[groupUuidKey] = state.groupUuid
         }
     }
     

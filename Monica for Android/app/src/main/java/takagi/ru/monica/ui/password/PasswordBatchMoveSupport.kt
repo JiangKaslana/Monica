@@ -45,11 +45,37 @@ import takagi.ru.monica.ui.components.UNIFIED_MOVE_ARCHIVE_SENTINEL_CATEGORY_ID
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
+import takagi.ru.monica.ui.components.UnifiedMoveInitialSource
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.utils.decodeKeePassPathForDisplay
 import takagi.ru.monica.utils.FieldChange
 import takagi.ru.monica.utils.OperationLogger
+import takagi.ru.monica.viewmodel.CategoryFilter
 import takagi.ru.monica.viewmodel.PasswordViewModel
+
+internal fun CategoryFilter.toUnifiedMoveInitialSource(): UnifiedMoveInitialSource {
+    return when (this) {
+        is CategoryFilter.KeePassDatabase -> UnifiedMoveInitialSource.KeePassDatabase(databaseId)
+        is CategoryFilter.KeePassGroupFilter -> UnifiedMoveInitialSource.KeePassDatabase(databaseId)
+        is CategoryFilter.KeePassDatabaseStarred -> UnifiedMoveInitialSource.KeePassDatabase(databaseId)
+        is CategoryFilter.KeePassDatabaseUncategorized -> UnifiedMoveInitialSource.KeePassDatabase(databaseId)
+        is CategoryFilter.MdbxDatabase -> UnifiedMoveInitialSource.MdbxDatabase(databaseId)
+        is CategoryFilter.MdbxFolderFilter -> UnifiedMoveInitialSource.MdbxDatabase(databaseId)
+        is CategoryFilter.BitwardenVault -> UnifiedMoveInitialSource.BitwardenVault(vaultId)
+        is CategoryFilter.BitwardenFolderFilter -> UnifiedMoveInitialSource.BitwardenVault(vaultId)
+        is CategoryFilter.BitwardenVaultStarred -> UnifiedMoveInitialSource.BitwardenVault(vaultId)
+        is CategoryFilter.BitwardenVaultUncategorized -> UnifiedMoveInitialSource.BitwardenVault(vaultId)
+        is CategoryFilter.All,
+        is CategoryFilter.Archived,
+        is CategoryFilter.Local,
+        is CategoryFilter.LocalOnly,
+        is CategoryFilter.Starred,
+        is CategoryFilter.Uncategorized,
+        is CategoryFilter.LocalStarred,
+        is CategoryFilter.LocalUncategorized,
+        is CategoryFilter.Custom -> UnifiedMoveInitialSource.MonicaLocal
+    }
+}
 
 internal data class PasswordBatchMoveActionResolution(
     val effectiveAction: UnifiedMoveAction,
@@ -114,7 +140,7 @@ internal fun resolvePasswordBatchMoveAction(
     )
 }
 
-private fun isKeePassMoveCopyOnlyTarget(target: UnifiedMoveCategoryTarget): Boolean {
+internal fun isKeePassMoveCopyOnlyTarget(target: UnifiedMoveCategoryTarget): Boolean {
     return when (target) {
         UnifiedMoveCategoryTarget.Uncategorized -> false
         is UnifiedMoveCategoryTarget.MonicaCategory ->
@@ -125,6 +151,16 @@ private fun isKeePassMoveCopyOnlyTarget(target: UnifiedMoveCategoryTarget): Bool
         is UnifiedMoveCategoryTarget.MdbxFolderTarget -> false
         else -> true
     }
+}
+
+internal fun shouldForceSupplementaryKeePassCopy(
+    requestedAction: UnifiedMoveAction,
+    hasKeePassOwnedItems: Boolean,
+    target: UnifiedMoveCategoryTarget
+): Boolean {
+    return requestedAction == UnifiedMoveAction.MOVE &&
+        hasKeePassOwnedItems &&
+        isKeePassMoveCopyOnlyTarget(target)
 }
 
 internal fun resolvePasswordBatchMoveTargetRouting(
@@ -834,6 +870,7 @@ internal fun PasswordBatchTransferProgressDialog(
 @Composable
 internal fun PasswordBatchMoveSheet(
     visible: Boolean,
+    initialSource: UnifiedMoveInitialSource,
     categories: List<Category>,
     keepassDatabases: List<LocalKeePassDatabase>,
     mdbxDatabases: List<takagi.ru.monica.data.LocalMdbxDatabase> = emptyList(),
@@ -888,6 +925,7 @@ internal fun PasswordBatchMoveSheet(
     UnifiedMoveToCategoryBottomSheet(
         visible = visible,
         onDismiss = onDismiss,
+        initialSource = initialSource,
         categories = categories,
         keepassDatabases = keepassDatabases,
         mdbxDatabases = mdbxDatabases,
@@ -931,7 +969,11 @@ internal fun PasswordBatchMoveSheet(
             )
             val effectiveAction = if (
                 actionResolutionForProgress.effectiveAction == UnifiedMoveAction.COPY ||
-                (action == UnifiedMoveAction.MOVE && aggregateSelection.hasKeePassOwned)
+                shouldForceSupplementaryKeePassCopy(
+                    requestedAction = action,
+                    hasKeePassOwnedItems = aggregateSelection.hasKeePassOwned,
+                    target = target
+                )
             ) {
                 UnifiedMoveAction.COPY
             } else {
@@ -1181,7 +1223,7 @@ internal fun PasswordBatchMoveSheet(
                             localKeePassViewModel = localKeePassViewModel,
                             securityManager = securityManager,
                             viewModel = viewModel,
-                            aggregateUiState = aggregateUiState,
+                            aggregateViewModels = aggregateUiState.toPasswordBatchMoveViewModels(),
                             bitwardenRepository = bitwardenRepository,
                             passwordTargetOverrides = passwordTargetOverrides,
                             onProgress = onProgressUpdate
@@ -1508,9 +1550,12 @@ internal fun PasswordBatchMoveSheet(
                                                 }
                                                 val groupPath = (groupTarget as? UnifiedMoveCategoryTarget.KeePassGroupTarget)
                                                     ?.groupPath
+                                                val groupUuid = (groupTarget as? UnifiedMoveCategoryTarget.KeePassGroupTarget)
+                                                    ?.groupUuid
                                                 val result = localKeePassViewModel.movePasswordEntriesToKdbx(
                                                     databaseId = databaseId,
                                                     groupPath = groupPath,
+                                                    groupUuid = groupUuid,
                                                     entries = groupEntries,
                                                     decryptPassword = { encrypted ->
                                                         resolvePasswordForBatchMove(
@@ -1531,14 +1576,19 @@ internal fun PasswordBatchMoveSheet(
                                                     throw result.exceptionOrNull()
                                                         ?: IllegalStateException("Move to KeePass failed")
                                                 }
-                                                viewModel.unarchivePasswordsAwait(groupIds)
-                                                if (groupPath == null) {
-                                                    viewModel.movePasswordsToKeePassDatabaseAwait(groupIds, databaseId)
-                                                } else {
-                                                    viewModel.movePasswordsToKeePassGroupAwait(
-                                                        groupIds,
-                                                        databaseId,
-                                                        groupPath
+                                                val summary = result.getOrThrow()
+                                                val succeededIds = summary.targetEntryUuidsByPasswordId.keys.toList()
+                                                if (succeededIds.isNotEmpty()) {
+                                                    viewModel.unarchivePasswordsAwait(succeededIds)
+                                                    viewModel.finalizePasswordsWrittenToKeePassAwait(
+                                                        targetEntryUuidsByPasswordId = summary.targetEntryUuidsByPasswordId,
+                                                        databaseId = databaseId,
+                                                        groupPath = groupPath
+                                                    )
+                                                }
+                                                if (summary.failedCount > 0) {
+                                                    throw IllegalStateException(
+                                                        "${summary.failedCount} KeePass entries failed to move"
                                                     )
                                                 }
                                             }

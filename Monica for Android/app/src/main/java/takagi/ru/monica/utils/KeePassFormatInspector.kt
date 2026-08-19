@@ -47,6 +47,10 @@ object KeePassFormatInspector {
         }
     }
 
+    fun ensureKdbxSupportedHeader(header: ByteArray, sourceName: String? = null) {
+        ensureKdbxSupported(header, sourceName)
+    }
+
     private fun matchesSignature(bytes: ByteArray, signature: ByteArray): Boolean {
         if (bytes.size < signature.size) return false
         for (index in signature.indices) {

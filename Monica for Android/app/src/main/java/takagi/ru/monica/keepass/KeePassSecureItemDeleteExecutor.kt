@@ -7,21 +7,11 @@ import takagi.ru.monica.repository.KeePassCompatibilityBridge
 class KeePassSecureItemDeleteExecutor(
     private val bridge: KeePassCompatibilityBridge?
 ) {
-    private val recycleBinUnavailableDatabaseIds = mutableSetOf<Long>()
-
     suspend fun delete(item: SecureItem, useRecycleBin: Boolean): Boolean {
         val databaseId = item.keepassDatabaseId ?: return true
         val keepassBridge = bridge ?: return true
 
-        if (!useRecycleBin) {
-            return runDirectDelete(keepassBridge, databaseId, item)
-        }
-
-        if (isRecycleBinUnavailable(databaseId)) {
-            Log.i(
-                TAG,
-                "Skip recycle bin attempt for db=$databaseId because recycle bin is known unavailable"
-            )
+        if (KeePassDeletePolicy.allowPermanentFallback(useRecycleBin)) {
             return runDirectDelete(keepassBridge, databaseId, item)
         }
 
@@ -37,19 +27,16 @@ class KeePassSecureItemDeleteExecutor(
         if (movedCount != null) {
             Log.w(
                 TAG,
-                "KeePass move to recycle bin affected 0 entries for db=$databaseId, fallback to direct delete"
+                "KeePass move to recycle bin affected 0 entries for db=$databaseId; preserve the item"
             )
         }
 
         val failureMessage = moveToRecycleBin.exceptionOrNull()?.message.orEmpty()
-        if (failureMessage.contains(RECYCLE_BIN_UNAVAILABLE, ignoreCase = true)) {
-            rememberRecycleBinUnavailable(databaseId)
-        }
         Log.w(
             TAG,
-            "KeePass move to recycle bin failed, fallback to direct delete: $failureMessage"
+            "KeePass move to recycle bin failed; permanent delete was not requested: $failureMessage"
         )
-        return runDirectDelete(keepassBridge, databaseId, item)
+        return false
     }
 
     private suspend fun runDirectDelete(
@@ -73,18 +60,7 @@ class KeePassSecureItemDeleteExecutor(
         return true
     }
 
-    private fun isRecycleBinUnavailable(databaseId: Long): Boolean = synchronized(recycleBinUnavailableDatabaseIds) {
-        recycleBinUnavailableDatabaseIds.contains(databaseId)
-    }
-
-    private fun rememberRecycleBinUnavailable(databaseId: Long) {
-        synchronized(recycleBinUnavailableDatabaseIds) {
-            recycleBinUnavailableDatabaseIds += databaseId
-        }
-    }
-
     private companion object {
         const val TAG = "KeePassSecureDelete"
-        const val RECYCLE_BIN_UNAVAILABLE = "recycle bin unavailable"
     }
 }

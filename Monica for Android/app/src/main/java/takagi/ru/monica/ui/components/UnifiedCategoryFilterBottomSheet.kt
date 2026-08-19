@@ -153,7 +153,11 @@ sealed interface UnifiedCategoryFilterSelection {
     data class BitwardenVaultStarredFilter(val vaultId: Long) : UnifiedCategoryFilterSelection
     data class BitwardenVaultUncategorizedFilter(val vaultId: Long) : UnifiedCategoryFilterSelection
     data class KeePassDatabaseFilter(val databaseId: Long) : UnifiedCategoryFilterSelection
-    data class KeePassGroupFilter(val databaseId: Long, val groupPath: String) : UnifiedCategoryFilterSelection
+    data class KeePassGroupFilter(
+        val databaseId: Long,
+        val groupPath: String,
+        val groupUuid: String? = null
+    ) : UnifiedCategoryFilterSelection
     data class KeePassDatabaseStarredFilter(val databaseId: Long) : UnifiedCategoryFilterSelection
     data class KeePassDatabaseUncategorizedFilter(val databaseId: Long) : UnifiedCategoryFilterSelection
     data class MdbxDatabaseFilter(val databaseId: Long) : UnifiedCategoryFilterSelection
@@ -360,7 +364,11 @@ fun UnifiedCategoryFilterBottomSheet(
                             val depth = group.depth.coerceAtLeast(0)
                             val groupSelected = selected is UnifiedCategoryFilterSelection.KeePassGroupFilter &&
                                 selected.databaseId == database.id &&
-                                selected.groupPath == group.path
+                                if (!selected.groupUuid.isNullOrBlank() && !group.uuid.isNullOrBlank()) {
+                                    selected.groupUuid == group.uuid
+                                } else {
+                                    selected.groupPath == group.path
+                                }
                             val parentPathLabel = decodeKeePassPathSegments(group.path)
                                 .dropLast(1)
                                 .takeIf { it.isNotEmpty() }
@@ -374,7 +382,8 @@ fun UnifiedCategoryFilterBottomSheet(
                                         onSelect(
                                             UnifiedCategoryFilterSelection.KeePassGroupFilter(
                                                 databaseId = database.id,
-                                                groupPath = group.path
+                                                groupPath = group.path,
+                                                groupUuid = group.uuid
                                             )
                                         )
                                     },

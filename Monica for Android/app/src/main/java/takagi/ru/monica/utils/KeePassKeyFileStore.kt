@@ -29,7 +29,6 @@ class KeePassKeyFileStore(
 
     fun copyBytes(bytes: ByteArray, displayName: String? = null): StoredKeyFile = synchronized(IO_LOCK) {
         require(bytes.isNotEmpty()) { "密钥文件为空" }
-        require(bytes.size <= MAX_KEY_FILE_BYTES) { "密钥文件超过 ${MAX_KEY_FILE_BYTES / 1024} KB" }
 
         val fingerprint = fingerprint(bytes)
         val relativePath = relativePathForFingerprint(fingerprint)
@@ -59,7 +58,6 @@ class KeePassKeyFileStore(
         val encoded = securityManager.decryptData(encrypted)
         val bytes = Base64.decode(encoded, Base64.NO_WRAP)
         require(bytes.isNotEmpty()) { "内部密钥文件为空" }
-        require(bytes.size <= MAX_KEY_FILE_BYTES) { "内部密钥文件过大" }
         bytes
     }
 
@@ -135,7 +133,6 @@ class KeePassKeyFileStore(
     )
 
     companion object {
-        const val MAX_KEY_FILE_BYTES = 1024 * 1024
         private const val ROOT_DIRECTORY = "keepass_keyfiles"
         private val IO_LOCK = Any()
 

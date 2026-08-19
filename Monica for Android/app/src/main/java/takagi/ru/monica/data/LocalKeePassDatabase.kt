@@ -332,7 +332,7 @@ interface LocalKeePassDatabaseDao {
     @Query("UPDATE local_keepass_databases SET last_accessed_at = :time WHERE id = :id")
     suspend fun updateLastAccessedTime(id: Long, time: Long = System.currentTimeMillis())
     
-    @Query("UPDATE local_keepass_databases SET entry_count = :count WHERE id = :id")
+    @Query("UPDATE local_keepass_databases SET entry_count = :count WHERE id = :id AND entry_count != :count")
     suspend fun updateEntryCount(id: Long, count: Int)
     
     @Query("UPDATE local_keepass_databases SET storage_location = :location, source_type = :sourceType, filePath = :newPath WHERE id = :id")

@@ -396,6 +396,12 @@ class SettingsViewModel(
         }
     }
 
+    fun updateVaultV2LayoutMode(mode: takagi.ru.monica.data.VaultV2LayoutMode) {
+        viewModelScope.launch {
+            settingsManager.updateVaultV2LayoutMode(mode)
+        }
+    }
+
     fun updatePasswordListQuickFiltersEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsManager.updatePasswordListQuickFiltersEnabled(enabled)

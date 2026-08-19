@@ -5,12 +5,14 @@ import app.keemobile.kotpass.errors.FormatError
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.Locale
+import takagi.ru.monica.keepass.KeePassDatabaseReadOnlyException
 
 enum class KeePassErrorCode {
     LEGACY_KDB_UNSUPPORTED,
     FORMAT_UNSUPPORTED,
     INVALID_CREDENTIAL,
     KEY_FILE_UNAVAILABLE,
+    DATABASE_READ_ONLY,
     ONEDRIVE_REDIRECT_CONFLICT,
     URI_PERMISSION_DENIED,
     KDF_MEMORY_INSUFFICIENT,
@@ -31,6 +33,13 @@ fun Throwable.toKeePassOperationException(): KeePassOperationException {
 
     fun wrap(code: KeePassErrorCode, userMessage: String): KeePassOperationException {
         return KeePassOperationException(code = code, message = userMessage, cause = this)
+    }
+
+    if (root is KeePassDatabaseReadOnlyException) {
+        return wrap(
+            code = KeePassErrorCode.DATABASE_READ_ONLY,
+            userMessage = "数据库已设为只读，请先在数据库设置中关闭只读模式"
+        )
     }
 
     if (isOneDriveRedirectHandlerConflict()) {

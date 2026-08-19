@@ -110,6 +110,7 @@ import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
+import takagi.ru.monica.ui.components.toUnifiedMoveInitialSource
 import takagi.ru.monica.ui.components.PullActionVisualState
 import takagi.ru.monica.ui.components.PullGestureIndicator
 import takagi.ru.monica.bitwarden.sync.SyncStatus
@@ -258,7 +259,11 @@ fun NoteListScreen(
         is NoteCategoryFilter.BitwardenVaultStarred -> UnifiedCategoryFilterSelection.BitwardenVaultStarredFilter(filter.vaultId)
         is NoteCategoryFilter.BitwardenVaultUncategorized -> UnifiedCategoryFilterSelection.BitwardenVaultUncategorizedFilter(filter.vaultId)
         is NoteCategoryFilter.KeePassDatabase -> UnifiedCategoryFilterSelection.KeePassDatabaseFilter(filter.databaseId)
-        is NoteCategoryFilter.KeePassGroupFilter -> UnifiedCategoryFilterSelection.KeePassGroupFilter(filter.databaseId, filter.groupPath)
+        is NoteCategoryFilter.KeePassGroupFilter -> UnifiedCategoryFilterSelection.KeePassGroupFilter(
+            filter.databaseId,
+            filter.groupPath,
+            filter.groupUuid
+        )
         is NoteCategoryFilter.KeePassDatabaseStarred -> UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter(filter.databaseId)
         is NoteCategoryFilter.KeePassDatabaseUncategorized -> UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter(filter.databaseId)
         is NoteCategoryFilter.MdbxDatabase -> UnifiedCategoryFilterSelection.MdbxDatabaseFilter(filter.databaseId)
@@ -277,7 +282,11 @@ fun NoteListScreen(
             is UnifiedCategoryFilterSelection.BitwardenVaultStarredFilter -> NoteCategoryFilter.BitwardenVaultStarred(selection.vaultId)
             is UnifiedCategoryFilterSelection.BitwardenVaultUncategorizedFilter -> NoteCategoryFilter.BitwardenVaultUncategorized(selection.vaultId)
             is UnifiedCategoryFilterSelection.KeePassDatabaseFilter -> NoteCategoryFilter.KeePassDatabase(selection.databaseId)
-            is UnifiedCategoryFilterSelection.KeePassGroupFilter -> NoteCategoryFilter.KeePassGroupFilter(selection.databaseId, selection.groupPath)
+            is UnifiedCategoryFilterSelection.KeePassGroupFilter -> NoteCategoryFilter.KeePassGroupFilter(
+                selection.databaseId,
+                selection.groupPath,
+                selection.groupUuid
+            )
         is UnifiedCategoryFilterSelection.KeePassDatabaseStarredFilter -> NoteCategoryFilter.KeePassDatabaseStarred(selection.databaseId)
         is UnifiedCategoryFilterSelection.KeePassDatabaseUncategorizedFilter -> NoteCategoryFilter.KeePassDatabaseUncategorized(selection.databaseId)
         is UnifiedCategoryFilterSelection.MdbxDatabaseFilter -> NoteCategoryFilter.MdbxDatabase(selection.databaseId)
@@ -844,6 +853,7 @@ fun NoteListScreen(
         UnifiedMoveToCategoryBottomSheet(
             visible = showBatchMoveCategoryDialog,
             onDismiss = { showBatchMoveCategoryDialog = false },
+            initialSource = selectedUnifiedFilter.toUnifiedMoveInitialSource(),
             categories = categories,
             keepassDatabases = keepassDatabases,
             mdbxDatabases = mdbxDatabases,
@@ -1017,8 +1027,15 @@ private fun filterNotesByCategory(
             (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId == filter.databaseId
         }
         is NoteCategoryFilter.KeePassGroupFilter -> notes.filter {
-            (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId == filter.databaseId &&
-                it.keepassGroupPath == filter.groupPath
+            takagi.ru.monica.ui.KeePassGroupFilterIdentity(
+                filter.databaseId,
+                filter.groupPath,
+                filter.groupUuid
+            ).matches(
+                itemDatabaseId = (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId,
+                itemGroupPath = it.keepassGroupPath,
+                itemGroupUuid = it.keepassGroupUuid
+            )
         }
         is NoteCategoryFilter.KeePassDatabaseStarred -> notes.filter {
             (it.resolveOwnership() as? SecureItemOwnership.KeePass)?.databaseId == filter.databaseId &&

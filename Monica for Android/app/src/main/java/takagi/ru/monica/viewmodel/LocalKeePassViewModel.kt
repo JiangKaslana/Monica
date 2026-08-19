@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import takagi.ru.monica.data.KeePassCipherAlgorithm
+import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.KeePassDatabaseCreationOptions
 import takagi.ru.monica.data.KeePassDatabaseSourceType
 import takagi.ru.monica.data.KeePassFormatVersion
@@ -45,9 +46,41 @@ import takagi.ru.monica.data.OperationLogItemType
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.attachments.AttachmentContainer
+import takagi.ru.monica.attachments.executor.KeePassAttachmentRef
 import takagi.ru.monica.keepass.KeePassCrossDatabaseTransfer
+import takagi.ru.monica.keepass.KeePassDxPasskeyCodec
+import takagi.ru.monica.keepass.KeePassFieldChange
+import takagi.ru.monica.keepass.KeePassNativeBrowserSnapshot
+import takagi.ru.monica.keepass.KeePassNativeEntryRecord
+import takagi.ru.monica.keepass.KeePassNativeEntryRouteKind
+import takagi.ru.monica.keepass.KeePassNativeEntryRoutePolicy
+import takagi.ru.monica.keepass.KeePassNativeGroupRecord
+import takagi.ru.monica.keepass.KeePassNativeGroupIdentity
+import takagi.ru.monica.keepass.KeePassNativeManagerRetainedState
+import takagi.ru.monica.keepass.KeePassNativeResolvedRoute
+import takagi.ru.monica.keepass.KeePassNativeSearchOptions
+import takagi.ru.monica.keepass.KeePassNativeSearchResult
+import takagi.ru.monica.keepass.KeePassDatabaseSettingsSnapshot
+import takagi.ru.monica.keepass.KeePassDatabaseSettingsUpdate
+import takagi.ru.monica.keepass.KeePassKeyFileChangeMode
+import takagi.ru.monica.keepass.KeePassMasterCredentialChangeResult
+import takagi.ru.monica.keepass.KeePassConflictDecision
+import takagi.ru.monica.keepass.KeePassConflictResolutionSide
+import takagi.ru.monica.keepass.KeePassRemoteConflictPreview
+import takagi.ru.monica.keepass.KeePassRemoteConflictResolution
+import takagi.ru.monica.keepass.KeePassIntegrityReport
+import takagi.ru.monica.keepass.KeePassMaintenanceExecution
+import takagi.ru.monica.keepass.KeePassMaintenanceOptions
+import takagi.ru.monica.keepass.KeePassNativeDeleteMode
+import takagi.ru.monica.keepass.KeePassNativeGroupUpdate
+import takagi.ru.monica.keepass.KeePassNativeEntryPresentationUpdate
+import takagi.ru.monica.keepass.KeePassNativeCustomIconPoolUpdate
+import takagi.ru.monica.keepass.KeePassRecoveryRecord
+import takagi.ru.monica.keepass.KeePassPasswordMoveRoute
+import takagi.ru.monica.keepass.resolveKeePassPasswordMoveRoute
 import takagi.ru.monica.repository.KeePassCompatibilityBridge
 import takagi.ru.monica.repository.KeePassWorkspaceRepository
+import takagi.ru.monica.passkey.PasskeyCredentialIdCodec
 import takagi.ru.monica.security.SecurityManager
 import takagi.ru.monica.sync.KEEPASS_REMOTE_SYNC_DEDUPE_KEY
 import takagi.ru.monica.sync.SyncDiagnostics
@@ -85,6 +118,16 @@ import takagi.ru.monica.utils.WebDavKeePassSupport
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.time.Instant
+import java.util.UUID
+
+data class KeePassPasswordMoveBatchResult(
+    val targetEntryUuidsByPasswordId: Map<Long, String>,
+    val failuresByPasswordId: Map<Long, String>
+) {
+    val successCount: Int get() = targetEntryUuidsByPasswordId.size
+    val failedCount: Int get() = failuresByPasswordId.size
+}
 
 /**
  * 本地 KeePass 数据库管理 ViewModel
@@ -139,6 +182,12 @@ class LocalKeePassViewModel(
     /** 当前选中的数据库 */
     private val _selectedDatabase = MutableStateFlow<LocalKeePassDatabase?>(null)
     val selectedDatabase: StateFlow<LocalKeePassDatabase?> = _selectedDatabase.asStateFlow()
+
+    private val _activeNativeManagerDatabaseId = MutableStateFlow<Long?>(null)
+    val activeNativeManagerDatabaseId: StateFlow<Long?> = _activeNativeManagerDatabaseId.asStateFlow()
+    private val _nativeManagerOpenRequests = MutableSharedFlow<Long>(extraBufferCapacity = 1)
+    val nativeManagerOpenRequests: SharedFlow<Long> = _nativeManagerOpenRequests.asSharedFlow()
+    private val nativeManagerRetainedStates = mutableMapOf<Long, KeePassNativeManagerRetainedState>()
     
     /** KeePass 分组缓存，按数据库 ID 组织 */
     private val _groupsByDatabase = MutableStateFlow<Map<Long, List<KeePassGroupInfo>>>(emptyMap())
@@ -166,9 +215,506 @@ class LocalKeePassViewModel(
 
     init {
         AttachmentContainer.registerKeePassService(kdbxService)
-        autoResolveWebDavConflictDatabases()
         repairOpaqueExternalDatabaseNames()
     }
+
+    fun openNativeManager(databaseId: Long) {
+        nativeManagerRetainedStates.putIfAbsent(
+            databaseId,
+            KeePassNativeManagerRetainedState(databaseId = databaseId)
+        )
+        _activeNativeManagerDatabaseId.value = databaseId
+        _nativeManagerOpenRequests.tryEmit(databaseId)
+    }
+
+    fun closeNativeManager(databaseId: Long, clearRetainedState: Boolean = true) {
+        if (_activeNativeManagerDatabaseId.value == databaseId) {
+            _activeNativeManagerDatabaseId.value = null
+        }
+        if (clearRetainedState) nativeManagerRetainedStates.remove(databaseId)
+    }
+
+    internal fun isKeePassDatabaseReadOnly(databaseId: Long): Boolean =
+        compatibilityBridge.isDatabaseReadOnly(databaseId)
+
+    internal fun setKeePassDatabaseReadOnly(databaseId: Long, readOnly: Boolean) {
+        compatibilityBridge.setDatabaseReadOnly(databaseId, readOnly)
+    }
+
+    internal suspend fun loadKeePassDatabaseSettings(
+        databaseId: Long
+    ): Result<KeePassDatabaseSettingsSnapshot> =
+        compatibilityBridge.readNativeDatabaseSettings(databaseId)
+
+    internal suspend fun updateKeePassDatabaseSettings(
+        databaseId: Long,
+        update: KeePassDatabaseSettingsUpdate
+    ): Result<KeePassDatabaseSettingsSnapshot> =
+        compatibilityBridge.updateNativeDatabaseSettings(databaseId, update)
+
+    internal suspend fun changeKeePassMasterCredentials(
+        databaseId: Long,
+        newPassword: String,
+        keyFileMode: KeePassKeyFileChangeMode,
+        replacementKeyFileUri: Uri?,
+        keepInternalKeyFileCopy: Boolean
+    ): Result<KeePassMasterCredentialChangeResult> =
+        compatibilityBridge.changeMasterCredentials(
+            databaseId = databaseId,
+            newPassword = newPassword,
+            keyFileMode = keyFileMode,
+            replacementKeyFileUri = replacementKeyFileUri,
+            keepInternalKeyFileCopy = keepInternalKeyFileCopy
+        ).onSuccess {
+            refreshKeyFileAccessState(databaseId)
+        }
+
+    internal fun verifyMonicaMasterPassword(password: String): Boolean =
+        securityManager.verifyMasterPassword(password)
+
+    fun lockKeePassDatabase(databaseId: Long) {
+        compatibilityBridge.lockDatabase(databaseId)
+        closeNativeManager(databaseId, clearRetainedState = true)
+        _groupsByDatabase.update { current -> current - databaseId }
+        _verificationStates.update { current -> current - databaseId }
+        _operationState.value = OperationState.Success("数据库已锁定")
+    }
+
+    internal fun nativeManagerRetainedState(databaseId: Long): KeePassNativeManagerRetainedState =
+        nativeManagerRetainedStates[databaseId]
+            ?: KeePassNativeManagerRetainedState(databaseId = databaseId)
+
+    internal fun retainNativeManagerState(state: KeePassNativeManagerRetainedState) {
+        nativeManagerRetainedStates[state.databaseId] = state
+    }
+
+    internal suspend fun resolveNativeEntryRoute(
+        entry: KeePassNativeEntryRecord
+    ): Result<KeePassNativeResolvedRoute> = withContext(Dispatchers.IO) {
+        runCatching {
+            val databaseId = entry.identity.databaseId
+            val entryUuid = entry.identity.entryUuid.toString()
+            when (KeePassNativeEntryRoutePolicy.routeFor(entry.kind)) {
+                KeePassNativeEntryRouteKind.PASSWORD -> {
+                    appDatabase.passwordEntryDao()
+                        .findByKeePassEntryUuid(databaseId, entryUuid)
+                        ?.let { KeePassNativeResolvedRoute.Password(it.id) }
+                        ?: KeePassNativeResolvedRoute.Generic
+                }
+                KeePassNativeEntryRouteKind.TOTP -> resolveSecureItemRoute(
+                    databaseId,
+                    entryUuid,
+                    ItemType.TOTP
+                ) { id -> KeePassNativeResolvedRoute.Totp(id) }
+                KeePassNativeEntryRouteKind.NOTE -> resolveSecureItemRoute(
+                    databaseId,
+                    entryUuid,
+                    ItemType.NOTE
+                ) { id -> KeePassNativeResolvedRoute.Note(id) }
+                KeePassNativeEntryRouteKind.BANK_CARD -> resolveSecureItemRoute(
+                    databaseId,
+                    entryUuid,
+                    ItemType.BANK_CARD
+                ) { id -> KeePassNativeResolvedRoute.BankCard(id) }
+                KeePassNativeEntryRouteKind.DOCUMENT -> resolveSecureItemRoute(
+                    databaseId,
+                    entryUuid,
+                    ItemType.DOCUMENT
+                ) { id -> KeePassNativeResolvedRoute.Document(id) }
+                KeePassNativeEntryRouteKind.PASSKEY -> {
+                    val rawCredentialId = entry.field("MonicaPasskeyCredentialId")?.displayValue
+                        .orEmpty()
+                        .ifBlank {
+                            entry.field(KeePassDxPasskeyCodec.FIELD_CREDENTIAL_ID)?.displayValue.orEmpty()
+                        }
+                    val targetCredentialId = PasskeyCredentialIdCodec.normalize(rawCredentialId) ?: rawCredentialId
+                    appDatabase.passkeyDao()
+                        .getKeePassCompatPasskeysByDatabaseId(databaseId)
+                        .firstOrNull { candidate ->
+                            val candidateCredentialId = PasskeyCredentialIdCodec.normalize(candidate.credentialId)
+                                ?: candidate.credentialId
+                            targetCredentialId.isNotBlank() && candidateCredentialId == targetCredentialId
+                        }
+                        ?.let { KeePassNativeResolvedRoute.Passkey(it.id) }
+                        ?: KeePassNativeResolvedRoute.Generic
+                }
+                KeePassNativeEntryRouteKind.GENERIC -> KeePassNativeResolvedRoute.Generic
+            }
+        }
+    }
+
+    private suspend fun resolveSecureItemRoute(
+        databaseId: Long,
+        entryUuid: String,
+        expectedType: ItemType,
+        route: (Long) -> KeePassNativeResolvedRoute
+    ): KeePassNativeResolvedRoute {
+        val item = appDatabase.secureItemDao().findByKeePassEntryUuid(databaseId, entryUuid)
+        return if (item != null && item.itemType == expectedType) route(item.id)
+        else KeePassNativeResolvedRoute.Generic
+    }
+
+    internal suspend fun openNativeBrowser(databaseId: Long): Result<KeePassNativeBrowserSnapshot> =
+        workspaceRepository.openNativeBrowser(databaseId)
+
+    internal suspend fun searchNativeEntries(
+        databaseId: Long,
+        options: KeePassNativeSearchOptions,
+        now: Instant = Instant.now()
+    ): Result<KeePassNativeSearchResult> =
+        workspaceRepository.searchNativeEntries(databaseId, options, now)
+
+    internal suspend fun replaceNativeEntryFields(
+        databaseId: Long,
+        entryUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.replaceNativeEntryFields(
+        databaseId,
+        entryUuid,
+        fields,
+        expectedRevisionToken
+    )
+
+    internal suspend fun replaceNativeEntryFieldsAndPresentation(
+        databaseId: Long,
+        entryUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        presentation: KeePassNativeEntryPresentationUpdate,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.replaceNativeEntryFieldsAndPresentation(
+        databaseId,
+        entryUuid,
+        fields,
+        presentation,
+        expectedRevisionToken,
+    )
+
+    internal suspend fun replaceNativeEntryPresentation(
+        databaseId: Long,
+        entryUuid: UUID,
+        update: KeePassNativeEntryPresentationUpdate,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.replaceNativeEntryPresentation(
+        databaseId,
+        entryUuid,
+        update,
+        expectedRevisionToken,
+    )
+
+    internal suspend fun updateNativeCustomIconPool(
+        databaseId: Long,
+        update: KeePassNativeCustomIconPoolUpdate,
+        expectedRevisionToken: String,
+    ): Result<Unit> = workspaceRepository.updateNativeCustomIconPool(
+        databaseId,
+        update,
+        expectedRevisionToken,
+    )
+
+    internal suspend fun restoreNativeEntryHistory(
+        databaseId: Long,
+        entryUuid: UUID,
+        historyIndex: Int,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.restoreNativeEntryHistory(
+        databaseId,
+        entryUuid,
+        historyIndex,
+        expectedRevisionToken
+    )
+
+    internal suspend fun deleteNativeEntryHistory(
+        databaseId: Long,
+        entryUuid: UUID,
+        historyIndex: Int,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.deleteNativeEntryHistory(
+        databaseId,
+        entryUuid,
+        historyIndex,
+        expectedRevisionToken
+    )
+
+    internal suspend fun createNativeGroup(
+        databaseId: Long,
+        parentGroupUuid: UUID,
+        name: String,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = workspaceRepository.createNativeGroup(
+        databaseId,
+        parentGroupUuid,
+        name,
+        expectedRevisionToken
+    )
+
+    internal suspend fun renameNativeGroup(
+        databaseId: Long,
+        groupUuid: UUID,
+        newName: String,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = workspaceRepository.renameNativeGroup(
+        databaseId,
+        groupUuid,
+        newName,
+        expectedRevisionToken
+    )
+
+    internal suspend fun moveNativeGroup(
+        databaseId: Long,
+        groupUuid: UUID,
+        targetParentGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = workspaceRepository.moveNativeGroup(
+        databaseId,
+        groupUuid,
+        targetParentGroupUuid,
+        expectedRevisionToken
+    )
+
+    internal suspend fun moveNativeGroups(
+        databaseId: Long,
+        groupUuids: Set<UUID>,
+        targetParentGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<List<KeePassNativeGroupRecord>> = workspaceRepository.moveNativeGroups(
+        databaseId = databaseId,
+        groupUuids = groupUuids,
+        targetParentGroupUuid = targetParentGroupUuid,
+        expectedRevisionToken = expectedRevisionToken,
+    )
+
+    internal suspend fun deleteNativeGroup(
+        databaseId: Long,
+        groupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<Unit> = workspaceRepository.deleteNativeGroup(
+        databaseId,
+        groupUuid,
+        expectedRevisionToken
+    )
+
+    internal suspend fun createNativeEntry(
+        databaseId: Long,
+        parentGroupUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.createNativeEntry(
+        databaseId,
+        parentGroupUuid,
+        fields,
+        expectedRevisionToken
+    )
+
+    internal suspend fun duplicateNativeEntry(
+        databaseId: Long,
+        entryUuid: UUID,
+        targetGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.duplicateNativeEntry(
+        databaseId,
+        entryUuid,
+        targetGroupUuid,
+        expectedRevisionToken
+    )
+
+    internal suspend fun saveNativeEntryAsTemplate(
+        databaseId: Long,
+        entryUuid: UUID,
+        titleOverride: String?,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.saveNativeEntryAsTemplate(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        titleOverride = titleOverride,
+        expectedRevisionToken = expectedRevisionToken,
+    )
+
+    internal suspend fun instantiateNativeTemplate(
+        databaseId: Long,
+        templateEntryUuid: UUID,
+        targetGroupUuid: UUID,
+        titleOverride: String?,
+        expectedRevisionToken: String,
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.instantiateNativeTemplate(
+        databaseId = databaseId,
+        templateEntryUuid = templateEntryUuid,
+        targetGroupUuid = targetGroupUuid,
+        titleOverride = titleOverride,
+        expectedRevisionToken = expectedRevisionToken,
+    )
+
+    internal suspend fun deleteNativeTemplate(
+        databaseId: Long,
+        templateEntryUuid: UUID,
+        expectedRevisionToken: String,
+    ): Result<Unit> = workspaceRepository.deleteNativeTemplate(
+        databaseId = databaseId,
+        templateEntryUuid = templateEntryUuid,
+        expectedRevisionToken = expectedRevisionToken,
+    )
+
+    internal suspend fun moveNativeEntries(
+        databaseId: Long,
+        entryUuids: Set<UUID>,
+        targetGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<List<KeePassNativeEntryRecord>> = workspaceRepository.moveNativeEntries(
+        databaseId,
+        entryUuids,
+        targetGroupUuid,
+        expectedRevisionToken
+    )
+
+    internal suspend fun deleteNativeEntries(
+        databaseId: Long,
+        entryUuids: Set<UUID>,
+        mode: KeePassNativeDeleteMode,
+        expectedRevisionToken: String
+    ): Result<Unit> = workspaceRepository.deleteNativeEntries(
+        databaseId,
+        entryUuids,
+        mode,
+        expectedRevisionToken
+    )
+
+    internal suspend fun renameNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        attachmentHashHex: String,
+        currentName: String?,
+        newName: String,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.renameNativeAttachment(
+        databaseId,
+        entryUuid,
+        attachmentHashHex,
+        currentName,
+        newName,
+        expectedRevisionToken
+    )
+
+    internal suspend fun addNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        sourceUri: Uri,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.addNativeAttachmentFromUri(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        sourceUri = sourceUri,
+        expectedRevisionToken = expectedRevisionToken
+    )
+
+    internal suspend fun deleteNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        attachmentHashHex: String,
+        currentName: String?,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.deleteNativeAttachment(
+        databaseId,
+        entryUuid,
+        attachmentHashHex,
+        currentName,
+        expectedRevisionToken
+    )
+
+    internal suspend fun exportNativeAttachment(
+        databaseId: Long,
+        entryUuid: UUID,
+        attachmentHashHex: String,
+        currentName: String?,
+        destinationUri: Uri
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val encodedReference = KeePassAttachmentRef.from(attachmentHashHex, currentName).encode()
+            val bytes = kdbxService.readAttachmentBytes(
+                databaseId = databaseId,
+                entryUuid = entryUuid.toString(),
+                hashHex = encodedReference
+            ).getOrThrow()
+            context.contentResolver.openOutputStream(destinationUri, "w")?.use { output ->
+                output.write(bytes)
+                output.flush()
+            } ?: throw IOException("Unable to open attachment destination")
+        }
+    }
+
+    internal suspend fun updateNativeGroupProperties(
+        databaseId: Long,
+        groupUuid: UUID,
+        update: KeePassNativeGroupUpdate,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeGroupRecord> = workspaceRepository.updateNativeGroupProperties(
+        databaseId,
+        groupUuid,
+        update,
+        expectedRevisionToken
+    )
+
+    internal suspend fun inspectNativeDatabaseIntegrity(databaseId: Long): Result<KeePassIntegrityReport> =
+        workspaceRepository.inspectNativeDatabaseIntegrity(databaseId)
+
+    internal suspend fun repairNativeDatabase(
+        databaseId: Long,
+        options: KeePassMaintenanceOptions = KeePassMaintenanceOptions()
+    ): Result<KeePassMaintenanceExecution> = workspaceRepository.repairNativeDatabase(databaseId, options)
+
+    internal suspend fun listRecoveryCopies(databaseId: Long): List<KeePassRecoveryRecord> =
+        withContext(Dispatchers.IO) { workspaceRepository.listRecoveryCopies(databaseId) }
+
+    internal suspend fun exportRecoveryCopy(
+        record: KeePassRecoveryRecord,
+        destinationUri: Uri
+    ): Result<Unit> = workspaceRepository.exportRecoveryCopy(record, destinationUri)
+
+    internal suspend fun deleteRecoveryCopy(record: KeePassRecoveryRecord): Result<Unit> =
+        workspaceRepository.deleteRecoveryCopy(record)
+
+    internal suspend fun restoreRecoveryCopy(
+        databaseId: Long,
+        record: KeePassRecoveryRecord
+    ): Result<Unit> = workspaceRepository.restoreRecoveryCopy(databaseId, record)
+
+    internal suspend fun saveNativeDatabaseCopy(
+        databaseId: Long,
+        destinationUri: Uri
+    ): Result<Unit> = workspaceRepository.saveNativeDatabaseCopy(databaseId, destinationUri)
+
+    internal suspend fun mergeNativeDatabaseFrom(
+        databaseId: Long,
+        sourceUri: Uri,
+        sourcePassword: String,
+        sourceKeyFileUri: Uri?,
+        targetGroupUuid: UUID,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeBrowserSnapshot> = workspaceRepository.mergeNativeDatabaseFrom(
+        databaseId,
+        sourceUri,
+        sourcePassword,
+        sourceKeyFileUri,
+        targetGroupUuid,
+        expectedRevisionToken
+    )
+
+    internal suspend fun inspectCurrentRemoteConflict(
+        databaseId: Long
+    ): Result<KeePassRemoteConflictPreview> = workspaceRepository.inspectCurrentRemoteConflict(databaseId)
+
+    internal suspend fun resolveCurrentRemoteConflict(
+        databaseId: Long,
+        decision: KeePassConflictDecision,
+        expectedLocalRevision: String,
+        expectedRemoteRevision: String,
+        selections: Map<String, KeePassConflictResolutionSide> = emptyMap()
+    ): Result<KeePassRemoteConflictResolution> = workspaceRepository.resolveCurrentRemoteConflict(
+        databaseId,
+        decision,
+        expectedLocalRevision,
+        expectedRemoteRevision,
+        selections
+    )
 
     /**
      * Older imports used Uri.lastPathSegment as the display name. Some
@@ -1705,26 +2251,6 @@ class LocalKeePassViewModel(
         }
     }
 
-    private fun autoResolveWebDavConflictDatabases() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val conflictDatabaseIds = dao.getAllDatabasesSync()
-                .asSequence()
-                .filter { it.sourceType == KeePassDatabaseSourceType.REMOTE_WEBDAV }
-                .filter { it.lastSyncStatus == KeePassSyncStatus.CONFLICT }
-                .map { it.id }
-                .toList()
-
-            if (conflictDatabaseIds.isEmpty()) {
-                return@launch
-            }
-
-            Log.i(TAG, "Detected ${conflictDatabaseIds.size} WebDAV conflict database(s), start silent auto-resolve")
-            conflictDatabaseIds.forEach { databaseId ->
-                syncRemoteDatabase(databaseId, silent = true)
-            }
-        }
-    }
-
     fun syncRemoteDatabase(databaseId: Long, silent: Boolean = false) {
         val taskId = SyncDiagnostics.nextTaskId("kp-sync")
         val targetLog = "keepass:$databaseId"
@@ -2443,18 +2969,23 @@ class LocalKeePassViewModel(
     suspend fun movePasswordEntriesToKdbx(
         databaseId: Long,
         groupPath: String?,
+        groupUuid: String? = null,
         entries: List<PasswordEntry>,
         decryptPassword: (String) -> String,
         onItemProcessed: ((Int, Int) -> Unit)? = null
-    ): Result<Int> = withContext(Dispatchers.IO) {
+    ): Result<KeePassPasswordMoveBatchResult> = withContext(Dispatchers.IO) {
         try {
             val total = entries.size
             if (total <= 0) {
                 onItemProcessed?.invoke(0, 0)
-                return@withContext Result.success(0)
+                return@withContext Result.success(
+                    KeePassPasswordMoveBatchResult(emptyMap(), emptyMap())
+                )
             }
 
             var processed = 0
+            val targetEntryUuidsByPasswordId = linkedMapOf<Long, String>()
+            val failuresByPasswordId = linkedMapOf<Long, String>()
             onItemProcessed?.invoke(0, total)
 
             val resolvePassword: (PasswordEntry) -> String = { item ->
@@ -2480,28 +3011,50 @@ class LocalKeePassViewModel(
                 onItemProcessed?.invoke(processed, total)
             }
 
+            fun recordFailure(entry: PasswordEntry, error: Throwable) {
+                failuresByPasswordId[entry.id] = error.message
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "KeePass move failed"
+            }
+
+            fun recordTargets(sources: List<PasswordEntry>, targets: List<PasswordEntry>) {
+                sources.zip(targets).forEach { (source, target) ->
+                    val targetUuid = target.keepassEntryUuid?.takeIf { it.isNotBlank() }
+                    if (targetUuid == null) {
+                        failuresByPasswordId[source.id] = "KeePass target entry uuid is missing"
+                    } else {
+                        targetEntryUuidsByPasswordId[source.id] = targetUuid
+                    }
+                }
+            }
+
             val externalEntries = entries.filter { it.keepassDatabaseId == null }
             if (externalEntries.isNotEmpty()) {
                 if (processed <= 0 && total > 1) {
                     onItemProcessed?.invoke(1, total)
                 }
                 val targetEntries = externalEntries.map { normalizeForTarget(it) }
-                compatibilityBridge.upsertLegacyPasswordEntries(
-                    databaseId = databaseId,
-                    entries = targetEntries,
-                    resolvePassword = resolvePassword,
-                    forceSyncWrite = true
-                ).getOrThrow()
+                var targetWritten = false
                 try {
+                    compatibilityBridge.upsertLegacyPasswordEntries(
+                        databaseId = databaseId,
+                        entries = targetEntries,
+                        resolvePassword = resolvePassword,
+                        forceSyncWrite = true
+                    ).getOrThrow()
+                    targetWritten = true
                     copyPasswordAttachmentsToKdbx(
                         sources = externalEntries,
                         targets = targetEntries,
                         targetDatabaseId = databaseId,
                         targetParentId = { source -> source.id }
                     )
+                    recordTargets(externalEntries, targetEntries)
                 } catch (e: Exception) {
-                    rollbackKeePassTargets(databaseId, targetEntries)
-                    throw e
+                    if (targetWritten) {
+                        rollbackKeePassTargets(databaseId, targetEntries)
+                    }
+                    externalEntries.forEach { entry -> recordFailure(entry, e) }
                 }
                 reportProcessed(externalEntries.size)
             }
@@ -2511,12 +3064,78 @@ class LocalKeePassViewModel(
                 if (processed <= 0 && total > 1) {
                     onItemProcessed?.invoke(1, total)
                 }
-                compatibilityBridge.upsertLegacyPasswordEntries(
-                    databaseId = databaseId,
-                    entries = sameDatabaseEntries.map { normalizeForTarget(it) },
-                    resolvePassword = resolvePassword
-                ).getOrThrow()
-                reportProcessed(sameDatabaseEntries.size)
+                val nativeEntries = sameDatabaseEntries.filter {
+                    resolveKeePassPasswordMoveRoute(it, databaseId) ==
+                        KeePassPasswordMoveRoute.NATIVE_RELOCATE
+                }
+                if (nativeEntries.isNotEmpty()) {
+                    try {
+                        val browser = workspaceRepository.openNativeBrowser(databaseId).getOrThrow()
+                        val requestedGroupUuid = groupUuid
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { raw -> runCatching { UUID.fromString(raw) }.getOrNull() }
+                        val targetGroup = requestedGroupUuid
+                            ?.let { uuid ->
+                                browser.groupsByIdentity[
+                                    KeePassNativeGroupIdentity(databaseId, uuid)
+                                ]?.singleOrNull()
+                            }
+                            ?: if (groupPath.isNullOrBlank()) {
+                                browser.rootGroup
+                            } else {
+                                browser.groupsByLegacyPath[groupPath].orEmpty().singleOrNull()
+                                    ?: throw IllegalArgumentException(
+                                        "KeePass target group is missing or ambiguous: $groupPath"
+                                    )
+                            }
+                        val entryUuidsByPasswordId = nativeEntries.associate { entry ->
+                            val rawUuid = requireNotNull(entry.keepassEntryUuid) {
+                                "KeePass source entry uuid is missing for password ${entry.id}"
+                            }
+                            entry.id to UUID.fromString(rawUuid)
+                        }
+                        val movedEntries = workspaceRepository.moveNativeEntries(
+                            databaseId = databaseId,
+                            entryUuids = entryUuidsByPasswordId.values.toSet(),
+                            targetGroupUuid = targetGroup.identity.groupUuid,
+                            expectedRevisionToken = browser.sourceRevision.sha256,
+                        ).getOrThrow()
+                        val movedUuids = movedEntries.mapTo(hashSetOf()) { it.identity.entryUuid }
+                        nativeEntries.forEach { entry ->
+                            val movedUuid = entryUuidsByPasswordId.getValue(entry.id)
+                            if (movedUuid in movedUuids) {
+                                targetEntryUuidsByPasswordId[entry.id] = movedUuid.toString()
+                            } else {
+                                failuresByPasswordId[entry.id] =
+                                    "KeePass entry was not found after the batch move"
+                            }
+                        }
+                    } catch (error: Exception) {
+                        Log.e(
+                            TAG,
+                            "Native KeePass batch move failed db=$databaseId entries=${nativeEntries.size}",
+                            error,
+                        )
+                        nativeEntries.forEach { entry -> recordFailure(entry, error) }
+                    }
+                    reportProcessed(nativeEntries.size)
+                }
+
+                val legacyEntries = sameDatabaseEntries - nativeEntries.toSet()
+                if (legacyEntries.isNotEmpty()) {
+                    val targetEntries = legacyEntries.map { normalizeForTarget(it) }
+                    try {
+                        compatibilityBridge.upsertLegacyPasswordEntries(
+                            databaseId = databaseId,
+                            entries = targetEntries,
+                            resolvePassword = resolvePassword
+                        ).getOrThrow()
+                        recordTargets(legacyEntries, targetEntries)
+                    } catch (e: Exception) {
+                        legacyEntries.forEach { entry -> recordFailure(entry, e) }
+                    }
+                    reportProcessed(legacyEntries.size)
+                }
             }
 
             val crossDatabaseEntriesBySource = entries
@@ -2526,39 +3145,71 @@ class LocalKeePassViewModel(
                 if (processed <= 0 && total > 1) {
                     onItemProcessed?.invoke(1, total)
                 }
-                val crossDatabaseSourceEntries = crossDatabaseEntriesBySource.values.flatten()
-                val targetEntries = crossDatabaseSourceEntries
-                    .map { entry -> normalizeForTarget(entry, forceNewEntryUuid = true) }
-
-                compatibilityBridge.upsertLegacyPasswordEntries(
-                    databaseId = databaseId,
-                    entries = targetEntries,
-                    resolvePassword = resolvePassword,
-                    forceSyncWrite = true
-                ).getOrThrow()
-
-                try {
-                    copyPasswordAttachmentsToKdbx(
-                        sources = crossDatabaseSourceEntries,
-                        targets = targetEntries,
-                        targetDatabaseId = databaseId,
-                        targetParentId = { source -> source.id }
-                    )
-                } catch (e: Exception) {
-                    rollbackKeePassTargets(databaseId, targetEntries)
-                    throw e
-                }
-
                 crossDatabaseEntriesBySource.forEach { (sourceDatabaseId, sourceEntries) ->
-                    compatibilityBridge.deleteLegacyPasswordEntries(
-                        databaseId = sourceDatabaseId,
-                        entries = sourceEntries
-                    ).getOrThrow()
-                    reportProcessed(sourceEntries.size)
+                    val nativeEntries = sourceEntries.filter {
+                        resolveKeePassPasswordMoveRoute(it, databaseId) ==
+                            KeePassPasswordMoveRoute.NATIVE_CROSS_DATABASE
+                    }
+                    nativeEntries.forEach { entry ->
+                        val entryUuid = requireNotNull(entry.keepassEntryUuid)
+                        val result = kdbxService.moveNativeEntry(
+                            sourceDatabaseId = sourceDatabaseId,
+                            sourceEntryUuid = entryUuid,
+                            targetDatabaseId = databaseId,
+                            targetGroupPath = groupPath
+                        )
+                        result.onSuccess { transfer ->
+                            targetEntryUuidsByPasswordId[entry.id] = transfer.targetEntryUuid
+                        }.onFailure { error ->
+                            recordFailure(entry, error)
+                        }
+                        reportProcessed(1)
+                    }
+
+                    val legacyEntries = sourceEntries - nativeEntries.toSet()
+                    if (legacyEntries.isNotEmpty()) {
+                        val targetEntries = legacyEntries.map { entry ->
+                            normalizeForTarget(entry, forceNewEntryUuid = true)
+                        }
+                        var targetWritten = false
+                        var targetComplete = false
+                        try {
+                            compatibilityBridge.upsertLegacyPasswordEntries(
+                                databaseId = databaseId,
+                                entries = targetEntries,
+                                resolvePassword = resolvePassword,
+                                forceSyncWrite = true
+                            ).getOrThrow()
+                            targetWritten = true
+                            copyPasswordAttachmentsToKdbx(
+                                sources = legacyEntries,
+                                targets = targetEntries,
+                                targetDatabaseId = databaseId,
+                                targetParentId = { source -> source.id }
+                            )
+                            targetComplete = true
+                            compatibilityBridge.deleteLegacyPasswordEntries(
+                                databaseId = sourceDatabaseId,
+                                entries = legacyEntries
+                            ).getOrThrow()
+                            recordTargets(legacyEntries, targetEntries)
+                        } catch (e: Exception) {
+                            if (targetWritten && !targetComplete) {
+                                rollbackKeePassTargets(databaseId, targetEntries)
+                            }
+                            legacyEntries.forEach { entry -> recordFailure(entry, e) }
+                        }
+                        reportProcessed(legacyEntries.size)
+                    }
                 }
             }
 
-            Result.success(entries.size)
+            Result.success(
+                KeePassPasswordMoveBatchResult(
+                    targetEntryUuidsByPasswordId = targetEntryUuidsByPasswordId,
+                    failuresByPasswordId = failuresByPasswordId
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }

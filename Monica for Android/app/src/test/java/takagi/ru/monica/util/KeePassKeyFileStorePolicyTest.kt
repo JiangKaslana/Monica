@@ -6,7 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import takagi.ru.monica.utils.KeePassKeyFileStore
-import takagi.ru.monica.utils.readKeePassKeyFileBytesLimited
+import takagi.ru.monica.utils.readKeePassKeyFileBytesFully
 
 class KeePassKeyFileStorePolicyTest {
 
@@ -30,24 +30,13 @@ class KeePassKeyFileStorePolicyTest {
     }
 
     @Test
-    fun keyFileSizeLimitMatchesKdbxCredentialPolicy() {
-        assertEquals(1024 * 1024, KeePassKeyFileStore.MAX_KEY_FILE_BYTES)
-    }
-
-    @Test
-    fun boundedReaderAcceptsExactLimit() {
-        val bytes = ByteArray(32) { it.toByte() }
+    fun readerAcceptsKeyFilesLargerThanOneMiB() {
+        val bytes = ByteArray(1024 * 1024 + 17) { (it % 251).toByte() }
 
         assertTrue(
             bytes.contentEquals(
-                ByteArrayInputStream(bytes).readKeePassKeyFileBytesLimited(bytes.size)
+                ByteArrayInputStream(bytes).readKeePassKeyFileBytesFully()
             )
         )
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun boundedReaderRejectsContentLargerThanLimit() {
-        ByteArrayInputStream(ByteArray(33))
-            .readKeePassKeyFileBytesLimited(32)
     }
 }

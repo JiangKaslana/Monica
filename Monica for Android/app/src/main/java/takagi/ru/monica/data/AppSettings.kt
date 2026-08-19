@@ -397,6 +397,16 @@ enum class PasswordListQuickFolderStyle {
     M3_CARD     // M3 卡片模式
 }
 
+enum class VaultV2LayoutMode {
+    CLASSIC,
+    HIERARCHICAL;
+
+    companion object {
+        fun fromStoredValue(value: String?): VaultV2LayoutMode =
+            entries.firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: CLASSIC
+    }
+}
+
 enum class AddButtonBehaviorMode {
     DIRECT_PASSWORD,
     EXPANDABLE_MENU
@@ -557,6 +567,7 @@ data class AppSettings(
     val authenticatorCardDisplayFields: List<AuthenticatorCardDisplayField> = AuthenticatorCardDisplayField.DEFAULT_ORDER, // 验证器卡片显示字段（顺序即展示顺序）
     val authenticatorCardHideCodeByDefault: Boolean = false, // 验证器卡片默认隐藏验证码
     val authenticatorLayoutMode: AuthenticatorLayoutMode = AuthenticatorLayoutMode.STANDARD,
+    val vaultV2LayoutMode: VaultV2LayoutMode = VaultV2LayoutMode.CLASSIC,
     val passwordListQuickFiltersEnabled: Boolean = true, // 密码列表快捷筛选开关（默认开启）
     val passwordListQuickFilterItems: List<PasswordListQuickFilterItem> = PasswordListQuickFilterItem.DEFAULT_ORDER, // 密码列表快捷筛选显示内容
     val passwordListCategoryQuickFiltersEnabled: Boolean = true, // 密码列表分类快捷筛选开关（默认开启）
@@ -586,6 +597,7 @@ data class AppSettings(
     val lastPasswordCategoryFilterPrimaryId: Long? = null, // 上次分类主参数（分类ID/库ID等）
     val lastPasswordCategoryFilterSecondaryId: Long? = null, // 上次分类次参数（如 Bitwarden Vault ID）
     val lastPasswordCategoryFilterText: String? = null, // 上次分类文本参数（如组路径/文件夹ID）
+    val lastPasswordCategoryFilterGroupUuid: String? = null, // KeePass 分组稳定身份；旧版本继续按路径回退
 
     // Bitwarden 同步范围设置
     val bitwardenUploadAll: Boolean = false, // 一键上传所有数据到 Bitwarden

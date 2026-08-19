@@ -7,8 +7,6 @@ import takagi.ru.monica.repository.KeePassCompatibilityBridge
 class KeePassPasswordDeleteExecutor(
     private val bridge: KeePassCompatibilityBridge?
 ) {
-    private val recycleBinUnavailableDatabaseIds = mutableSetOf<Long>()
-
     suspend fun deleteBatch(entries: List<PasswordEntry>, useRecycleBin: Boolean): Boolean {
         if (entries.isEmpty()) return true
         val keepassBridge = bridge ?: return true
@@ -33,15 +31,7 @@ class KeePassPasswordDeleteExecutor(
         val databaseId = entry.keepassDatabaseId ?: return true
         val keepassBridge = bridge ?: return true
 
-        if (!useRecycleBin) {
-            return runDirectDelete(keepassBridge, databaseId, entry)
-        }
-
-        if (isRecycleBinUnavailable(databaseId)) {
-            Log.i(
-                TAG,
-                "Skip recycle bin attempt for db=$databaseId because recycle bin is known unavailable"
-            )
+        if (KeePassDeletePolicy.allowPermanentFallback(useRecycleBin)) {
             return runDirectDelete(keepassBridge, databaseId, entry)
         }
 
@@ -57,19 +47,16 @@ class KeePassPasswordDeleteExecutor(
         if (movedCount != null) {
             Log.w(
                 TAG,
-                "KeePass move to recycle bin affected 0 entries for db=$databaseId, fallback to direct delete"
+                "KeePass move to recycle bin affected 0 entries for db=$databaseId; preserve the entry"
             )
         }
 
         val failureMessage = moveToRecycleBin.exceptionOrNull()?.message.orEmpty()
-        if (failureMessage.contains(RECYCLE_BIN_UNAVAILABLE, ignoreCase = true)) {
-            rememberRecycleBinUnavailable(databaseId)
-        }
         Log.w(
             TAG,
-            "KeePass move to recycle bin failed, fallback to direct delete: $failureMessage"
+            "KeePass move to recycle bin failed; permanent delete was not requested: $failureMessage"
         )
-        return runDirectDelete(keepassBridge, databaseId, entry)
+        return false
     }
 
     private suspend fun deleteBatchForDatabase(
@@ -79,15 +66,7 @@ class KeePassPasswordDeleteExecutor(
         useRecycleBin: Boolean
     ): Boolean {
         if (entries.isEmpty()) return true
-        if (!useRecycleBin) {
-            return runDirectDeleteBatch(bridge, databaseId, entries)
-        }
-
-        if (isRecycleBinUnavailable(databaseId)) {
-            Log.i(
-                TAG,
-                "Skip recycle bin batch attempt for db=$databaseId because recycle bin is known unavailable"
-            )
+        if (KeePassDeletePolicy.allowPermanentFallback(useRecycleBin)) {
             return runDirectDeleteBatch(bridge, databaseId, entries)
         }
 
@@ -111,19 +90,16 @@ class KeePassPasswordDeleteExecutor(
         if (movedCount != null) {
             Log.w(
                 TAG,
-                "KeePass batch move to recycle bin affected 0 entries for db=$databaseId, fallback to direct delete"
+                "KeePass batch move to recycle bin affected 0 entries for db=$databaseId; preserve all entries"
             )
         }
 
         val failureMessage = moveToRecycleBin.exceptionOrNull()?.message.orEmpty()
-        if (failureMessage.contains(RECYCLE_BIN_UNAVAILABLE, ignoreCase = true)) {
-            rememberRecycleBinUnavailable(databaseId)
-        }
         Log.w(
             TAG,
-            "KeePass batch move to recycle bin failed, fallback to direct delete: $failureMessage"
+            "KeePass batch move to recycle bin failed; permanent delete was not requested: $failureMessage"
         )
-        return runDirectDeleteBatch(bridge, databaseId, entries)
+        return false
     }
 
     private suspend fun runDirectDelete(
@@ -171,18 +147,7 @@ class KeePassPasswordDeleteExecutor(
         return true
     }
 
-    private fun isRecycleBinUnavailable(databaseId: Long): Boolean = synchronized(recycleBinUnavailableDatabaseIds) {
-        recycleBinUnavailableDatabaseIds.contains(databaseId)
-    }
-
-    private fun rememberRecycleBinUnavailable(databaseId: Long) {
-        synchronized(recycleBinUnavailableDatabaseIds) {
-            recycleBinUnavailableDatabaseIds += databaseId
-        }
-    }
-
     private companion object {
         const val TAG = "KeePassPasswordDelete"
-        const val RECYCLE_BIN_UNAVAILABLE = "recycle bin unavailable"
     }
 }

@@ -2448,16 +2448,22 @@
 
     <!-- Permission Actions -->
     <string name="permission_revoke_hint">Para revocar este permiso, vaya a Configuración &gt; Aplicaciones &gt; Monica &gt; Permisos</string>
-    <string name="permission_grant_hint">Toque para abrir la configuración del sistema y conceda este permiso</string>
+    <string name="permission_grant_hint">Toque para solicitar este permiso</string>
     <string name="cannot_open_settings">No se puede abrir la configuración del sistema</string>
+    <string name="permission_request_granted">Se concedió el permiso «%1$s»</string>
+    <string name="permission_already_granted">El permiso «%1$s» ya está concedido</string>
+    <string name="permission_status_refreshed">Estado de permisos actualizado</string>
+    <string name="permission_request_denied_title">Permiso no concedido</string>
+    <string name="permission_request_denied_message">Android no concedió «%1$s». ¿Abrir los ajustes de la aplicación para confirmarlo manualmente?</string>
+    <string name="permission_open_system_settings">Abrir ajustes</string>
 
     <!-- Permission Help Dialog -->
     <string name="permission_help_title">Acerca de los permisos</string>
-    <string name="permission_help_content">Toque un permiso para administrarlo.\n\nRequerido: core\nRecomendado: útil\nOpcional: extras</string>
+    <string name="permission_help_content">Toque un permiso pendiente para solicitarlo a Android. Los permisos de servicios abren su página específica del sistema.\n\nRequerido: función principal\nRecomendado: útil\nOpcional: función adicional</string>
 
     <!-- Permission Info Card -->
     <string name="permission_info_title">Gestión de permisos</string>
-    <string name="permission_info_message">Consulte los permisos y el estado de Monica\'. Toque uno para administrarlo en la configuración del sistema.</string>
+    <string name="permission_info_message">Consulte los permisos y su estado. Toque un permiso pendiente para solicitarlo a Android.</string>
 
     <!-- Selective Backup -->
     <string name="selective_backup_title">Selección de contenido de copia de seguridad</string>
@@ -4252,4 +4258,62 @@
     <string name="mdbx_snapshot_create_full_anyway">Crear instantánea completa</string>
     <string name="add_credential">Añadir credencial</string>
     <string name="credential_number">Credencial %1$d</string>
+    <string name="vault_v2_hierarchical_layout_title">Jerarquía de carpetas de la biblioteca</string>
+    <string name="vault_v2_hierarchical_layout_desc">Explora por fuente de almacenamiento y jerarquía de carpetas, mostrando las carpetas antes que los elementos</string>
+    <string name="vault_v2_hierarchy_local_source">Monica local</string>
+    <string name="vault_v2_hierarchy_current_folder">Carpeta actual</string>
+    <plurals name="vault_v2_hierarchy_item_count">
+        <item quantity="one">%1$d elemento</item>
+        <item quantity="other">%1$d elementos</item>
+    </plurals>
+    <string name="keepass_native_title_required">Introduce un título antes de guardar</string>
+    <string name="keepass_native_field_name_required">Cada campo necesita un nombre</string>
+    <string name="keepass_native_field_name_duplicate">Los nombres de campo deben ser únicos</string>
+    <string name="keepass_native_credentials_section">Credenciales</string>
+    <string name="keepass_native_custom_fields_hint">Añade campos para códigos de recuperación, identificadores, ajustes TOTP o datos de plugins.</string>
+    <string name="keepass_native_create_entry_hint_title">Empieza por lo esencial</string>
+    <string name="keepass_native_edit_entry_hint_title">Todos los campos siguen editables</string>
+<string name="keepass_native_generate_password">Generar una contraseña segura</string>
+<string name="keepass_native_custom_icon_title">Icono personalizado</string>
+<string name="keepass_native_custom_icon_none">Sin icono personalizado</string>
+<string name="keepass_native_custom_icon_hint">Elige o sube un icono</string>
+<string name="keepass_native_custom_icon_stored">Guardado en el grupo de iconos KDBX</string>
+<string name="keepass_native_custom_icon_choose">Elegir</string>
+<string name="keepass_native_custom_icon_upload">Subir</string>
+<string name="keepass_native_custom_icon_clear">Borrar icono personalizado</string>
+<string name="keepass_native_custom_icon_picker_title">Elegir icono personalizado</string>
+<string name="keepass_native_custom_icon_in_use">En uso · %1$d referencia(s)</string>
+<string name="keepass_native_custom_icon_unused">Sin referencias</string>
+<string name="keepass_native_custom_icon_name_title">Nombrar icono</string>
+<string name="keepass_native_custom_icon_name_label">Nombre del icono</string>
+<string name="keepass_native_custom_icon_builtin">Icono integrado: %1$s</string>
+<string name="keepass_native_custom_icon_builtin_picker">Elegir icono integrado</string>
+<string name="keepass_native_custom_icon_rename">Cambiar nombre del icono personalizado</string>
+<string name="keepass_native_custom_icon_read_failed">No se pudo leer la imagen seleccionada</string>
+<string name="keepass_native_custom_icon_invalid">Imagen no compatible o demasiado grande (PNG, JPEG, GIF, WebP o ICO; máx. 2 MB)</string>
+<string name="keepass_native_entry_auto_type_title">Auto-Type de la entrada</string>
+<string name="keepass_native_entry_auto_type_hint">Edita la secuencia y las reglas de ventana guardadas en esta entrada KDBX.</string>
+<string name="keepass_native_auto_type_default_sequence">Secuencia predeterminada</string>
+<string name="keepass_native_auto_type_tokens_hint">Ejemplo: {USERNAME}{TAB}{PASSWORD}{ENTER}</string>
+<string name="keepass_native_auto_type_obfuscation">Método de entrada: %1$s</string>
+<string name="keepass_native_auto_type_none">Entrada directa</string>
+<string name="keepass_native_auto_type_clipboard">Portapapeles</string>
+<string name="keepass_native_auto_type_window">Coincidencia de ventana</string>
+<string name="keepass_native_auto_type_sequence">Secuencia de teclas</string>
+<string name="keepass_native_auto_type_add_rule">Añadir regla de ventana</string>
+<string name="keepass_native_auto_type_remove_rule">Eliminar regla de ventana</string>
+<string name="keepass_native_auto_type_window_required">Cada regla de ventana Auto-Type necesita una coincidencia.</string>
+<string name="keepass_native_auto_type_window_duplicate">Las reglas de ventana Auto-Type deben ser únicas.</string>
+<string name="keepass_native_folder_drag_target">Moviendo «%1$s». Toca una carpeta de destino.</string>
+<string name="keepass_native_folder_drag_drop">Soltar aquí</string>
+<string name="keepass_native_folder_drag_count">%1$d carpetas seleccionadas</string>
+<string name="keepass_native_manage_templates">Administrar plantillas</string>
+<string name="keepass_native_create_template">Crear plantilla</string>
+<string name="keepass_native_edit_template">Editar plantilla</string>
+<string name="keepass_native_save_as_template">Guardar como plantilla</string>
+<string name="keepass_native_use_template">Crear desde plantilla</string>
+<string name="keepass_native_delete_template">Eliminar plantilla</string>
+<string name="keepass_native_delete_template_message">¿Eliminar la plantilla «%1$s»? Las entradas ya creadas no se verán afectadas.</string>
+<string name="keepass_native_template_target_hint">Elige la carpeta de destino. Se conservarán los campos, adjuntos, icono y Auto-Type.</string>
+    <string name="keepass_native_open_manager">Administrar contenido de la base de datos</string>
 </resources>

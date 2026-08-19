@@ -2448,16 +2448,22 @@
 
     <!-- Permission Actions -->
     <string name="permission_revoke_hint">Um diese Berechtigung zu widerrufen, gehen Sie zu Einstellungen &gt; Apps &gt; Monica &gt; Berechtigungen</string>
-    <string name="permission_grant_hint">Tippen Sie hier, um die Systemeinstellungen zu öffnen und diese Berechtigung zu erteilen</string>
+    <string name="permission_grant_hint">Tippen Sie, um diese Berechtigung anzufordern</string>
     <string name="cannot_open_settings">Systemeinstellungen können nicht geöffnet werden</string>
+    <string name="permission_request_granted">Berechtigung „%1$s“ wurde erteilt</string>
+    <string name="permission_already_granted">Berechtigung „%1$s“ ist bereits erteilt</string>
+    <string name="permission_status_refreshed">Berechtigungsstatus wurde aktualisiert</string>
+    <string name="permission_request_denied_title">Berechtigung nicht erteilt</string>
+    <string name="permission_request_denied_message">Android hat „%1$s“ nicht erteilt. App-Einstellungen zur manuellen Bestätigung öffnen?</string>
+    <string name="permission_open_system_settings">Einstellungen öffnen</string>
 
     <!-- Permission Help Dialog -->
     <string name="permission_help_title">Über Berechtigungen</string>
-    <string name="permission_help_content">Tippen Sie auf eine Berechtigung, um sie zu verwalten.\n\nReforderlich: core\nRempfohlen: nützlich\nOptional: Extras</string>
+    <string name="permission_help_content">Tippen Sie auf eine fehlende Berechtigung, um sie bei Android anzufordern. Dienstberechtigungen öffnen die zugehörige Systemseite.\n\nErforderlich: Kernfunktion\nEmpfohlen: nützlich\nOptional: Zusatzfunktion</string>
 
     <!-- Permission Info Card -->
     <string name="permission_info_title">Berechtigungsverwaltung</string>
-    <string name="permission_info_message">Sehen Sie sich die Berechtigungen und den Status von Monica\' an. Tippen Sie auf eines, um es in den Systemeinstellungen zu verwalten.</string>
+    <string name="permission_info_message">Zeigt Monicas Berechtigungen und deren Status. Tippen Sie auf eine fehlende Berechtigung, um sie bei Android anzufordern.</string>
 
     <!-- Selective Backup -->
     <string name="selective_backup_title">Auswahl des Backup-Inhalts</string>
@@ -4252,4 +4258,62 @@
     <string name="mdbx_snapshot_create_full_anyway">Vollständigen Snapshot erstellen</string>
     <string name="add_credential">Zugangsdaten hinzufügen</string>
     <string name="credential_number">Zugangsdaten %1$d</string>
+    <string name="vault_v2_hierarchical_layout_title">Ordnerhierarchie der Passwortbibliothek</string>
+    <string name="vault_v2_hierarchical_layout_desc">Nach Speicherquelle und Ordnerstruktur durchsuchen; Ordner werden vor Einträgen angezeigt</string>
+    <string name="vault_v2_hierarchy_local_source">Monica lokal</string>
+    <string name="vault_v2_hierarchy_current_folder">Aktueller Ordner</string>
+    <plurals name="vault_v2_hierarchy_item_count">
+        <item quantity="one">%1$d Eintrag</item>
+        <item quantity="other">%1$d Einträge</item>
+    </plurals>
+    <string name="keepass_native_title_required">Geben Sie vor dem Speichern einen Titel ein</string>
+    <string name="keepass_native_field_name_required">Jedes Feld benötigt einen Namen</string>
+    <string name="keepass_native_field_name_duplicate">Feldnamen müssen eindeutig sein</string>
+    <string name="keepass_native_credentials_section">Zugangsdaten</string>
+    <string name="keepass_native_custom_fields_hint">Benutzerdefinierte Felder für Wiederherstellungscodes, IDs, TOTP-Einstellungen oder Plugin-Daten hinzufügen.</string>
+    <string name="keepass_native_create_entry_hint_title">Mit den wichtigsten Angaben beginnen</string>
+    <string name="keepass_native_edit_entry_hint_title">Jedes Feld bleibt bearbeitbar</string>
+<string name="keepass_native_generate_password">Starkes Passwort generieren</string>
+<string name="keepass_native_custom_icon_title">Benutzerdefiniertes Symbol</string>
+<string name="keepass_native_custom_icon_none">Kein benutzerdefiniertes Symbol</string>
+<string name="keepass_native_custom_icon_hint">Symbol auswählen oder hochladen</string>
+<string name="keepass_native_custom_icon_stored">Im KDBX-Symbolpool gespeichert</string>
+<string name="keepass_native_custom_icon_choose">Auswählen</string>
+<string name="keepass_native_custom_icon_upload">Hochladen</string>
+<string name="keepass_native_custom_icon_clear">Benutzerdefiniertes Symbol entfernen</string>
+<string name="keepass_native_custom_icon_picker_title">Benutzerdefiniertes Symbol auswählen</string>
+<string name="keepass_native_custom_icon_in_use">Verwendet · %1$d Referenz(en)</string>
+<string name="keepass_native_custom_icon_unused">Nicht referenziert</string>
+<string name="keepass_native_custom_icon_name_title">Symbol benennen</string>
+<string name="keepass_native_custom_icon_name_label">Symbolname</string>
+<string name="keepass_native_custom_icon_builtin">Integriertes Symbol: %1$s</string>
+<string name="keepass_native_custom_icon_builtin_picker">Integriertes Symbol auswählen</string>
+<string name="keepass_native_custom_icon_rename">Benutzerdefiniertes Symbol umbenennen</string>
+<string name="keepass_native_custom_icon_read_failed">Das ausgewählte Bild konnte nicht gelesen werden</string>
+<string name="keepass_native_custom_icon_invalid">Nicht unterstütztes oder zu großes Bild (PNG, JPEG, GIF, WebP oder ICO; max. 2 MB)</string>
+<string name="keepass_native_entry_auto_type_title">Auto-Type des Eintrags</string>
+<string name="keepass_native_entry_auto_type_hint">Sequenz und Fensterregeln dieses KDBX-Eintrags bearbeiten.</string>
+<string name="keepass_native_auto_type_default_sequence">Standardsquenz</string>
+<string name="keepass_native_auto_type_tokens_hint">Beispiel: {USERNAME}{TAB}{PASSWORD}{ENTER}</string>
+<string name="keepass_native_auto_type_obfuscation">Eingabemethode: %1$s</string>
+<string name="keepass_native_auto_type_none">Direkte Eingabe</string>
+<string name="keepass_native_auto_type_clipboard">Zwischenablage</string>
+<string name="keepass_native_auto_type_window">Fensterabgleich</string>
+<string name="keepass_native_auto_type_sequence">Tastenfolge</string>
+<string name="keepass_native_auto_type_add_rule">Fensterregel hinzufügen</string>
+<string name="keepass_native_auto_type_remove_rule">Fensterregel entfernen</string>
+<string name="keepass_native_auto_type_window_required">Jede Auto-Type-Fensterregel benötigt einen Fensterabgleich.</string>
+<string name="keepass_native_auto_type_window_duplicate">Auto-Type-Fensterregeln müssen eindeutig sein.</string>
+<string name="keepass_native_folder_drag_target">„%1$s“ wird verschoben. Zielordner antippen.</string>
+<string name="keepass_native_folder_drag_drop">Hier ablegen</string>
+<string name="keepass_native_folder_drag_count">%1$d Ordner ausgewählt</string>
+<string name="keepass_native_manage_templates">Vorlagen verwalten</string>
+<string name="keepass_native_create_template">Vorlage erstellen</string>
+<string name="keepass_native_edit_template">Vorlage bearbeiten</string>
+<string name="keepass_native_save_as_template">Als Vorlage speichern</string>
+<string name="keepass_native_use_template">Aus Vorlage erstellen</string>
+<string name="keepass_native_delete_template">Vorlage löschen</string>
+<string name="keepass_native_delete_template_message">Vorlage „%1$s“ löschen? Bereits erstellte Einträge bleiben erhalten.</string>
+<string name="keepass_native_template_target_hint">Zielordner auswählen. Felder, Anhänge, Symbol und Auto-Type werden übernommen.</string>
+    <string name="keepass_native_open_manager">Datenbankinhalte verwalten</string>
 </resources>

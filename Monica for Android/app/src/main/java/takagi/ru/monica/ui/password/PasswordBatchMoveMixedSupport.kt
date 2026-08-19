@@ -26,6 +26,12 @@ import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.util.TotpDataResolver
 import takagi.ru.monica.viewmodel.PasswordViewModel
+import takagi.ru.monica.viewmodel.BankCardViewModel
+import takagi.ru.monica.viewmodel.BillingAddressViewModel
+import takagi.ru.monica.viewmodel.DocumentViewModel
+import takagi.ru.monica.viewmodel.NoteViewModel
+import takagi.ru.monica.viewmodel.PasskeyViewModel
+import takagi.ru.monica.viewmodel.TotpViewModel
 import takagi.ru.monica.ui.password.PasswordAggregateListItemUi
 import takagi.ru.monica.ui.password.PasswordAggregateWalletItemType
 
@@ -56,6 +62,25 @@ internal data class PasswordBatchAggregateSelection(
     val secureItems: List<SecureItem>
         get() = totpItems + notes + bankCards + documents + billingAddresses
 }
+
+internal data class PasswordBatchMoveViewModels(
+    val totpViewModel: TotpViewModel? = null,
+    val bankCardViewModel: BankCardViewModel? = null,
+    val documentViewModel: DocumentViewModel? = null,
+    val billingAddressViewModel: BillingAddressViewModel? = null,
+    val noteViewModel: NoteViewModel? = null,
+    val passkeyViewModel: PasskeyViewModel? = null,
+)
+
+internal fun PasswordListAggregateUiState.toPasswordBatchMoveViewModels():
+    PasswordBatchMoveViewModels = PasswordBatchMoveViewModels(
+        totpViewModel = totpViewModel,
+        bankCardViewModel = bankCardViewModel,
+        documentViewModel = documentViewModel,
+        billingAddressViewModel = billingAddressViewModel,
+        noteViewModel = noteViewModel,
+        passkeyViewModel = passkeyViewModel,
+    )
 
 internal data class MixedPasswordBatchMoveResult(
     val successCount: Int,
@@ -121,7 +146,7 @@ internal suspend fun executeMixedPasswordBatchMove(
     localKeePassViewModel: takagi.ru.monica.viewmodel.LocalKeePassViewModel,
     securityManager: SecurityManager,
     viewModel: PasswordViewModel,
-    aggregateUiState: PasswordListAggregateUiState,
+    aggregateViewModels: PasswordBatchMoveViewModels,
     bitwardenRepository: BitwardenRepository,
     passwordTargetOverrides: Map<Long, UnifiedMoveCategoryTarget> = emptyMap(),
     onProgress: ((Int, Int) -> Unit)? = null
@@ -163,7 +188,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 localKeePassViewModel = localKeePassViewModel,
                 securityManager = securityManager,
                 viewModel = viewModel,
-                aggregateUiState = aggregateUiState,
+                aggregateViewModels = aggregateViewModels,
                 bitwardenRepository = bitwardenRepository,
                 passwordTargetOverrides = emptyMap(),
                 onProgress = { processed, _ ->
@@ -210,8 +235,11 @@ internal suspend fun executeMixedPasswordBatchMove(
         selectedEntries = selectedEntries,
         target = target
     )
-    val forceSupplementaryCopy =
-        action == UnifiedMoveAction.MOVE && aggregateSelection.hasKeePassOwned
+    val forceSupplementaryCopy = shouldForceSupplementaryKeePassCopy(
+        requestedAction = action,
+        hasKeePassOwnedItems = aggregateSelection.hasKeePassOwned,
+        target = target
+    )
     if (passwordActionResolution.showKeepassCopyOnlyHint || forceSupplementaryCopy) {
         Toast.makeText(
             context,
@@ -367,7 +395,7 @@ internal suspend fun executeMixedPasswordBatchMove(
             reportProgress(aggregateSelection.secureItems.size)
         } else {
         aggregateSelection.totpItems.forEach { item ->
-            val totpViewModel = aggregateUiState.totpViewModel
+            val totpViewModel = aggregateViewModels.totpViewModel
             if (totpViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -416,7 +444,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.notes.forEach { item ->
-            val noteViewModel = aggregateUiState.noteViewModel
+            val noteViewModel = aggregateViewModels.noteViewModel
             if (noteViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -437,6 +465,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                 content = decodedNote.content,
                 title = item.title,
                 tags = decodedNote.tags,
+                customFields = decodedNote.customFields,
                 isMarkdown = decodedNote.isMarkdown,
                 isFavorite = item.isFavorite,
                 categoryId = targetCategoryId,
@@ -453,7 +482,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.bankCards.forEach { item ->
-            val bankCardViewModel = aggregateUiState.bankCardViewModel
+            val bankCardViewModel = aggregateViewModels.bankCardViewModel
             if (bankCardViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -494,7 +523,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.documents.forEach { item ->
-            val documentViewModel = aggregateUiState.documentViewModel
+            val documentViewModel = aggregateViewModels.documentViewModel
             if (documentViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -535,7 +564,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.billingAddresses.forEach { item ->
-            val billingAddressViewModel = aggregateUiState.billingAddressViewModel
+            val billingAddressViewModel = aggregateViewModels.billingAddressViewModel
             if (billingAddressViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -724,9 +753,18 @@ internal suspend fun executeMixedPasswordBatchMove(
                         }
                     )
                     if (result.isSuccess) {
-                        viewModel.unarchivePasswordsAwait(selectedIds)
-                        viewModel.movePasswordsToKeePassDatabaseAwait(selectedIds, target.databaseId)
-                        successCount += selectedEntries.size
+                        val summary = result.getOrThrow()
+                        val succeededIds = summary.targetEntryUuidsByPasswordId.keys.toList()
+                        if (succeededIds.isNotEmpty()) {
+                            viewModel.unarchivePasswordsAwait(succeededIds)
+                            viewModel.finalizePasswordsWrittenToKeePassAwait(
+                                targetEntryUuidsByPasswordId = summary.targetEntryUuidsByPasswordId,
+                                databaseId = target.databaseId,
+                                groupPath = null
+                            )
+                        }
+                        successCount += summary.successCount
+                        failedCount += summary.failedCount
                     } else {
                         failedCount += selectedEntries.size
                     }
@@ -742,6 +780,7 @@ internal suspend fun executeMixedPasswordBatchMove(
                     val result = localKeePassViewModel.movePasswordEntriesToKdbx(
                         databaseId = target.databaseId,
                         groupPath = target.groupPath,
+                        groupUuid = target.groupUuid,
                         entries = selectedEntries,
                         decryptPassword = { encrypted ->
                             decryptedPasswordSnapshot[encrypted]
@@ -758,9 +797,18 @@ internal suspend fun executeMixedPasswordBatchMove(
                         }
                     )
                     if (result.isSuccess) {
-                        viewModel.unarchivePasswordsAwait(selectedIds)
-                        viewModel.movePasswordsToKeePassGroupAwait(selectedIds, target.databaseId, target.groupPath)
-                        successCount += selectedEntries.size
+                        val summary = result.getOrThrow()
+                        val succeededIds = summary.targetEntryUuidsByPasswordId.keys.toList()
+                        if (succeededIds.isNotEmpty()) {
+                            viewModel.unarchivePasswordsAwait(succeededIds)
+                            viewModel.finalizePasswordsWrittenToKeePassAwait(
+                                targetEntryUuidsByPasswordId = summary.targetEntryUuidsByPasswordId,
+                                databaseId = target.databaseId,
+                                groupPath = target.groupPath
+                            )
+                        }
+                        successCount += summary.successCount
+                        failedCount += summary.failedCount
                     } else {
                         failedCount += selectedEntries.size
                     }
@@ -828,7 +876,7 @@ internal suspend fun executeMixedPasswordBatchMove(
             reportProgress(aggregateSelection.secureItems.size)
         } else {
         aggregateSelection.totpItems.forEach { item ->
-            val totpViewModel = aggregateUiState.totpViewModel
+            val totpViewModel = aggregateViewModels.totpViewModel
             if (totpViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -836,8 +884,10 @@ internal suspend fun executeMixedPasswordBatchMove(
             }
             if (isMonicaLocalTarget) {
                 val moved = if (item.isLocalOnlyItem()) {
-                    totpViewModel.moveToCategory(listOf(item.id), targetCategoryId)
-                    true
+                    totpViewModel.moveTotpToStorage(
+                        id = item.id,
+                        categoryId = targetCategoryId,
+                    )
                 } else {
                     totpViewModel.moveTotpToMonicaLocal(item, targetCategoryId).isSuccess
                 }
@@ -847,7 +897,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.notes.forEach { item ->
-            val noteViewModel = aggregateUiState.noteViewModel
+            val noteViewModel = aggregateViewModels.noteViewModel
             if (noteViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -883,7 +933,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.bankCards.forEach { item ->
-            val bankCardViewModel = aggregateUiState.bankCardViewModel
+            val bankCardViewModel = aggregateViewModels.bankCardViewModel
             if (bankCardViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -899,7 +949,6 @@ internal suspend fun executeMixedPasswordBatchMove(
                         bitwardenVaultId = null,
                         bitwardenFolderId = null
                     )
-                    true
                 } else {
                     bankCardViewModel.moveCardToMonicaLocal(item, targetCategoryId).isSuccess
                 }
@@ -922,7 +971,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.documents.forEach { item ->
-            val documentViewModel = aggregateUiState.documentViewModel
+            val documentViewModel = aggregateViewModels.documentViewModel
             if (documentViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -938,7 +987,6 @@ internal suspend fun executeMixedPasswordBatchMove(
                         bitwardenVaultId = null,
                         bitwardenFolderId = null
                     )
-                    true
                 } else {
                     documentViewModel.moveDocumentToMonicaLocal(item, targetCategoryId).isSuccess
                 }
@@ -961,7 +1009,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         }
 
         aggregateSelection.billingAddresses.forEach { item ->
-            val billingAddressViewModel = aggregateUiState.billingAddressViewModel
+            val billingAddressViewModel = aggregateViewModels.billingAddressViewModel
             if (billingAddressViewModel == null) {
                 failedCount++
                 reportProgress()
@@ -983,7 +1031,7 @@ internal suspend fun executeMixedPasswordBatchMove(
 
         if (!isMonicaLocalTarget) {
             aggregateSelection.totpItems.forEach { item ->
-                val totpViewModel = aggregateUiState.totpViewModel
+                val totpViewModel = aggregateViewModels.totpViewModel
                 if (totpViewModel == null) {
                     failedCount++
                     reportProgress()
@@ -1081,7 +1129,7 @@ internal suspend fun executeMixedPasswordBatchMove(
             }
         }
         if (preparedRecordIds.isNotEmpty()) {
-            val persisted = aggregateUiState.passkeyViewModel?.updateMdbxDatabaseForPasskeys(
+            val persisted = aggregateViewModels.passkeyViewModel?.updateMdbxDatabaseForPasskeys(
                 recordIds = preparedRecordIds,
                 databaseId = targetMdbxDatabaseId!!,
                 folderId = targetMdbxFolderId
@@ -1104,7 +1152,7 @@ internal suspend fun executeMixedPasswordBatchMove(
         when {
             updateResult.isSuccess -> {
                 val updatedPasskey = updateResult.getOrThrow()
-                val persisted = aggregateUiState.passkeyViewModel?.updatePasskey(updatedPasskey)
+                val persisted = aggregateViewModels.passkeyViewModel?.updatePasskey(updatedPasskey)
                 if (persisted?.isSuccess == true) {
                     val queueDelete = queuePasswordPagePasskeyBitwardenDeleteAfterMove(
                         source = passkey,

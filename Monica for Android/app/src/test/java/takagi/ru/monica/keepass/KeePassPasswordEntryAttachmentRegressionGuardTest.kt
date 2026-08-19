@@ -11,24 +11,27 @@ class KeePassPasswordEntryAttachmentRegressionGuardTest {
         val source = projectFile(
             "app/src/main/java/takagi/ru/monica/utils/KeePassKdbxService.kt"
         ).readText()
+        val applierSource = projectFile(
+            "app/src/main/java/takagi/ru/monica/keepass/KeePassChangeSetApplier.kt"
+        ).readText()
 
         val updateBody = source.substringAfter("private fun updateEntry(")
             .substringBefore("private fun updateSecureItemInternal(")
-        val rebuildBody = source.substringAfter("private fun buildUpdatedEntry(")
-            .substringBefore("private fun applyPasswordEntryPresentation(")
 
         assertTrue(
-            "Updating a KeePass password entry must remember the matched Entry before removing it, " +
-                "otherwise Entry.binaries is lost when the entry is rebuilt.",
-            updateBody.contains("firstMatchedContext")
+            "Updating a KeePass password entry must resolve and retain the matched native Entry context.",
+            updateBody.contains("matchedContext = entryContexts.firstOrNull")
         )
         assertTrue(
-            "Updating a KeePass password entry must patch the existing Entry, not replace it with a fresh Entry.",
-            updateBody.contains("fieldPatch.applyTo(existing)")
+            "Foreground updates must use the same native change-set path as remote replay.",
+            updateBody.contains("KeePassChangeSetApplier().applyAll")
         )
         assertTrue(
-            "KeePass field patch must copy the existing Entry so attachments in Entry.binaries survive.",
-            source.contains("return entry.copy(")
+            "The change-set applier must patch the current native Entry through KeePassNativeMutation, " +
+                "so binaries and unknown metadata survive.",
+            applierSource.contains("nativeMutation.editEntry(") &&
+                applierSource.contains("KeePassEntryFieldPatch.fromEntryFields(") &&
+                applierSource.contains(").applyTo(current)")
         )
     }
 

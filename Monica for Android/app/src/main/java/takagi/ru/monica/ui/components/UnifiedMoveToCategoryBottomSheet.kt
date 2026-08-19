@@ -73,7 +73,11 @@ sealed interface UnifiedMoveCategoryTarget {
     data class BitwardenVaultTarget(val vaultId: Long) : UnifiedMoveCategoryTarget
     data class BitwardenFolderTarget(val vaultId: Long, val folderId: String) : UnifiedMoveCategoryTarget
     data class KeePassDatabaseTarget(val databaseId: Long) : UnifiedMoveCategoryTarget
-    data class KeePassGroupTarget(val databaseId: Long, val groupPath: String) : UnifiedMoveCategoryTarget
+    data class KeePassGroupTarget(
+        val databaseId: Long,
+        val groupPath: String,
+        val groupUuid: String? = null,
+    ) : UnifiedMoveCategoryTarget
     data class MdbxDatabaseTarget(val databaseId: Long) : UnifiedMoveCategoryTarget
     data class MdbxFolderTarget(val databaseId: Long, val folderId: String) : UnifiedMoveCategoryTarget
 }
@@ -124,6 +128,7 @@ enum class UnifiedMoveAction {
 fun UnifiedMoveToCategoryBottomSheet(
     visible: Boolean,
     onDismiss: () -> Unit,
+    initialSource: UnifiedMoveInitialSource = UnifiedMoveInitialSource.MonicaLocal,
     categories: List<Category>,
     keepassDatabases: List<LocalKeePassDatabase>,
     mdbxDatabases: List<LocalMdbxDatabase> = emptyList(),
@@ -163,10 +168,18 @@ fun UnifiedMoveToCategoryBottomSheet(
             bitwardenVaults.forEach { add(MovePickerSource.BitwardenVaultSource(it)) }
         }
     }
-    val activeSourceKey = remember { mutableStateOf(sources.firstOrNull()?.key ?: MovePickerSource.MonicaLocal.key) }
-    val sourceKeys = sources.map { it.key }
-    LaunchedEffect(sourceKeys) {
-        if (activeSourceKey.value !in sourceKeys) {
+    val sourceKeys = sources.mapTo(linkedSetOf()) { it.key }
+    val activeSourceKey = remember(initialSource) {
+        mutableStateOf(resolveUnifiedMoveInitialSourceKey(initialSource, sourceKeys))
+    }
+    val hasManualSourceSelection = remember(initialSource) { mutableStateOf(false) }
+    LaunchedEffect(initialSource, sourceKeys) {
+        val resolvedInitialSourceKey = resolveUnifiedMoveInitialSourceKey(initialSource, sourceKeys)
+        if (!hasManualSourceSelection.value && activeSourceKey.value != resolvedInitialSourceKey) {
+            activeSourceKey.value = resolvedInitialSourceKey
+            selectedTarget.value = null
+            selectedTargetLabel.value = null
+        } else if (activeSourceKey.value !in sourceKeys) {
             activeSourceKey.value = MovePickerSource.MonicaLocal.key
             selectedTarget.value = null
             selectedTargetLabel.value = null
@@ -386,7 +399,8 @@ fun UnifiedMoveToCategoryBottomSheet(
                         MovePickerTarget(
                             target = UnifiedMoveCategoryTarget.KeePassGroupTarget(
                                 databaseId = source.database.id,
-                                groupPath = groupNode.group.path
+                                groupPath = groupNode.group.path,
+                                groupUuid = groupNode.group.uuid,
                             ),
                             label = listOfNotNull(
                                 source.database.name,
@@ -552,6 +566,7 @@ fun UnifiedMoveToCategoryBottomSheet(
                             MonicaExpressiveFilterChip(
                                 selected = source.key == activeSourceKey.value,
                                 onClick = {
+                                    hasManualSourceSelection.value = true
                                     activeSourceKey.value = source.key
                                     selectedTarget.value = null
                                     selectedTargetLabel.value = null

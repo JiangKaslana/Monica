@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
@@ -168,6 +169,17 @@ internal fun KeepassRefreshTopActionsMenuItem(
         },
         leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
         onClick = onClick
+    )
+}
+
+@Composable
+internal fun KeepassNativeManagerTopActionsMenuItem(
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.keepass_native_open_manager)) },
+        leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+        onClick = onClick,
     )
 }
 

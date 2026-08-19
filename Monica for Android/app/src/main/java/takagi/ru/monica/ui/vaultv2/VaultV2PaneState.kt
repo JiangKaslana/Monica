@@ -12,6 +12,15 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 
+internal data class VaultV2FolderNavigationEntry(
+    val storageFilterType: String,
+    val storageFilterPrimaryId: Long?,
+    val storageFilterSecondaryKey: String?,
+    val storageFilterIdentityKey: String?,
+    val scrollIndex: Int,
+    val scrollOffset: Int,
+)
+
 @Stable
 class VaultV2PaneState internal constructor(
     scrollIndex: Int,
@@ -22,12 +31,14 @@ class VaultV2PaneState internal constructor(
     storageFilterType: String,
     storageFilterPrimaryId: Long?,
     storageFilterSecondaryKey: String?,
+    storageFilterIdentityKey: String? = null,
     hasInitializedStorageFilter: Boolean,
     selectionCount: Int,
     isArchiveView: Boolean,
     archiveReturnStorageFilterType: String?,
     archiveReturnStorageFilterPrimaryId: Long?,
     archiveReturnStorageFilterSecondaryKey: String?,
+    archiveReturnStorageFilterIdentityKey: String? = null,
     retainedState: VaultV2RetainedState = VaultV2RetainedState(),
 ) {
     internal val computedListSnapshots: VaultV2RetainedSourceSnapshotStore<
@@ -37,6 +48,10 @@ class VaultV2PaneState internal constructor(
     > = retainedState.computedListSnapshots
     internal val visibleListSnapshots = retainedState.visibleListSnapshots
     private val retainedListState = retainedState
+    private val folderNavigationHistory = retainedState.folderNavigationHistory
+
+    val hasFolderNavigationHistory: Boolean
+        get() = folderNavigationHistory.isNotEmpty()
 
     var scrollIndex by mutableIntStateOf(scrollIndex)
         private set
@@ -66,6 +81,9 @@ class VaultV2PaneState internal constructor(
     var storageFilterSecondaryKey by mutableStateOf(storageFilterSecondaryKey)
         private set
 
+    var storageFilterIdentityKey by mutableStateOf(storageFilterIdentityKey)
+        private set
+
     var hasInitializedStorageFilter by mutableStateOf(hasInitializedStorageFilter)
         private set
 
@@ -80,6 +98,8 @@ class VaultV2PaneState internal constructor(
     internal var archiveReturnStorageFilterPrimaryId by mutableStateOf(archiveReturnStorageFilterPrimaryId)
 
     internal var archiveReturnStorageFilterSecondaryKey by mutableStateOf(archiveReturnStorageFilterSecondaryKey)
+
+    internal var archiveReturnStorageFilterIdentityKey by mutableStateOf(archiveReturnStorageFilterIdentityKey)
 
     fun updateScrollPosition(index: Int, offset: Int) {
         val safeIndex = index.coerceAtLeast(0)
@@ -109,11 +129,36 @@ class VaultV2PaneState internal constructor(
         type: String,
         primaryId: Long? = null,
         secondaryKey: String? = null,
+        identityKey: String? = null,
     ) {
         storageFilterType = type
         storageFilterPrimaryId = primaryId
         storageFilterSecondaryKey = secondaryKey
+        storageFilterIdentityKey = identityKey
         hasInitializedStorageFilter = true
+    }
+
+    internal fun pushFolderNavigationPosition(index: Int, offset: Int) {
+        folderNavigationHistory += VaultV2FolderNavigationEntry(
+            storageFilterType = storageFilterType,
+            storageFilterPrimaryId = storageFilterPrimaryId,
+            storageFilterSecondaryKey = storageFilterSecondaryKey,
+            storageFilterIdentityKey = storageFilterIdentityKey,
+            scrollIndex = index.coerceAtLeast(0),
+            scrollOffset = offset.coerceAtLeast(0),
+        )
+        while (folderNavigationHistory.size > 32) {
+            folderNavigationHistory.removeAt(0)
+        }
+    }
+
+    internal fun popFolderNavigationPosition(): VaultV2FolderNavigationEntry? {
+        if (folderNavigationHistory.isEmpty()) return null
+        return folderNavigationHistory.removeAt(folderNavigationHistory.lastIndex)
+    }
+
+    internal fun clearFolderNavigationHistory() {
+        folderNavigationHistory.clear()
     }
 
     fun ensureAggregateDefaultStorageFilter() {
@@ -154,6 +199,7 @@ class VaultV2PaneState internal constructor(
             archiveReturnStorageFilterType = storageFilterType
             archiveReturnStorageFilterPrimaryId = storageFilterPrimaryId
             archiveReturnStorageFilterSecondaryKey = storageFilterSecondaryKey
+            archiveReturnStorageFilterIdentityKey = storageFilterIdentityKey
         }
         isArchiveView = true
         requestScrollToTop()
@@ -165,11 +211,13 @@ class VaultV2PaneState internal constructor(
                 type = returnType,
                 primaryId = archiveReturnStorageFilterPrimaryId,
                 secondaryKey = archiveReturnStorageFilterSecondaryKey,
+                identityKey = archiveReturnStorageFilterIdentityKey,
             )
         }
         archiveReturnStorageFilterType = null
         archiveReturnStorageFilterPrimaryId = null
         archiveReturnStorageFilterSecondaryKey = null
+        archiveReturnStorageFilterIdentityKey = null
         isArchiveView = false
         requestScrollToTop()
     }
@@ -195,6 +243,8 @@ internal fun vaultV2PaneStateSaver(
             it.archiveReturnStorageFilterType,
             it.archiveReturnStorageFilterPrimaryId,
             it.archiveReturnStorageFilterSecondaryKey,
+            it.storageFilterIdentityKey,
+            it.archiveReturnStorageFilterIdentityKey,
         )
     },
     restore = { restored ->
@@ -213,6 +263,8 @@ internal fun vaultV2PaneStateSaver(
             archiveReturnStorageFilterType = restored.getOrNull(11) as? String,
             archiveReturnStorageFilterPrimaryId = restored.getOrNull(12) as? Long,
             archiveReturnStorageFilterSecondaryKey = restored.getOrNull(13) as? String,
+            storageFilterIdentityKey = restored.getOrNull(14) as? String,
+            archiveReturnStorageFilterIdentityKey = restored.getOrNull(15) as? String,
             retainedState = retainedState,
         )
     },
@@ -233,12 +285,14 @@ internal fun rememberVaultV2PaneState(
             storageFilterType = VAULT_V2_STORAGE_FILTER_ALL,
             storageFilterPrimaryId = null,
             storageFilterSecondaryKey = null,
+            storageFilterIdentityKey = null,
             hasInitializedStorageFilter = false,
             selectionCount = 0,
             isArchiveView = false,
             archiveReturnStorageFilterType = null,
             archiveReturnStorageFilterPrimaryId = null,
             archiveReturnStorageFilterSecondaryKey = null,
+            archiveReturnStorageFilterIdentityKey = null,
             retainedState = retainedState,
         )
     }
