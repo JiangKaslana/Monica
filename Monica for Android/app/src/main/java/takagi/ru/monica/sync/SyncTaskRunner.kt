@@ -164,13 +164,9 @@ object SyncTaskRunner {
                     reason = error.message
                 )
             } catch (error: Exception) {
-                SyncExecutionResult.Failed(
+                syncExecutionFailure(
+                    error = error,
                     finishedAtMillis = System.currentTimeMillis(),
-                    error = SyncError(
-                        kind = SyncErrorKind.UNEXPECTED,
-                        redactedMessage = error.message,
-                        retryable = false
-                    )
                 )
             }
         }

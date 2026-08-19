@@ -1,7 +1,9 @@
 package takagi.ru.monica.ui.screens
 
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -14,21 +16,49 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -71,8 +101,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import takagi.ru.monica.R
+import takagi.ru.monica.data.model.OtpType
+import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.keepass.KeePassFieldChange
 import takagi.ru.monica.keepass.KeePassCustomIconEditor
 import takagi.ru.monica.keepass.KeePassAutoTypeDraft
@@ -88,6 +121,7 @@ import takagi.ru.monica.keepass.KeePassNativeGroupIdentity
 import takagi.ru.monica.ui.components.CustomFieldEditCard
 import takagi.ru.monica.ui.components.CustomFieldSectionHeader
 import takagi.ru.monica.util.PasswordGenerator
+import java.util.Locale
 import java.util.UUID
 import app.keemobile.kotpass.models.CustomIcon
 import app.keemobile.kotpass.constants.PredefinedIcon
@@ -110,7 +144,12 @@ internal fun NativeEntryEditorScreen(
     onRenameCustomIcon: (UUID, String, (String?) -> Unit) -> Unit = { _, _, result ->
         result("Custom icon rename is unavailable")
     },
-    onSave: (List<KeePassFieldChange>, KeePassNativeEntryPresentationUpdate?, (String?) -> Unit) -> Unit,
+    onSave: (
+        List<KeePassFieldChange>,
+        KeePassNativeEntryPresentationUpdate?,
+        List<Uri>,
+        (String?) -> Unit,
+    ) -> Unit,
 ) {
     val context = LocalContext.current
     val initialDraft = remember(entry?.identity, parentGroup, revisionToken) {
@@ -189,6 +228,53 @@ internal fun NativeEntryEditorScreen(
     var autoTypeChanged by remember(entry?.identity, parentGroup, revisionToken) {
         mutableStateOf(false)
     }
+    val originalTotpFields = remember(entry?.identity, parentGroup, revisionToken) {
+        entry?.fields.orEmpty()
+            .filter { field -> isNativeTotpFieldName(field.name) }
+            .map { field ->
+                KeePassFieldChange(field.name, field.rawValue, field.isProtected)
+            }
+    }
+    val initialTotp = remember(entry?.identity, parentGroup, revisionToken) {
+        parseNativeTotpFields(
+            entry?.fields.orEmpty().map { field ->
+                KeePassFieldChange(field.name, field.rawValue, field.isProtected)
+            },
+        )
+    }
+    var totpEnabled by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf(initialTotp != null)
+    }
+    var totpSecret by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf(initialTotp?.secret.orEmpty())
+    }
+    var totpIssuer by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf(initialTotp?.issuer.orEmpty())
+    }
+    var totpAccount by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf(initialTotp?.accountName.orEmpty())
+    }
+    var totpPeriod by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf((initialTotp?.period ?: 30).toString())
+    }
+    var totpDigits by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf((initialTotp?.digits ?: 6).toString())
+    }
+    var totpAlgorithm by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf(initialTotp?.algorithm ?: "SHA1")
+    }
+    var otpType by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf(initialTotp?.otpType?.takeIf { it == OtpType.HOTP } ?: OtpType.TOTP)
+    }
+    var hotpCounter by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf((initialTotp?.counter ?: 0L).toString())
+    }
+    var totpChanged by remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateOf(false)
+    }
+    val pendingAttachmentUris: SnapshotStateList<Uri> = remember(entry?.identity, parentGroup, revisionToken) {
+        mutableStateListOf()
+    }
 
     val iconReadFailedMessage = stringResource(R.string.keepass_native_custom_icon_read_failed)
     val iconInvalidMessage = stringResource(R.string.keepass_native_custom_icon_invalid)
@@ -222,6 +308,18 @@ internal fun NativeEntryEditorScreen(
     val duplicateFieldNameMessage = stringResource(R.string.keepass_native_field_name_duplicate)
     val autoTypeWindowRequiredMessage = stringResource(R.string.keepass_native_auto_type_window_required)
     val autoTypeWindowDuplicateMessage = stringResource(R.string.keepass_native_auto_type_window_duplicate)
+    val totpSecretRequiredMessage = stringResource(R.string.keepass_native_totp_secret_required)
+    val totpParametersInvalidMessage = stringResource(R.string.keepass_native_totp_parameters_invalid)
+
+    val attachmentPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris: List<Uri> ->
+        uris.forEach { uri ->
+            if (pendingAttachmentUris.none { existing -> existing == uri }) {
+                pendingAttachmentUris += uri
+            }
+        }
+    }
 
     fun updateField(id: Long, transform: (NativeEntryEditorField) -> NativeEntryEditorField) {
         val index = fields.indexOfFirst { it.id == id }
@@ -234,6 +332,15 @@ internal fun NativeEntryEditorScreen(
             NativeEntryDraftError.TITLE_REQUIRED -> titleRequiredMessage
             NativeEntryDraftError.FIELD_NAME_REQUIRED -> fieldNameRequiredMessage
             NativeEntryDraftError.DUPLICATE_FIELD_NAME -> duplicateFieldNameMessage
+        }
+        if (totpEnabled && totpSecret.isBlank()) return totpSecretRequiredMessage
+        if (totpEnabled && (
+                totpPeriod.toIntOrNull()?.takeIf { it > 0 } == null ||
+                    totpDigits.toIntOrNull()?.takeIf { it in 4..10 } == null ||
+                    (otpType == OtpType.HOTP && hotpCounter.toLongOrNull()?.takeIf { it >= 0L } == null)
+                )
+        ) {
+            return totpParametersInvalidMessage
         }
         return when (KeePassAutoTypeEditor.validate(
             KeePassAutoTypeDraft(
@@ -302,9 +409,33 @@ internal fun NativeEntryEditorScreen(
                                 } else {
                                     null
                                 }
+                                val editedFields = NativeEntryEditorDraft(fields.toList()).toFieldChanges()
+                                val title = fields.firstOrNull { it.slot == NativeEntryStandardSlot.TITLE }
+                                    ?.value.orEmpty()
+                                val persistedFields = if (totpChanged) {
+                                    mergeNativeTotpFields(
+                                        fields = editedFields,
+                                        data = if (totpEnabled) {
+                                            TotpData(
+                                                secret = totpSecret,
+                                                issuer = totpIssuer,
+                                                accountName = totpAccount,
+                                                period = totpPeriod.toInt(),
+                                                digits = totpDigits.toInt(),
+                                                algorithm = totpAlgorithm,
+                                                otpType = otpType,
+                                                counter = hotpCounter.toLongOrNull() ?: 0L,
+                                            )
+                                        } else null,
+                                        title = title,
+                                    )
+                                } else {
+                                    editedFields + originalTotpFields
+                                }
                                 onSave(
-                                    NativeEntryEditorDraft(fields.toList()).toFieldChanges(),
+                                    persistedFields,
                                     presentation,
+                                    pendingAttachmentUris.toList(),
                                 ) { failure ->
                                     error = failure
                                     saving = false
@@ -384,6 +515,35 @@ internal fun NativeEntryEditorScreen(
                             updateField(field.id) { it.copy(value = password) }
                         }
                     },
+                )
+            }
+            item {
+                NativeTotpEditorCard(
+                    enabled = totpEnabled,
+                    secret = totpSecret,
+                    issuer = totpIssuer,
+                    accountName = totpAccount,
+                    period = totpPeriod,
+                    digits = totpDigits,
+                    algorithm = totpAlgorithm,
+                    otpType = otpType,
+                    hotpCounter = hotpCounter,
+                    onEnabledChange = { totpEnabled = it; totpChanged = true },
+                    onSecretChange = { totpSecret = it; totpChanged = true },
+                    onIssuerChange = { totpIssuer = it; totpChanged = true },
+                    onAccountNameChange = { totpAccount = it; totpChanged = true },
+                    onPeriodChange = { totpPeriod = it.filter(Char::isDigit); totpChanged = true },
+                    onDigitsChange = { totpDigits = it.filter(Char::isDigit); totpChanged = true },
+                    onAlgorithmChange = { totpAlgorithm = it; totpChanged = true },
+                    onOtpTypeChange = { otpType = it; totpChanged = true },
+                    onHotpCounterChange = { hotpCounter = it.filter(Char::isDigit); totpChanged = true },
+                )
+            }
+            item {
+                NativePendingAttachmentsCard(
+                    pendingUris = pendingAttachmentUris,
+                    onAdd = { attachmentPickerLauncher.launch(arrayOf("*/*")) },
+                    onRemove = { uri -> pendingAttachmentUris.remove(uri) },
                 )
             }
             item {
@@ -527,6 +687,196 @@ internal fun NativeEntryEditorScreen(
             onDismiss = { renamingIconUuid = null },
         )
     }
+}
+
+@Composable
+private fun NativeTotpEditorCard(
+    enabled: Boolean,
+    secret: String,
+    issuer: String,
+    accountName: String,
+    period: String,
+    digits: String,
+    algorithm: String,
+    otpType: OtpType,
+    hotpCounter: String,
+    onEnabledChange: (Boolean) -> Unit,
+    onSecretChange: (String) -> Unit,
+    onIssuerChange: (String) -> Unit,
+    onAccountNameChange: (String) -> Unit,
+    onPeriodChange: (String) -> Unit,
+    onDigitsChange: (String) -> Unit,
+    onAlgorithmChange: (String) -> Unit,
+    onOtpTypeChange: (OtpType) -> Unit,
+    onHotpCounterChange: (String) -> Unit,
+) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.keepass_native_totp_title), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        stringResource(R.string.keepass_native_totp_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = onEnabledChange)
+            }
+            if (enabled) {
+                OutlinedTextField(
+                    value = secret,
+                    onValueChange = onSecretChange,
+                    label = { Text(stringResource(R.string.totp_secret)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = issuer,
+                        onValueChange = onIssuerChange,
+                        label = { Text(stringResource(R.string.issuer)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = accountName,
+                        onValueChange = onAccountNameChange,
+                        label = { Text(stringResource(R.string.account_name)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = period,
+                        onValueChange = onPeriodChange,
+                        label = { Text(stringResource(R.string.time_period_seconds)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = digits,
+                        onValueChange = onDigitsChange,
+                        label = { Text(stringResource(R.string.code_digits)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NativeTotpChoiceButton(
+                        label = stringResource(R.string.otp_type_totp),
+                        selected = otpType == OtpType.TOTP,
+                        onClick = { onOtpTypeChange(OtpType.TOTP) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    NativeTotpChoiceButton(
+                        label = stringResource(R.string.otp_type_hotp),
+                        selected = otpType == OtpType.HOTP,
+                        onClick = { onOtpTypeChange(OtpType.HOTP) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                OutlinedTextField(
+                    value = algorithm,
+                    onValueChange = { value -> onAlgorithmChange(value.uppercase()) },
+                    label = { Text(stringResource(R.string.passkey_detail_algorithm)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (otpType == OtpType.HOTP) {
+                    OutlinedTextField(
+                        value = hotpCounter,
+                        onValueChange = onHotpCounterChange,
+                        label = { Text(stringResource(R.string.hotp_counter_hint)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NativeTotpChoiceButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 48.dp),
+    ) {
+        if (selected) Icon(Icons.Default.Check, contentDescription = null)
+        Spacer(Modifier.size(if (selected) 6.dp else 0.dp))
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun NativePendingAttachmentsCard(
+    pendingUris: List<Uri>,
+    onAdd: () -> Unit,
+    onRemove: (Uri) -> Unit,
+) {
+    val context = LocalContext.current
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.attachments), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = onAdd) {
+                    Icon(Icons.Default.AttachFile, contentDescription = stringResource(R.string.attachments_add))
+                }
+            }
+            if (pendingUris.isEmpty()) {
+                Text(
+                    stringResource(R.string.keepass_native_pending_attachments_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                pendingUris.forEach { uri ->
+                    val label = remember(uri) { nativeAttachmentDisplayName(context, uri) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text(label, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        IconButton(onClick = { onRemove(uri) }) {
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.attachment_delete))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun nativeAttachmentDisplayName(context: Context, uri: Uri): String {
+    val queried = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull()
+    return queried?.takeIf(String::isNotBlank)
+        ?: uri.lastPathSegment?.substringAfterLast('/')
+        ?: uri.toString()
 }
 
 @Composable
@@ -767,29 +1117,43 @@ internal fun NativePredefinedIconPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.keepass_native_custom_icon_builtin_picker)) },
         text = {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(64.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
+                contentPadding = PaddingValues(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(PredefinedIcon.values().toList(), key = { it.name }) { icon ->
+                gridItems(PredefinedIcon.values().toList(), key = { it.name }) { icon ->
                     Surface(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .size(64.dp)
                             .clickable { onSelect(icon) },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = if (icon == selectedIcon) {
                             MaterialTheme.colorScheme.secondaryContainer
                         } else {
                             MaterialTheme.colorScheme.surfaceContainerLow
                         },
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null)
-                            Spacer(Modifier.size(10.dp))
-                            Text(icon.name)
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = keepassPredefinedIconVector(icon),
+                                contentDescription = icon.name,
+                                modifier = Modifier.size(28.dp),
+                            )
+                            if (icon == selectedIcon) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(5.dp)
+                                        .size(16.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -797,6 +1161,36 @@ internal fun NativePredefinedIconPickerDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
     )
+}
+
+internal fun keepassPredefinedIconVector(icon: PredefinedIcon): ImageVector {
+    val name = icon.name.lowercase(Locale.ROOT)
+    return when {
+        "folderopen" in name || ("folder" in name && "open" in name) -> Icons.Default.FolderOpen
+        "folder" in name || "directory" in name -> Icons.Default.Folder
+        "world" in name || "internet" in name || "url" in name -> Icons.Default.Language
+        "warning" in name || "danger" in name -> Icons.Default.Warning
+        "network" in name || "server" in name -> Icons.Default.Dns
+        "database" in name || "storage" in name -> Icons.Default.Storage
+        "computer" in name || "desktop" in name -> Icons.Default.Computer
+        "mobile" in name || "phone" in name -> Icons.Default.Smartphone
+        "mail" in name || "email" in name -> Icons.Default.Email
+        "identity" in name || "badge" in name || "user" in name -> Icons.Default.Badge
+        "credit" in name || "card" in name -> Icons.Default.CreditCard
+        "money" in name || "bank" in name || "finance" in name -> Icons.Default.AccountBalance
+        "cart" in name || "shopping" in name -> Icons.Default.ShoppingCart
+        "camera" in name || "photo" in name || "picture" in name -> Icons.Default.PhotoCamera
+        "clock" in name || "time" in name || "calendar" in name -> Icons.Default.Schedule
+        "setting" in name || "gear" in name || "tools" in name -> Icons.Default.Settings
+        "part" in name || "plugin" in name || "extension" in name -> Icons.Default.Extension
+        "note" in name || "text" in name || "document" in name -> Icons.Default.Description
+        "home" in name -> Icons.Default.Home
+        "star" in name || "favorite" in name -> Icons.Default.Star
+        "cloud" in name -> Icons.Default.Cloud
+        "work" in name || "briefcase" in name -> Icons.Default.Work
+        "lock" in name || "secure" in name -> Icons.Default.Lock
+        else -> Icons.Default.VpnKey
+    }
 }
 
 @Composable

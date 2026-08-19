@@ -2053,7 +2053,8 @@ class KeePassKdbxService(
         databaseId: Long,
         parentGroupUuid: UUID,
         name: String,
-        expectedRevisionToken: String
+        expectedRevisionToken: String,
+        properties: KeePassNativeGroupUpdate? = null
     ): Result<KeePassNativeGroupRecord> = withContext(Dispatchers.IO) {
         try {
             val normalizedName = name.trim().takeIf { it.isNotEmpty() }
@@ -2076,11 +2077,19 @@ class KeePassKdbxService(
                         groupName = normalizedName
                     )
                 )
-                MutationPlan(
-                    updatedDatabase = KeePassChangeSetApplier().apply(
+                val createdDatabase = KeePassChangeSetApplier().apply(
                         loaded.keePassDatabase,
                         changeSet
-                    ).updatedDatabase,
+                    ).updatedDatabase
+                val updatedDatabase = properties?.let { update ->
+                    KeePassNativeManagement.updateGroup(
+                        database = createdDatabase,
+                        groupUuid = newGroupUuid,
+                        update = update.copy(name = normalizedName),
+                    )
+                } ?: createdDatabase
+                MutationPlan(
+                    updatedDatabase = updatedDatabase,
                     result = Unit,
                     beforeRemoteUpload = { database, workingRevision ->
                         enqueuePendingChangeSetsIfRemote(database, listOf(changeSet), workingRevision)
@@ -2309,6 +2318,61 @@ class KeePassKdbxService(
                 )
             }
             Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun createNativeEntryWithAttachmentsFromUris(
+        databaseId: Long,
+        parentGroupUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        sourceUris: List<Uri>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            require(fields.isNotEmpty()) { "KeePass entry requires at least one field" }
+            val normalizedNames = fields.map { it.name.trim().lowercase(Locale.ROOT) }
+            require(normalizedNames.none { it.isBlank() }) { "KeePass field name cannot be blank" }
+            require(normalizedNames.size == normalizedNames.distinct().size) {
+                "KeePass field names must be unique"
+            }
+            val attachments = readNativeAttachmentPayloads(sourceUris)
+            val entryUuid = UUID.randomUUID()
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken)
+                requireUniqueNativeGroup(loaded.nativeSession.value, parentGroupUuid)
+                requirePreflightAllowed(
+                    KeePassWritePreflight.evaluateRuntime(
+                        currentDatabaseBytes = loaded.sourceRevision.sizeBytes,
+                        incomingPayloadBytes = attachments.sumOf { payload -> payload.bytes.size.toLong() }
+                    )
+                )
+                val created = KeePassNativeManagement.createEntry(
+                    database = loaded.keePassDatabase,
+                    targetGroupUuid = parentGroupUuid,
+                    fields = fields.map { field ->
+                        field.name.trim() to if (field.protected) {
+                            EntryValue.Encrypted(EncryptedValue.fromString(field.value))
+                        } else {
+                            EntryValue.Plain(field.value)
+                        }
+                    },
+                    entryUuid = entryUuid
+                )
+                val withAttachments = attachments.fold(created) { database, payload ->
+                    KeePassNativeManagement.addAttachment(
+                        database = database,
+                        entryUuid = entryUuid,
+                        fileName = payload.fileName,
+                        bytes = payload.bytes
+                    )
+                }
+                MutationPlan(updatedDatabase = withAttachments, result = Unit)
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+        } catch (error: OutOfMemoryError) {
+            Result.failure(error)
         } catch (error: Exception) {
             Result.failure(normalizeError(error))
         }
@@ -2596,6 +2660,58 @@ class KeePassKdbxService(
             Result.failure(error)
         } catch (error: Exception) {
             Result.failure(normalizeError(error))
+        }
+    }
+
+    internal suspend fun addNativeAttachmentsFromUris(
+        databaseId: Long,
+        entryUuid: UUID,
+        sourceUris: List<Uri>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = withContext(Dispatchers.IO) {
+        try {
+            if (sourceUris.isEmpty()) {
+                return@withContext Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+            }
+            val attachments = readNativeAttachmentPayloads(sourceUris)
+            mutateDatabase(databaseId) { loaded ->
+                assertNativeRevision(expectedRevisionToken, loaded.nativeSession.value.revisionToken, entryUuid)
+                requireUniqueNativeEntry(loaded.nativeSession.value, entryUuid)
+                requirePreflightAllowed(
+                    KeePassWritePreflight.evaluateRuntime(
+                        currentDatabaseBytes = loaded.sourceRevision.sizeBytes,
+                        incomingPayloadBytes = attachments.sumOf { payload -> payload.bytes.size.toLong() }
+                    )
+                )
+                val updated = attachments.fold(loaded.keePassDatabase) { database, payload ->
+                    KeePassNativeManagement.addAttachment(
+                        database = database,
+                        entryUuid = entryUuid,
+                        fileName = payload.fileName,
+                        bytes = payload.bytes
+                    )
+                }
+                MutationPlan(updatedDatabase = updated, result = Unit)
+            }
+            Result.success(loadUniqueNativeEntryRecord(databaseId, entryUuid))
+        } catch (error: OutOfMemoryError) {
+            Result.failure(error)
+        } catch (error: Exception) {
+            Result.failure(normalizeError(error))
+        }
+    }
+
+    private data class NativeAttachmentPayload(
+        val fileName: String,
+        val bytes: ByteArray
+    )
+
+    private fun readNativeAttachmentPayloads(sourceUris: List<Uri>): List<NativeAttachmentPayload> {
+        return sourceUris.distinctBy(Uri::toString).map { sourceUri ->
+            val metadata = AttachmentUriMetadata.resolve(context, sourceUri)
+            val bytes = context.contentResolver.openInputStream(sourceUri)?.use { input -> input.readBytes() }
+                ?: throw IOException("Unable to read selected attachment: ${metadata.fileName}")
+            NativeAttachmentPayload(metadata.fileName, bytes)
         }
     }
 

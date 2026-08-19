@@ -95,6 +95,36 @@ class DefaultSyncCoordinatorStatusTest {
     }
 
     @Test
+    fun coordinatorPublishesConflictWhenExecutorThrowsRemoteConflict() = runBlocking {
+        val job = Job()
+        val target = SyncTarget.KeePassDatabase(databaseId = 8L)
+        val store = DefaultSyncStatusStore()
+        val executor = object : SyncExecutor {
+            override fun canExecute(target: SyncTarget): Boolean = true
+
+            override suspend fun execute(request: SyncRequest): SyncExecutionResult {
+                error("远端文件已变化，且本地工作副本也有修改，请先处理冲突")
+            }
+        }
+        val coordinator = DefaultSyncCoordinator(
+            scope = CoroutineScope(coroutineContext + job),
+            executors = listOf(executor),
+            statusStore = store,
+            nowMillis = { 10L }
+        )
+
+        try {
+            coordinator.request(request("conflict", target, SyncTrigger.PAGE_VISIBLE))
+            val finalStatus = awaitPhase(store, target.stableKey, SyncPhase.CONFLICT)
+
+            assertEquals(SyncErrorKind.CONFLICT, finalStatus.lastError?.kind)
+            assertTrue(finalStatus.lastError?.redactedMessage?.contains("远端文件已变化") == true)
+        } finally {
+            job.cancel()
+        }
+    }
+
+    @Test
     fun coordinatorPublishesBlockedWhenExecutorIsMissing() = runBlocking {
         val target = SyncTarget.MdbxVault(databaseId = 9L)
         val dedupeKey = SyncKey("mdbx:9:repair")

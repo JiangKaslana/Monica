@@ -188,9 +188,16 @@ class KeePassWorkspaceRepository(
         databaseId: Long,
         parentGroupUuid: UUID,
         name: String,
-        expectedRevisionToken: String
+        expectedRevisionToken: String,
+        properties: KeePassNativeGroupUpdate? = null
     ): Result<KeePassNativeGroupRecord> {
-        return service.createNativeGroup(databaseId, parentGroupUuid, name, expectedRevisionToken)
+        return service.createNativeGroup(
+            databaseId,
+            parentGroupUuid,
+            name,
+            expectedRevisionToken,
+            properties,
+        )
     }
 
     internal suspend fun renameNativeGroup(
@@ -245,6 +252,20 @@ class KeePassWorkspaceRepository(
         databaseId,
         parentGroupUuid,
         fields,
+        expectedRevisionToken
+    )
+
+    internal suspend fun createNativeEntryWithAttachments(
+        databaseId: Long,
+        parentGroupUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        sourceUris: List<Uri>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = service.createNativeEntryWithAttachmentsFromUris(
+        databaseId,
+        parentGroupUuid,
+        fields,
+        sourceUris,
         expectedRevisionToken
     )
 
@@ -359,6 +380,18 @@ class KeePassWorkspaceRepository(
         databaseId,
         entryUuid,
         sourceUri,
+        expectedRevisionToken
+    )
+
+    internal suspend fun addNativeAttachmentsFromUris(
+        databaseId: Long,
+        entryUuid: UUID,
+        sourceUris: List<Uri>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = service.addNativeAttachmentsFromUris(
+        databaseId,
+        entryUuid,
+        sourceUris,
         expectedRevisionToken
     )
 

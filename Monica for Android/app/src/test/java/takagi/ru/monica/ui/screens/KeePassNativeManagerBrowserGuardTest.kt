@@ -24,6 +24,19 @@ class KeePassNativeManagerBrowserGuardTest {
         assertFalse(browser.contains("OutlinedCard("))
     }
 
+    @Test
+    fun `new folder reuses the complete group property editor`() {
+        val source = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/KeePassNativeManagerScreen.kt",
+        ).readText()
+
+        assertTrue(source.contains("NativeCreateGroupDialog("))
+        assertTrue(source.contains("expires = expires"))
+        assertTrue(source.contains("expiryTime = expiryTime"))
+        assertTrue(source.contains("tags = parsedTags"))
+        assertTrue(source.contains("enableSearching = searching"))
+    }
+
     private fun projectFile(relativePath: String): File {
         var directory: File? = File(System.getProperty("user.dir") ?: ".")
         while (directory != null) {

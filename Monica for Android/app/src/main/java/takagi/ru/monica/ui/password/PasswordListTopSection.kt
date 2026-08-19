@@ -57,6 +57,7 @@ import takagi.ru.monica.ui.components.M3IdentityVerifyDialog
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuDropdown
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuOffset
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
+import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.utils.BiometricHelper
 import takagi.ru.monica.utils.KeePassKdbxService
 import takagi.ru.monica.utils.decodeKeePassPathForDisplay
@@ -148,8 +149,9 @@ internal fun PasswordListTopSection(
     coroutineScope: CoroutineScope,
     bitwardenRepository: BitwardenRepository,
     securityManager: SecurityManager,
-    onRenameCategory: (Category) -> Unit,
+    onRenameCategory: (Category, String) -> Unit,
     onDeleteCategory: (Category) -> Unit,
+    onTransferCategory: (Category, UnifiedMoveCategoryTarget, takagi.ru.monica.ui.components.UnifiedMoveAction) -> Unit,
     onOpenCommonAccountTemplates: () -> Unit,
     onOpenMdbxCommitHistory: (Long) -> Unit,
     onOpenHistory: () -> Unit,
@@ -368,6 +370,7 @@ internal fun PasswordListTopSection(
                                         }
                                     }
                                 },
+                                onTransferCategory = onTransferCategory,
                                 getBitwardenFolders = viewModel::getBitwardenFolders,
                                 getMdbxFolders = viewModel::getMdbxFolders,
                                 getKeePassGroups = localKeePassViewModel::getGroups,

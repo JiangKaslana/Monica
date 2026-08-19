@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import takagi.ru.monica.keepass.KeePassFieldChange
+import takagi.ru.monica.data.model.TotpData
 
 class KeePassNativeEntryEditorModelTest {
 
@@ -123,5 +124,56 @@ class KeePassNativeEntryEditorModelTest {
         assertFalse(custom.protected)
         assertEquals(draft.fields.maxOf { it.order } + 1, custom.order)
         assertNull(custom.slot)
+    }
+
+    @Test
+    fun `totp fields are managed by the authenticator card and remain keepass compatible`() {
+        val source = listOf(
+            KeePassFieldChange("Title", "Mail"),
+            KeePassFieldChange("otp", "otpauth://totp/old?secret=AAAA", protected = true),
+            KeePassFieldChange("Plugin", "opaque"),
+        )
+
+        val merged = mergeNativeTotpFields(
+            fields = source,
+            data = TotpData(
+                secret = "JBSWY3DPEHPK3PXP",
+                issuer = "Example",
+                accountName = "alice@example.com",
+                period = 30,
+                digits = 6,
+                algorithm = "SHA1",
+            ),
+            title = "Mail",
+        )
+
+        assertEquals(1, merged.count { it.name.equals("otp", ignoreCase = true) })
+        assertTrue(merged.any { it.name == "TOTP Seed" && it.protected })
+        assertTrue(merged.any { it.name == "Plugin" && it.value == "opaque" })
+        assertFalse(buildNativeEntryEditorDraft(merged).customFields.any {
+            isNativeTotpFieldName(it.name)
+        })
+    }
+
+    @Test
+    fun `existing keepass totp fields populate the authenticator editor`() {
+        val parsed = parseNativeTotpFields(
+            listOf(
+                KeePassFieldChange("Title", "GitHub"),
+                KeePassFieldChange("UserName", "alice"),
+                KeePassFieldChange("TOTP Seed", "jbsw y3dp ehpk3pxp", protected = true),
+                KeePassFieldChange("TOTP Period", "45"),
+                KeePassFieldChange("TOTP Digits", "8"),
+                KeePassFieldChange("TOTP Algorithm", "sha256"),
+            ),
+        )
+
+        requireNotNull(parsed)
+        assertEquals("JBSWY3DPEHPK3PXP", parsed.secret)
+        assertEquals("GitHub", parsed.issuer)
+        assertEquals("alice", parsed.accountName)
+        assertEquals(45, parsed.period)
+        assertEquals(8, parsed.digits)
+        assertEquals("SHA256", parsed.algorithm)
     }
 }

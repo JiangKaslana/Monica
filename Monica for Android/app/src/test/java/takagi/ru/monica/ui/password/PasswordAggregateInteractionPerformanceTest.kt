@@ -38,6 +38,7 @@ class PasswordAggregateInteractionPerformanceTest {
             displayedContentTypes = setOf(PasswordPageContentType.NOTE),
             searchQuery = "",
             categoryFilter = CategoryFilter.All,
+            localCategoryIdsInScope = emptySet(),
         )
 
         assertFalse(state.seed(key).hasSnapshot)

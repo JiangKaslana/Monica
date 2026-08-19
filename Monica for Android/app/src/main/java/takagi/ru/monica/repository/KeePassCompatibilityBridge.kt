@@ -12,6 +12,7 @@ import takagi.ru.monica.keepass.KeePassFieldChange
 import takagi.ru.monica.keepass.KeePassNativeSearchOptions
 import takagi.ru.monica.keepass.KeePassDatabaseSettingsUpdate
 import takagi.ru.monica.keepass.KeePassKeyFileChangeMode
+import takagi.ru.monica.keepass.KeePassNativeGroupUpdate
 import java.time.Instant
 import java.util.UUID
 
@@ -147,12 +148,14 @@ class KeePassCompatibilityBridge(
         databaseId: Long,
         parentGroupUuid: UUID,
         name: String,
-        expectedRevisionToken: String
+        expectedRevisionToken: String,
+        properties: KeePassNativeGroupUpdate? = null,
     ) = workspaceRepository.createNativeGroup(
         databaseId,
         parentGroupUuid,
         name,
-        expectedRevisionToken
+        expectedRevisionToken,
+        properties,
     )
 
     internal suspend fun renameNativeGroup(

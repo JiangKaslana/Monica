@@ -22,8 +22,19 @@ internal data class PasswordQuickFolderShortcut(
     val subtitle: String,
     val isBack: Boolean,
     val targetFilter: CategoryFilter,
-    val passwordCount: Int?
+    val passwordCount: Int?,
+    /**
+     * Local folder represented by this shortcut. Keeping the source object on the shortcut avoids
+     * falling back to normal navigation when the asynchronous menu snapshot and category list are
+     * briefly out of sync while edit mode is active.
+     */
+    val editableCategory: Category? = null,
 )
+
+internal fun PasswordQuickFolderShortcut.resolveEditableCategory(
+    categories: List<Category>,
+): Category? = editableCategory ?: (targetFilter as? CategoryFilter.Custom)
+    ?.let { filter -> categories.firstOrNull { category -> category.id == filter.categoryId } }
 
 internal data class PasswordQuickFolderBreadcrumb(
     val key: String,
@@ -179,7 +190,8 @@ internal fun buildQuickFolderShortcuts(
                 subtitle = "Monica",
                 isBack = false,
                 targetFilter = CategoryFilter.Custom(node.category.id),
-                passwordCount = passwordCount
+                passwordCount = passwordCount,
+                editableCategory = node.category,
             )
         }
     }
@@ -383,7 +395,8 @@ internal fun buildCategoryMenuFolderShortcuts(
                 subtitle = "Monica",
                 isBack = false,
                 targetFilter = CategoryFilter.Custom(node.category.id),
-                passwordCount = passwordCount
+                passwordCount = passwordCount,
+                editableCategory = node.category,
             )
         }
     }

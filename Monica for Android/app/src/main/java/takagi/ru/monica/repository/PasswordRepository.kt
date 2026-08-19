@@ -101,6 +101,9 @@ class PasswordRepository(
             .withoutExternalSteamMaFileEntries()
     }
 
+    suspend fun getDeletedEntries(): List<PasswordEntry> =
+        passwordEntryDao.getDeletedEntriesSync()
+
     // Category operations
     fun getAllCategories(): Flow<List<Category>> {
         return categoryDao?.getAllCategories() ?: kotlinx.coroutines.flow.flowOf(emptyList())

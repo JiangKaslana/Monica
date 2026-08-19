@@ -62,6 +62,7 @@ import takagi.ru.monica.utils.KeePassUriPermissionState
 import takagi.ru.monica.utils.keePassUriPermissionState
 import takagi.ru.monica.utils.KeePassSecureItemData
 import takagi.ru.monica.utils.buildKeePassPathKey
+import takagi.ru.monica.utils.resolveLocalCategoryIdsInScope
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.applyToPasswordEntry
 import takagi.ru.monica.data.model.toStorageTarget
@@ -276,6 +277,13 @@ private data class KeePassCustomFieldFingerprint(
     val isProtected: Boolean,
     val sortOrder: Int
 )
+
+private data class PasswordEntriesFilterRequest(
+    val query: String,
+    val filter: CategoryFilter,
+    val categories: List<Category>,
+    val includeDescendantCategories: Boolean,
+)
 private const val PASSWORD_SCROLL_DEBUG_LOGS_ENABLED = false
 
 /**
@@ -443,6 +451,10 @@ class PasswordViewModel(
     private val smartDeduplicationEnabled = settingsManager?.settingsFlow?.map { 
         it.smartDeduplicationEnabled 
     }?.stateIn(viewModelScope, SharingStarted.Eagerly, true) ?: kotlinx.coroutines.flow.MutableStateFlow(true)
+    private val passwordParentCategoryIncludesChildren = settingsManager?.settingsFlow?.map {
+        it.passwordParentCategoryIncludesChildren
+    }?.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+        ?: kotlinx.coroutines.flow.MutableStateFlow(false)
     
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -605,12 +617,28 @@ class PasswordViewModel(
 
     private val passwordEntriesSource: Flow<List<PasswordEntry>> = combine(
         debouncedSearchQuery,
-        _categoryFilter
-    ) { query, filter ->
-        query to filter
+        _categoryFilter,
+        categoriesSource,
+        passwordParentCategoryIncludesChildren,
+    ) { query, filter, categoryList, includeDescendants ->
+        PasswordEntriesFilterRequest(
+            query = query,
+            filter = filter,
+            categories = categoryList,
+            includeDescendantCategories = includeDescendants,
+        )
     }
         .distinctUntilChanged()
-        .flatMapLatest { (query, filter) ->
+        .flatMapLatest { request ->
+            val query = request.query
+            val filter = request.filter
+            val localCategoryIdsInScope = (filter as? CategoryFilter.Custom)?.let { customFilter ->
+                resolveLocalCategoryIdsInScope(
+                    categories = request.categories,
+                    selectedCategoryId = customFilter.categoryId,
+                    includeDescendants = request.includeDescendantCategories,
+                )
+            }.orEmpty()
             val baseFlow: Flow<List<PasswordEntry>> = if (query.isNotBlank()) {
                 // Extended search: query + custom fields, then apply current category filter in-memory.
                 val searchFlow = repository.searchPasswordEntries(query).map { baseResults ->
@@ -668,7 +696,11 @@ class PasswordViewModel(
                         searchResults.filter { it.id in localOnlyIds }
                     }
                     else -> searchFlow.map { searchResults ->
-                        applyCategoryFilterInMemory(searchResults, filter)
+                        applyCategoryFilterInMemory(
+                            entries = searchResults,
+                            filter = filter,
+                            localCategoryIdsInScope = localCategoryIdsInScope,
+                        )
                     }
                 }
             } else {
@@ -690,8 +722,12 @@ class PasswordViewModel(
                     is CategoryFilter.LocalUncategorized -> rawAllPasswordsSource.map { list ->
                         list.filter { it.isLocalOnlyEntry() && it.categoryId == null }
                     }
-                    is CategoryFilter.Custom -> repository.getPasswordEntriesByCategory(filter.categoryId)
-                        .map { list -> list.filter { it.isLocalOnlyEntry() } }
+                    is CategoryFilter.Custom -> rawAllPasswordsSource.map { list ->
+                        val categoryIds = localCategoryIdsInScope.ifEmpty { setOf(filter.categoryId) }
+                        list.filter { entry ->
+                            entry.isLocalOnlyEntry() && entry.categoryId in categoryIds
+                        }
+                    }
                     is CategoryFilter.KeePassDatabase -> repository.getPasswordEntriesByKeePassDatabase(filter.databaseId)
                     is CategoryFilter.KeePassGroupFilter -> repository.getPasswordEntriesByKeePassGroup(
                         filter.databaseId,
@@ -924,7 +960,8 @@ class PasswordViewModel(
 
     private fun applyCategoryFilterInMemory(
         entries: List<PasswordEntry>,
-        filter: CategoryFilter
+        filter: CategoryFilter,
+        localCategoryIdsInScope: Set<Long> = emptySet(),
     ): List<PasswordEntry> {
         return when (filter) {
             is CategoryFilter.All -> entries
@@ -935,7 +972,10 @@ class PasswordViewModel(
             is CategoryFilter.Uncategorized -> entries.filter { it.categoryId == null }
             is CategoryFilter.LocalStarred -> entries.filter { it.isLocalOnlyEntry() && it.isFavorite }
             is CategoryFilter.LocalUncategorized -> entries.filter { it.isLocalOnlyEntry() && it.categoryId == null }
-            is CategoryFilter.Custom -> entries.filter { it.categoryId == filter.categoryId && it.isLocalOnlyEntry() }
+            is CategoryFilter.Custom -> {
+                val categoryIds = localCategoryIdsInScope.ifEmpty { setOf(filter.categoryId) }
+                entries.filter { it.categoryId in categoryIds && it.isLocalOnlyEntry() }
+            }
             is CategoryFilter.KeePassDatabase -> entries.filter { it.keepassDatabaseId == filter.databaseId }
             is CategoryFilter.KeePassGroupFilter -> entries.filter {
                 takagi.ru.monica.ui.KeePassGroupFilterIdentity(
@@ -2334,12 +2374,96 @@ class PasswordViewModel(
         }
     }
 
+    internal suspend fun updateCategoriesAwait(categories: List<Category>) {
+        categories.forEach { category -> repository.updateCategory(category) }
+    }
+
     fun deleteCategory(category: Category) {
         viewModelScope.launch {
             repository.deleteCategory(category)
             if (_categoryFilter.value is CategoryFilter.Custom && (_categoryFilter.value as CategoryFilter.Custom).categoryId == category.id) {
                 applyCategoryFilter(CategoryFilter.All, persist = true)
             }
+        }
+    }
+
+    internal suspend fun deleteCategoriesAwait(categories: List<Category>) {
+        if (categories.isEmpty()) return
+        categories.forEach { category -> repository.deleteCategory(category) }
+        val deletedIds = categories.mapTo(mutableSetOf(), Category::id)
+        val selectedCategoryId = (_categoryFilter.value as? CategoryFilter.Custom)?.categoryId
+        if (selectedCategoryId in deletedIds) {
+            applyCategoryFilter(CategoryFilter.All, persist = true)
+        }
+    }
+
+    internal suspend fun getAllActiveSecureItemsAwait(): List<SecureItem> =
+        secureItemRepository?.getAllItems()?.first()?.filterNot(SecureItem::isDeleted).orEmpty()
+
+    internal suspend fun getInactiveCategoryReferencesAwait(
+        categoryIds: Set<Long>,
+    ): Int {
+        if (categoryIds.isEmpty()) return 0
+        val archivedPasswords = repository.getArchivedEntries().first()
+            .count { entry -> entry.categoryId in categoryIds }
+        val deletedPasswords = repository.getDeletedEntries()
+            .count { entry -> entry.categoryId in categoryIds }
+        val deletedSecureItems = secureItemRepository?.getDeletedItemsSync()
+            ?.count { item -> item.categoryId in categoryIds }
+            ?: 0
+        return archivedPasswords + deletedPasswords + deletedSecureItems
+    }
+
+    internal suspend fun copyLocalOnlySecureItemsToMonicaCategoryBatch(
+        items: List<SecureItem>,
+        categoryId: Long?,
+    ): MdbxSecureItemBatchResult {
+        val secureRepository = secureItemRepository
+            ?: return MdbxSecureItemBatchResult(successCount = 0, failedCount = items.size)
+        if (items.isEmpty()) return MdbxSecureItemBatchResult(0, 0)
+        val localItems = items.filter { item ->
+            !item.isDeleted &&
+                item.keepassDatabaseId == null &&
+                item.bitwardenVaultId == null &&
+                item.mdbxDatabaseId == null
+        }
+        if (localItems.isEmpty()) {
+            return MdbxSecureItemBatchResult(successCount = 0, failedCount = items.size)
+        }
+        return runCatching {
+            val now = Date()
+            val copies = localItems.map { source ->
+                source.copy(
+                    id = 0,
+                    categoryId = categoryId,
+                    keepassDatabaseId = null,
+                    keepassGroupPath = null,
+                    keepassEntryUuid = null,
+                    keepassGroupUuid = null,
+                    mdbxDatabaseId = null,
+                    mdbxFolderId = null,
+                    bitwardenVaultId = null,
+                    bitwardenCipherId = null,
+                    bitwardenFolderId = null,
+                    bitwardenRevisionDate = null,
+                    bitwardenLocalModified = false,
+                    syncStatus = "NONE",
+                    replicaGroupId = null,
+                    isDeleted = false,
+                    deletedAt = null,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            }
+            val ids = secureRepository.insertItems(copies)
+            MdbxSecureItemBatchResult(
+                successCount = ids.size,
+                failedCount = (items.size - ids.size).coerceAtLeast(0),
+                createdIds = ids,
+            )
+        }.getOrElse { error ->
+            Log.e("PasswordViewModel", "Local secure-item category copy failed", error)
+            MdbxSecureItemBatchResult(successCount = 0, failedCount = items.size)
         }
     }
     

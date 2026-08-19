@@ -540,6 +540,7 @@ internal fun rememberPasswordAggregateUiState(
     aggregateConfig: PasswordListAggregateConfig?,
     searchQuery: String,
     currentFilter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long>,
     appSettings: AppSettings,
     retainedState: PasswordAggregateRetainedState,
 ): PasswordListAggregateUiState {
@@ -577,7 +578,8 @@ internal fun rememberPasswordAggregateUiState(
         aggregateNotes,
         aggregateTotpItems,
         aggregatePasskeys,
-        currentFilter
+        currentFilter,
+        localCategoryIdsInScope,
     ) {
         resolveNonEmptyAggregateContentTypes(
             configuredTypes = aggregateConfig?.visibleContentTypes ?: emptyList(),
@@ -588,6 +590,7 @@ internal fun rememberPasswordAggregateUiState(
             totpItems = aggregateTotpItems,
             passkeys = aggregatePasskeys,
             categoryFilter = currentFilter,
+            localCategoryIdsInScope = localCategoryIdsInScope,
             parseTotpData = aggregateConfig?.totpViewModel?.let { viewModel ->
                 { item: SecureItem -> viewModel.parseTotpDataForDisplay(item) }
             } ?: {
@@ -665,11 +668,13 @@ internal fun rememberPasswordAggregateUiState(
         aggregateDisplayedContentTypes,
         searchQuery,
         currentFilter,
+        localCategoryIdsInScope,
     ) {
         PasswordAggregateSnapshotKey(
             displayedContentTypes = aggregateDisplayedContentTypes,
             searchQuery = searchQuery,
             categoryFilter = currentFilter,
+            localCategoryIdsInScope = localCategoryIdsInScope,
         )
     }
     val aggregateSnapshotSeed = remember(retainedState, aggregateSnapshotKey) {
@@ -687,6 +692,7 @@ internal fun rememberPasswordAggregateUiState(
         aggregatePasskeys,
         searchQuery,
         currentFilter,
+        localCategoryIdsInScope,
         aggregateDisplayedContentTypes,
         stateKey = aggregateSnapshotKey,
         initialValue = aggregateSnapshotSeed.items,
@@ -709,6 +715,7 @@ internal fun rememberPasswordAggregateUiState(
                 passkeys = aggregatePasskeys,
                 searchQuery = searchQuery,
                 categoryFilter = currentFilter,
+                localCategoryIdsInScope = localCategoryIdsInScope,
                 parseBankCardData = aggregateConfig?.bankCardViewModel?.let { viewModel ->
                     { item: SecureItem -> viewModel.parseCardData(item.itemData) }
                 } ?: {

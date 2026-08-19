@@ -2547,6 +2547,17 @@
     <string name="password_batch_transfer_progress_title_move">Массовое перемещение</string>
     <string name="password_batch_transfer_target">Цель: %1$s</string>
     <string name="password_batch_transfer_partial_result">%1$d выполнено, %2$d ошибок</string>
+    <string name="password_batch_keepass_failure_title">Не удалось переместить в KeePass</string>
+    <string name="password_batch_keepass_failure_conflict">Облачный файл и локальная рабочая копия %1$s были изменены. Для защиты базы данных %2$d элемент(а/ов) не перемещены, исходные элементы сохранены. Откройте «База данных и резервное копирование → KeePass → эта база данных → Инструменты базы данных → Центр конфликтов», разрешите конфликт и повторите перемещение.</string>
+    <string name="password_batch_keepass_failure_network">Не удалось подключиться к %1$s. %2$d элемент(а/ов) не перемещены, исходные элементы сохранены. Проверьте сеть и состояние удалённого хранилища, затем повторите попытку.</string>
+    <string name="password_batch_keepass_failure_auth">Срок действия входа в %1$s истёк. %2$d элемент(а/ов) не перемещены, исходные элементы сохранены. Войдите в удалённую учётную запись ещё раз и повторите попытку.</string>
+    <string name="password_batch_keepass_failure_permission">У %1$s нет разрешения на запись или база открыта только для чтения. %2$d элемент(а/ов) не перемещены, исходные элементы сохранены. Повторно предоставьте доступ или отключите режим только для чтения.</string>
+    <string name="password_batch_keepass_failure_locked">%1$s заблокирована. %2$d элемент(а/ов) не перемещены, исходные элементы сохранены. Разблокируйте базу данных и повторите попытку.</string>
+    <string name="password_batch_keepass_failure_unknown">Не удалось записать %2$d элемент(а/ов) в %1$s. Исходные элементы сохранены. Причина: %3$s</string>
+    <string name="keepass_sync_conflict_guidance">Облачная база данных и локальная рабочая копия были изменены. Откройте «База данных и резервное копирование → KeePass → эта база данных → Инструменты базы данных → Центр конфликтов» и выберите способ разрешения конфликта.</string>
+    <string name="keepass_sync_network_guidance">Проверьте подключение к сети и состояние удалённого хранилища, затем повторите синхронизацию.</string>
+    <string name="keepass_sync_auth_guidance">Возможно, срок действия входа в удалённую учётную запись истёк. Войдите снова в настройках базы данных.</string>
+    <string name="keepass_sync_permission_guidance">Проверьте разрешение на запись и режим только для чтения базы данных, затем повторите попытку.</string>
     <string name="password_batch_transfer_notification_channel_name">Прогресс массового переноса</string>
     <string name="password_batch_transfer_notification_channel_desc">Прогресс копирования и перемещения по базам данных</string>
     <string name="password_batch_transfer_notification_progress">%1$d/%2$d выполнено</string>
@@ -3249,6 +3260,8 @@
     <string name="password_list_quick_filters_content_desc">Переключайте и перетаскивайте элементы фильтров.</string>
     <string name="password_list_category_quick_filters_switch_title">Фильтры по категориям</string>
     <string name="password_list_category_quick_filters_switch_desc">Показывать чипы папок под быстрыми фильтрами.</string>
+    <string name="password_parent_category_includes_children_title">Включать элементы подкатегорий</string>
+    <string name="password_parent_category_includes_children_desc">В родительской категории также показываются элементы всех подкатегорий. Применяется к паролям и хранилищу.</string>
     <string name="password_list_quick_folders_switch_title">Переключатель быстрых папок</string>
     <string name="password_list_quick_folders_switch_desc">Показывать карточки папок над списком паролей.</string>
     <string name="password_list_quick_folders_style_title">Стиль быстрых папок</string>
@@ -3623,4 +3636,17 @@
     <string name="steam_mini_profile_background_description">Показывать фон мини-профиля Steam на карточках токена и аккаунта. Анимация работает только на экране, размер кэша ограничен 64 МБ.</string>
     <string name="add_credential">Добавить учётные данные</string>
     <string name="credential_number">Учётные данные %1$d</string>
+    <string name="category_folder_transfer_source_missing">Исходная папка больше не существует.</string>
+    <string name="category_folder_transfer_no_change">Папка уже находится в выбранном месте.</string>
+    <string name="category_folder_transfer_invalid_destination">Нельзя переместить или скопировать папку в неё саму или в одну из её вложенных папок.</string>
+    <string name="category_folder_transfer_passkey_copy_blocked">Эта папка содержит ключи доступа. Их нельзя безопасно дублировать, поскольку каждая учётная запись должна сохранять уникальный закрытый ключ. Переместите папку или сначала вынесите из неё ключи доступа.</string>
+    <string name="category_folder_transfer_identity_items_unsupported">Эта папка содержит платёжные адреса или платёжные аккаунты, которые выбранная база данных пока не поддерживает. Сначала переместите их в Monica или MDBX.</string>
+    <string name="category_folder_transfer_inactive_items_blocked">В этой папке осталось %1$d архивированных или удалённых элементов. Восстановите или окончательно удалите их перед перемещением всей папки в другую базу данных.</string>
+    <string name="category_folder_transfer_target_missing">Выбранная целевая база данных больше недоступна.</string>
+    <string name="category_folder_transfer_bitwarden_attachments_blocked">В этой папке есть вложения, но выбранный аккаунт Bitwarden не может их загружать. Операция остановлена, чтобы вложения не были потеряны без предупреждения.</string>
+    <string name="category_folder_transfer_attachment_failed">Не удалось скопировать вложения для %1$d элементов.</string>
+    <string name="category_folder_transfer_success">Обработано папок: %1$d, элементов: %2$d</string>
+    <string name="category_folder_transfer_partial_title">Перенос папки завершён не полностью</string>
+    <string name="category_folder_transfer_partial_message">Завершено элементов: %1$d, ошибок: %2$d. Исходные элементы с ошибками и структура исходных папок сохранены. %3$s</string>
+    <string name="category_folder_transfer_running">Уже выполняется другой перенос папки.</string>
 </resources>

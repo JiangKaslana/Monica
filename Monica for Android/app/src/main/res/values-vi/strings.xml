@@ -2985,6 +2985,17 @@ Làm mới hoặc đồng bộ hóa cơ sở dữ liệu KeePass này, sau đó 
     <string name="password_batch_transfer_progress_title_move">Đang di chuyển hàng loạt</string>
     <string name="password_batch_transfer_target">Mục tiêu: %1$s</string>
     <string name="password_batch_transfer_partial_result">%1$d đã hoàn thành, %2$d thất bại</string>
+    <string name="password_batch_keepass_failure_title">Không thể di chuyển sang KeePass</string>
+    <string name="password_batch_keepass_failure_conflict">Tệp đám mây và bản sao làm việc trên thiết bị của %1$s đều đã thay đổi. Để bảo vệ cơ sở dữ liệu, %2$d mục chưa được di chuyển và các mục nguồn vẫn được giữ nguyên. Mở “Cơ sở dữ liệu và sao lưu → KeePass → cơ sở dữ liệu này → Công cụ cơ sở dữ liệu → Trung tâm xung đột”, xử lý xung đột rồi thử di chuyển lại.</string>
+    <string name="password_batch_keepass_failure_network">Không thể kết nối với %1$s. %2$d mục chưa được di chuyển và các mục nguồn vẫn được giữ nguyên. Hãy kiểm tra mạng và dịch vụ lưu trữ từ xa rồi thử lại.</string>
+    <string name="password_batch_keepass_failure_auth">Phiên đăng nhập của %1$s đã hết hạn. %2$d mục chưa được di chuyển và các mục nguồn vẫn được giữ nguyên. Hãy đăng nhập lại tài khoản từ xa rồi thử lại.</string>
+    <string name="password_batch_keepass_failure_permission">%1$s không có quyền ghi hoặc đang ở chế độ chỉ đọc. %2$d mục chưa được di chuyển và các mục nguồn vẫn được giữ nguyên. Hãy cấp quyền lại cho cơ sở dữ liệu hoặc tắt chế độ chỉ đọc.</string>
+    <string name="password_batch_keepass_failure_locked">%1$s đang bị khóa. %2$d mục chưa được di chuyển và các mục nguồn vẫn được giữ nguyên. Hãy mở khóa cơ sở dữ liệu rồi thử lại.</string>
+    <string name="password_batch_keepass_failure_unknown">Không thể ghi %2$d mục vào %1$s. Các mục nguồn vẫn được giữ nguyên. Lý do: %3$s</string>
+    <string name="keepass_sync_conflict_guidance">Cơ sở dữ liệu đám mây và bản sao làm việc trên thiết bị đều đã thay đổi. Mở “Cơ sở dữ liệu và sao lưu → KeePass → cơ sở dữ liệu này → Công cụ cơ sở dữ liệu → Trung tâm xung đột” và chọn cách xử lý xung đột.</string>
+    <string name="keepass_sync_network_guidance">Hãy kiểm tra kết nối mạng và dịch vụ lưu trữ từ xa rồi đồng bộ lại.</string>
+    <string name="keepass_sync_auth_guidance">Phiên đăng nhập của tài khoản từ xa có thể đã hết hạn. Hãy đăng nhập lại trong cài đặt cơ sở dữ liệu.</string>
+    <string name="keepass_sync_permission_guidance">Hãy kiểm tra quyền ghi và cài đặt chỉ đọc của cơ sở dữ liệu rồi thử lại.</string>
     <string name="password_batch_transfer_notification_channel_name">Tiến trình chuyển hàng loạt</string>
     <string name="password_batch_transfer_notification_channel_desc">Hiển thị tiến trình sao chép và di chuyển hàng loạt trên cơ sở dữ liệu</string>
     <string name="password_batch_transfer_notification_progress">%1$d/%2$d đã hoàn thành</string>
@@ -3282,6 +3293,8 @@ Làm mới hoặc đồng bộ hóa cơ sở dữ liệu KeePass này, sau đó 
     <string name="password_list_quick_filters_content_desc">Chuyển đổi từng mục bộ lọc nhanh và kéo để sắp xếp lại.</string>
     <string name="password_list_category_quick_filters_switch_title">Danh mục Bộ lọc nhanh</string>
     <string name="password_list_category_quick_filters_switch_desc">Hiển thị các chip thư mục dưới các bộ lọc nhanh. Nhấn lại để đi lên hoặc xóa.</string>
+    <string name="password_parent_category_includes_children_title">Bao gồm mục trong danh mục con</string>
+    <string name="password_parent_category_includes_children_desc">Khi xem danh mục cha, cũng hiển thị mục trong tất cả danh mục con. Áp dụng cho Mật khẩu và Kho.</string>
     <string name="password_list_quick_folders_switch_title">Chuyển thư mục nhanh</string>
     <string name="password_list_quick_folders_switch_desc">Hiển thị thẻ thư mục phía trên danh sách mật khẩu.</string>
     <string name="password_list_quick_folders_style_title">Kiểu thư mục nhanh</string>
@@ -3540,4 +3553,17 @@ Làm mới hoặc đồng bộ hóa cơ sở dữ liệu KeePass này, sau đó 
     <string name="steam_mini_profile_background_description">Hiển thị nền hồ sơ thu nhỏ Steam trên thẻ mã và chi tiết tài khoản. Nền động chỉ phát khi hiển thị; bộ nhớ đệm tối đa 64 MB.</string>
     <string name="add_credential">Thêm thông tin đăng nhập</string>
     <string name="credential_number">Thông tin đăng nhập %1$d</string>
+    <string name="category_folder_transfer_source_missing">Thư mục nguồn không còn tồn tại.</string>
+    <string name="category_folder_transfer_no_change">Thư mục đã ở vị trí được chọn.</string>
+    <string name="category_folder_transfer_invalid_destination">Không thể di chuyển hoặc sao chép thư mục vào chính nó hay một thư mục con của nó.</string>
+    <string name="category_folder_transfer_passkey_copy_blocked">Thư mục này chứa passkey. Không thể sao chép an toàn vì mỗi thông tin xác thực phải giữ khóa riêng duy nhất. Hãy di chuyển thư mục hoặc chuyển passkey ra trước.</string>
+    <string name="category_folder_transfer_identity_items_unsupported">Thư mục này chứa địa chỉ thanh toán hoặc tài khoản thanh toán mà cơ sở dữ liệu đã chọn chưa thể lưu. Hãy chuyển các mục đó sang Monica hoặc MDBX trước.</string>
+    <string name="category_folder_transfer_inactive_items_blocked">Thư mục này vẫn chứa %1$d mục đã lưu trữ hoặc đã xóa. Hãy khôi phục hoặc xóa vĩnh viễn các mục đó trước khi chuyển toàn bộ thư mục sang cơ sở dữ liệu khác.</string>
+    <string name="category_folder_transfer_target_missing">Cơ sở dữ liệu đích đã chọn không còn khả dụng.</string>
+    <string name="category_folder_transfer_bitwarden_attachments_blocked">Thư mục này có tệp đính kèm nhưng tài khoản Bitwarden đã chọn không thể tải chúng lên. Thao tác đã dừng để tránh làm mất tệp đính kèm mà không có cảnh báo.</string>
+    <string name="category_folder_transfer_attachment_failed">Không thể sao chép tệp đính kèm của %1$d mục.</string>
+    <string name="category_folder_transfer_success">Đã xử lý %1$d thư mục và %2$d mục</string>
+    <string name="category_folder_transfer_partial_title">Chuyển thư mục chưa hoàn tất</string>
+    <string name="category_folder_transfer_partial_message">Đã hoàn tất %1$d mục và thất bại %2$d mục. Các mục nguồn thất bại và cấu trúc thư mục nguồn vẫn được giữ lại. %3$s</string>
+    <string name="category_folder_transfer_running">Một tác vụ chuyển thư mục khác đang chạy.</string>
 </resources>

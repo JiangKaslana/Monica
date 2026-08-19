@@ -27,6 +27,7 @@ import takagi.ru.monica.ui.components.CreateDialogTarget
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
 import takagi.ru.monica.utils.KeePassGroupInfo
 import takagi.ru.monica.utils.planLocalCategoryMove
+import takagi.ru.monica.utils.planLocalCategoryRename
 import takagi.ru.monica.viewmodel.PasswordViewModel
 
 /**
@@ -91,7 +92,15 @@ fun ColumnScope.CategoryManagementTrailingContent(
         onMoveCategoryToStorageTarget = { category, target ->
             executeCategoryMoveToTarget(context, categories, category, target, passwordViewModel)
         },
-        onRenameCategory = passwordViewModel::updateCategory,
+        onRenameCategory = { category, newLeafName ->
+            executeCategoryRename(
+                context = context,
+                categories = categories,
+                category = category,
+                newLeafName = newLeafName,
+                passwordViewModel = passwordViewModel,
+            )
+        },
         onDeleteCategory = passwordViewModel::deleteCategory,
         categoryActionTarget = state.categoryActionTarget,
         onCategoryActionTargetChange = { state.categoryActionTarget = it },
@@ -211,6 +220,30 @@ private fun executeCategoryMove(
             context,
             context.getString(R.string.save_failed_with_error, error.message ?: ""),
             Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
+private fun executeCategoryRename(
+    context: Context,
+    categories: List<Category>,
+    category: Category,
+    newLeafName: String,
+    passwordViewModel: PasswordViewModel,
+) {
+    runCatching {
+        planLocalCategoryRename(
+            categories = categories,
+            sourceCategory = category,
+            newLeafName = newLeafName,
+        )
+    }.onSuccess { plan ->
+        plan.updatedCategories.forEach(passwordViewModel::updateCategory)
+    }.onFailure { error ->
+        Toast.makeText(
+            context,
+            context.getString(R.string.save_failed_with_error, error.message ?: ""),
+            Toast.LENGTH_SHORT,
         ).show()
     }
 }

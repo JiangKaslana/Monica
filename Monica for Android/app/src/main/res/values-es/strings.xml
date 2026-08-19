@@ -3124,6 +3124,17 @@
     <string name="password_batch_transfer_progress_title_move">Movimiento por lotes en curso</string>
     <string name="password_batch_transfer_target">Destino: %1$s</string>
     <string name="password_batch_transfer_partial_result">%1$d completado, %2$d fallido</string>
+    <string name="password_batch_keepass_failure_title">No se pudo mover a KeePass</string>
+    <string name="password_batch_keepass_failure_conflict">El archivo en la nube y la copia local de %1$s tienen cambios. Para proteger la base de datos, no se movieron %2$d elemento(s) y se conservaron los elementos de origen. Abre «Base de datos y copia de seguridad → KeePass → esta base de datos → Herramientas de la base de datos → Centro de conflictos», resuelve el conflicto y vuelve a intentarlo.</string>
+    <string name="password_batch_keepass_failure_network">No se pudo conectar con %1$s. No se movieron %2$d elemento(s) y se conservaron los elementos de origen. Comprueba la red y el servicio de almacenamiento remoto y vuelve a intentarlo.</string>
+    <string name="password_batch_keepass_failure_auth">La sesión de %1$s ha caducado. No se movieron %2$d elemento(s) y se conservaron los elementos de origen. Inicia sesión de nuevo en la cuenta remota y vuelve a intentarlo.</string>
+    <string name="password_batch_keepass_failure_permission">%1$s no tiene permiso de escritura o está en modo de solo lectura. No se movieron %2$d elemento(s) y se conservaron los elementos de origen. Vuelve a autorizar la base de datos o desactiva el modo de solo lectura.</string>
+    <string name="password_batch_keepass_failure_locked">%1$s está bloqueada. No se movieron %2$d elemento(s) y se conservaron los elementos de origen. Desbloquea la base de datos y vuelve a intentarlo.</string>
+    <string name="password_batch_keepass_failure_unknown">%1$s no pudo guardar %2$d elemento(s). Se conservaron los elementos de origen. Motivo: %3$s</string>
+    <string name="keepass_sync_conflict_guidance">La base de datos en la nube y la copia local tienen cambios. Abre «Base de datos y copia de seguridad → KeePass → esta base de datos → Herramientas de la base de datos → Centro de conflictos» y elige cómo resolver el conflicto.</string>
+    <string name="keepass_sync_network_guidance">Comprueba la conexión de red y el servicio de almacenamiento remoto y vuelve a sincronizar.</string>
+    <string name="keepass_sync_auth_guidance">Es posible que la sesión de la cuenta remota haya caducado. Inicia sesión de nuevo en los ajustes de la base de datos.</string>
+    <string name="keepass_sync_permission_guidance">Comprueba el permiso de escritura y el modo de solo lectura de la base de datos y vuelve a intentarlo.</string>
     <string name="password_batch_transfer_notification_channel_name">Transferencia por lotes progreso</string>
     <string name="password_batch_transfer_notification_channel_desc">Muestra el progreso de la copia por lotes y el movimiento entre bases de datos</string>
     <string name="password_batch_transfer_notification_progress">%1$d/%2$d completado</string>
@@ -3848,6 +3859,8 @@
     <string name="password_list_quick_filters_content_desc">Alterne cada elemento de filtro rápido y arrástrelo para reordenarlo.</string>
     <string name="password_list_category_quick_filters_switch_title">Categoría rápida Filtros</string>
     <string name="password_list_category_quick_filters_switch_desc">Mostrar chips de carpeta en filtros rápidos. Toque nuevamente para subir o borrar.</string>
+    <string name="password_parent_category_includes_children_title">Incluir elementos de subcategorías</string>
+    <string name="password_parent_category_includes_children_desc">Al abrir una categoría principal, también muestra los elementos de todas sus subcategorías. Se aplica a Contraseñas y Bóveda.</string>
     <string name="password_list_quick_folders_switch_title">Cambio rápido de carpeta</string>
     <string name="password_list_quick_folders_switch_desc">Mostrar tarjetas de carpeta encima de la lista de contraseñas.</string>
     <string name="password_list_quick_folders_style_title">Estilo de carpeta rápida</string>
@@ -4316,4 +4329,17 @@
 <string name="keepass_native_delete_template_message">¿Eliminar la plantilla «%1$s»? Las entradas ya creadas no se verán afectadas.</string>
 <string name="keepass_native_template_target_hint">Elige la carpeta de destino. Se conservarán los campos, adjuntos, icono y Auto-Type.</string>
     <string name="keepass_native_open_manager">Administrar contenido de la base de datos</string>
+    <string name="category_folder_transfer_source_missing">La carpeta de origen ya no existe.</string>
+    <string name="category_folder_transfer_no_change">La carpeta ya se encuentra en la ubicación seleccionada.</string>
+    <string name="category_folder_transfer_invalid_destination">No se puede mover ni copiar una carpeta dentro de sí misma ni de una de sus subcarpetas.</string>
+    <string name="category_folder_transfer_passkey_copy_blocked">Esta carpeta contiene claves de acceso. No se pueden duplicar de forma segura porque cada credencial debe conservar una clave privada única. Mueve la carpeta o retira primero las claves de acceso.</string>
+    <string name="category_folder_transfer_identity_items_unsupported">Esta carpeta contiene direcciones de facturación o cuentas de pago que la base de datos seleccionada aún no puede guardar. Mueve primero esos elementos a Monica o MDBX.</string>
+    <string name="category_folder_transfer_inactive_items_blocked">Esta carpeta aún contiene %1$d elemento(s) archivado(s) o eliminado(s). Restáuralos o elimínalos definitivamente antes de mover la carpeta completa a otra base de datos.</string>
+    <string name="category_folder_transfer_target_missing">La base de datos de destino seleccionada ya no está disponible.</string>
+    <string name="category_folder_transfer_bitwarden_attachments_blocked">Esta carpeta contiene archivos adjuntos, pero la cuenta de Bitwarden seleccionada no puede subirlos. La operación se detuvo para evitar que se pierdan sin aviso.</string>
+    <string name="category_folder_transfer_attachment_failed">No se pudieron copiar los archivos adjuntos de %1$d elemento(s).</string>
+    <string name="category_folder_transfer_success">Se procesaron %1$d carpeta(s) y %2$d elemento(s)</string>
+    <string name="category_folder_transfer_partial_title">Transferencia de carpeta incompleta</string>
+    <string name="category_folder_transfer_partial_message">Se completaron %1$d elemento(s) y fallaron %2$d. Se conservaron los elementos de origen fallidos y la estructura de carpetas original. %3$s</string>
+    <string name="category_folder_transfer_running">Ya hay otra transferencia de carpeta en curso.</string>
 </resources>

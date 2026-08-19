@@ -1,5 +1,6 @@
 package takagi.ru.monica.ui.screens
 
+import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
 
@@ -142,6 +143,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.keemobile.kotpass.constants.GroupOverride
+import app.keemobile.kotpass.constants.PredefinedIcon
 import kotlinx.coroutines.launch
 import takagi.ru.monica.R
 import takagi.ru.monica.data.LocalKeePassDatabase
@@ -175,6 +177,10 @@ import takagi.ru.monica.ui.components.CustomFieldEditCard
 import takagi.ru.monica.ui.components.CustomFieldSectionHeader
 import takagi.ru.monica.util.PasswordGenerator
 import java.text.DateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -276,6 +282,9 @@ internal fun KeePassNativeManagerScreen(
     val currentGroup = currentGroupIdentity?.let { snapshot?.group(it) }
     val selectedEntry = selectedEntryIdentity?.let { snapshot?.entry(it) }
     val editingEntry = editingEntryIdentity?.let { snapshot?.entry(it) }
+    val entryCreatedFollowupFailedMessage = stringResource(
+        R.string.keepass_native_entry_created_followup_failed,
+    )
 
     BackHandler {
         when {
@@ -384,73 +393,41 @@ internal fun KeePassNativeManagerScreen(
                               }
                           }
                       },
-                      onSave = { fields, presentation, onResult ->
+                      onSave = { fields, presentation, pendingAttachments, onResult ->
                           scope.launch {
-                            val templateMode = editing?.kind == KeePassNativeEntryKind.TEMPLATE ||
-                                creatingEntryParent == snapshot?.templateGroupIdentity
-                            val persistedFields = if (templateMode && fields.none {
-                                    it.name.equals(KeePassTemplateEngine.TEMPLATE_MARKER_FIELD, ignoreCase = true)
-                                }) {
-                                fields + KeePassFieldChange(
-                                    name = KeePassTemplateEngine.TEMPLATE_MARKER_FIELD,
-                                    value = KeePassTemplateEngine.TEMPLATE_MARKER_VALUE,
-                                )
-                            } else fields
-                            val result = if (editing != null) {
-                                if (presentation == null) {
-                                    viewModel.replaceNativeEntryFields(
-                                        databaseId = database.id,
-                                        entryUuid = editing.identity.entryUuid,
-                                        fields = persistedFields,
-                                        expectedRevisionToken = snapshot?.sourceRevision?.sha256.orEmpty(),
-                                    )
-                                } else {
-                                    viewModel.replaceNativeEntryFieldsAndPresentation(
-                                        databaseId = database.id,
-                                        entryUuid = editing.identity.entryUuid,
-                                        fields = persistedFields,
-                                        presentation = presentation,
-                                        expectedRevisionToken = snapshot?.sourceRevision?.sha256.orEmpty(),
-                                    )
-                                }
-                              } else {
-                                val parent = creatingEntryParent
-                                if (parent == null) {
-                                    Result.failure(IllegalStateException("KeePass parent group is unavailable"))
-                                } else {
-                                    val createdResult = viewModel.createNativeEntry(
-                                        databaseId = database.id,
-                                        parentGroupUuid = parent.groupUuid,
-                                        fields = persistedFields,
-                                        expectedRevisionToken = snapshot?.sourceRevision?.sha256.orEmpty()
-                                    )
-                                    createdResult.fold(
-                                        onSuccess = { created ->
-                                            if (presentation == null) {
-                                                Result.success(created)
-                                            } else {
-                                                viewModel.replaceNativeEntryPresentation(
-                                                    databaseId = database.id,
-                                                    entryUuid = created.identity.entryUuid,
-                                                    update = presentation,
-                                                    expectedRevisionToken = viewModel.openNativeBrowser(database.id)
-                                                        .getOrNull()
-                                                        ?.sourceRevision?.sha256
-                                                        .orEmpty(),
-                                                )
-                                            }
-                                        },
-                                        onFailure = { failure -> Result.failure(failure) },
-                                    )
-                                }
-                            }
-                            result.onSuccess { saved ->
+                            val outcome = saveKeePassNativeManagerEntry(
+                                viewModel = viewModel,
+                                databaseId = database.id,
+                                editingEntry = editing,
+                                creatingParent = creatingEntryParent,
+                                templateMode = editing?.kind == KeePassNativeEntryKind.TEMPLATE ||
+                                    creatingEntryParent == snapshot?.templateGroupIdentity,
+                                fields = fields,
+                                presentation = presentation,
+                                pendingAttachments = pendingAttachments,
+                                revisionToken = snapshot?.sourceRevision?.sha256.orEmpty(),
+                            )
+                            val saved = outcome.savedEntry
+                            if (saved != null) {
                                 creatingEntryParent = null
                                 editingEntryIdentity = null
                                 reload { selectedEntryIdentity = saved.identity }
                                 onResult(null)
-                            }.onFailure { failure ->
-                                onResult(failure.message ?: failure.javaClass.simpleName)
+                            } else {
+                                val failure = outcome.failure
+                                    ?: IllegalStateException("KeePass entry save returned no result")
+                                val created = outcome.createdEntry
+                                if (created != null) {
+                                    creatingEntryParent = null
+                                    editingEntryIdentity = created.identity
+                                    reload()
+                                    onResult(
+                                        entryCreatedFollowupFailedMessage + ": " +
+                                            (failure.message ?: failure.javaClass.simpleName)
+                                    )
+                                } else {
+                                    onResult(failure.message ?: failure.javaClass.simpleName)
+                                }
                             }
                         }
                     }
@@ -656,17 +633,19 @@ internal fun KeePassNativeManagerScreen(
     }
 
     createGroupParent?.let { parentIdentity ->
-        NativeGroupNameDialog(
-            title = stringResource(R.string.keepass_native_create_group),
-            initialName = "",
+        NativeCreateGroupDialog(
+            customIcons = snapshot?.customIcons.orEmpty(),
+            customIconReferences = snapshot?.customIconReferences.orEmpty(),
             onDismiss = { createGroupParent = null },
-            onConfirm = { name, onResult ->
+            onConfirm = { update, onResult ->
                 scope.launch {
+                    val name = update.name.orEmpty()
                     viewModel.createNativeGroup(
                         database.id,
                         parentIdentity.groupUuid,
                         name,
-                        snapshot?.sourceRevision?.sha256.orEmpty()
+                        snapshot?.sourceRevision?.sha256.orEmpty(),
+                        update,
                     ).onSuccess {
                         createGroupParent = null
                         reload()
@@ -2821,6 +2800,254 @@ private fun NativeSearchSwitch(label: String, checked: Boolean, onCheckedChange:
 }
 
 @Composable
+private fun NativeCreateGroupDialog(
+    customIcons: Map<UUID, app.keemobile.kotpass.models.CustomIcon>,
+    customIconReferences: Map<UUID, Int>,
+    onDismiss: () -> Unit,
+    onConfirm: (KeePassNativeGroupUpdate, (String?) -> Unit) -> Unit,
+) {
+    val context = LocalContext.current
+    var name by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf("") }
+    var tagsText by remember { mutableStateOf("") }
+    var expires by remember { mutableStateOf(false) }
+    var expiryTime by remember { mutableStateOf(Instant.now().plus(30, ChronoUnit.DAYS)) }
+    var searching by remember { mutableStateOf(GroupOverride.Inherit) }
+    var autoType by remember { mutableStateOf(GroupOverride.Inherit) }
+    var defaultSequence by remember { mutableStateOf("") }
+    var selectedPredefinedIcon by remember {
+        mutableStateOf(
+            PredefinedIcon.values().firstOrNull { icon -> icon.name.equals("Folder", ignoreCase = true) }
+                ?: PredefinedIcon.values().first(),
+        )
+    }
+    var selectedCustomIconUuid by remember { mutableStateOf<UUID?>(null) }
+    var pendingCustomIcon by remember { mutableStateOf<KeePassNativeCustomIconPayload?>(null) }
+    var showCustomIconPicker by remember { mutableStateOf(false) }
+    var showPredefinedIconPicker by remember { mutableStateOf(false) }
+    var searchMenuExpanded by remember { mutableStateOf(false) }
+    var autoTypeMenuExpanded by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val iconReadFailedMessage = stringResource(R.string.keepass_native_custom_icon_read_failed)
+    val iconInvalidMessage = stringResource(R.string.keepass_native_custom_icon_invalid)
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: throw IllegalStateException("Unable to read selected image")
+        }.getOrNull()
+        when {
+            bytes == null -> error = iconReadFailedMessage
+            KeePassCustomIconEditor.validateImageBytes(bytes).isFailure -> error = iconInvalidMessage
+            else -> {
+                pendingCustomIcon = KeePassNativeCustomIconPayload(
+                    bytes = bytes,
+                    name = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')
+                        ?.takeIf(String::isNotBlank) ?: name.ifBlank { "Folder" },
+                )
+                selectedCustomIconUuid = null
+            }
+        }
+    }
+
+    fun openDatePicker() {
+        val local = expiryTime.atZone(ZoneId.systemDefault())
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                expiryTime = LocalDate.of(year, month + 1, day)
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+            },
+            local.year,
+            local.monthValue - 1,
+            local.dayOfMonth,
+        ).show()
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(stringResource(R.string.keepass_native_create_group)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; error = null },
+                    label = { Text(stringResource(R.string.folder_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text(stringResource(R.string.notes)) },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = tagsText,
+                    onValueChange = { tagsText = it },
+                    label = { Text(stringResource(R.string.keepass_native_tags)) },
+                    supportingText = { Text(stringResource(R.string.note_tags_placeholder)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expires = !expires },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.expiry_date))
+                        Text(
+                            stringResource(R.string.keepass_native_group_expiration_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = expires, onCheckedChange = { expires = it })
+                }
+                if (expires) {
+                    OutlinedButton(onClick = ::openDatePicker, modifier = Modifier.fillMaxWidth()) {
+                        Text(DateFormat.getDateInstance().format(Date.from(expiryTime)))
+                    }
+                }
+                Text(
+                    stringResource(R.string.keepass_native_custom_icon_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showCustomIconPicker = true },
+                        enabled = customIcons.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.keepass_native_custom_icon_choose)) }
+                    Button(
+                        onClick = { imagePickerLauncher.launch("image/*") },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.keepass_native_custom_icon_upload)) }
+                }
+                OutlinedButton(
+                    onClick = { showPredefinedIconPicker = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(keepassPredefinedIconVector(selectedPredefinedIcon), contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.keepass_native_custom_icon_builtin, selectedPredefinedIcon.name))
+                }
+                OutlinedTextField(
+                    value = defaultSequence,
+                    onValueChange = { defaultSequence = it },
+                    label = { Text(stringResource(R.string.keepass_native_default_auto_type_sequence)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Box {
+                    OutlinedButton(onClick = { searchMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.keepass_native_search_policy, groupOverrideLabel(searching)))
+                    }
+                    DropdownMenu(expanded = searchMenuExpanded, onDismissRequest = { searchMenuExpanded = false }) {
+                        GroupOverride.entries.forEach { value ->
+                            DropdownMenuItem(
+                                text = { Text(groupOverrideLabel(value)) },
+                                leadingIcon = { if (searching == value) Icon(Icons.Default.Check, contentDescription = null) },
+                                onClick = { searching = value; searchMenuExpanded = false },
+                            )
+                        }
+                    }
+                }
+                Box {
+                    OutlinedButton(onClick = { autoTypeMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.keepass_native_auto_type_policy, groupOverrideLabel(autoType)))
+                    }
+                    DropdownMenu(expanded = autoTypeMenuExpanded, onDismissRequest = { autoTypeMenuExpanded = false }) {
+                        GroupOverride.entries.forEach { value ->
+                            DropdownMenuItem(
+                                text = { Text(groupOverrideLabel(value)) },
+                                leadingIcon = { if (autoType == value) Icon(Icons.Default.Check, contentDescription = null) },
+                                onClick = { autoType = value; autoTypeMenuExpanded = false },
+                            )
+                        }
+                    }
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = name.isNotBlank() && !busy,
+                onClick = {
+                    val parsedTags = tagsText.split(',', ';', '\n')
+                        .map(String::trim)
+                        .filter(String::isNotEmpty)
+                        .distinct()
+                    busy = true
+                    onConfirm(
+                        KeePassNativeGroupUpdate(
+                            name = name.trim(),
+                            notes = notes,
+                            icon = selectedPredefinedIcon,
+                            customIconUuid = selectedCustomIconUuid,
+                            customIcon = pendingCustomIcon,
+                            defaultAutoTypeSequence = defaultSequence,
+                            enableAutoType = autoType,
+                            enableSearching = searching,
+                            tags = parsedTags,
+                            expires = expires,
+                            expiryTime = expiryTime,
+                        ),
+                    ) { failure ->
+                        error = failure
+                        busy = false
+                    }
+                },
+            ) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text(stringResource(R.string.create))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+
+    if (showCustomIconPicker) {
+        NativeCustomIconPickerDialog(
+            icons = customIcons,
+            iconReferences = customIconReferences,
+            selectedUuid = selectedCustomIconUuid,
+            onSelect = { uuid ->
+                selectedCustomIconUuid = uuid
+                pendingCustomIcon = null
+                showCustomIconPicker = false
+            },
+            deletingUuid = null,
+            onDelete = null,
+            onRename = null,
+            onDismiss = { showCustomIconPicker = false },
+        )
+    }
+    if (showPredefinedIconPicker) {
+        NativePredefinedIconPickerDialog(
+            selectedIcon = selectedPredefinedIcon,
+            onSelect = { icon ->
+                selectedPredefinedIcon = icon
+                selectedCustomIconUuid = null
+                pendingCustomIcon = null
+                showPredefinedIconPicker = false
+            },
+            onDismiss = { showPredefinedIconPicker = false },
+        )
+    }
+}
+
+@Composable
 private fun NativeGroupNameDialog(
     title: String,
     initialName: String,
@@ -3065,7 +3292,13 @@ private fun NativeGroupPropertiesDialog(
     onSave: (KeePassNativeGroupUpdate, (String?) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
+    var name by remember(group.identity) { mutableStateOf(group.name) }
     var notes by remember(group.identity) { mutableStateOf(group.notes) }
+    var tagsText by remember(group.identity) { mutableStateOf(group.tags.joinToString(", ")) }
+    var expires by remember(group.identity) { mutableStateOf(group.times?.expires == true) }
+    var expiryTime by remember(group.identity) {
+        mutableStateOf(group.times?.expiryTime ?: Instant.now().plus(30, ChronoUnit.DAYS))
+    }
     var defaultSequence by remember(group.identity) { mutableStateOf(group.defaultAutoTypeSequence.orEmpty()) }
     var searching by remember(group.identity) { mutableStateOf(group.enableSearching) }
     var autoType by remember(group.identity) { mutableStateOf(group.enableAutoType) }
@@ -3106,6 +3339,20 @@ private fun NativeGroupPropertiesDialog(
             }
         }
     }
+    fun openDatePicker() {
+        val local = expiryTime.atZone(ZoneId.systemDefault())
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                expiryTime = LocalDate.of(year, month + 1, day)
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+            },
+            local.year,
+            local.monthValue - 1,
+            local.dayOfMonth,
+        ).show()
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.keepass_native_group_properties)) },
@@ -3114,7 +3361,13 @@ private fun NativeGroupPropertiesDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(group.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.folder_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
@@ -3122,6 +3375,34 @@ private fun NativeGroupPropertiesDialog(
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth()
                 )
+                OutlinedTextField(
+                    value = tagsText,
+                    onValueChange = { tagsText = it },
+                    label = { Text(stringResource(R.string.keepass_native_tags)) },
+                    supportingText = { Text(stringResource(R.string.note_tags_placeholder)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expires = !expires },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.expiry_date))
+                        Text(
+                            stringResource(R.string.keepass_native_group_expiration_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = expires, onCheckedChange = { expires = it })
+                }
+                if (expires) {
+                    OutlinedButton(onClick = ::openDatePicker, modifier = Modifier.fillMaxWidth()) {
+                        Text(DateFormat.getDateInstance().format(Date.from(expiryTime)))
+                    }
+                }
                 Text(
                     stringResource(R.string.keepass_native_custom_icon_title),
                     style = MaterialTheme.typography.titleSmall,
@@ -3203,8 +3484,13 @@ private fun NativeGroupPropertiesDialog(
         },
         confirmButton = {
             Button(onClick = {
+                val parsedTags = tagsText.split(',', ';', '\n')
+                    .map(String::trim)
+                    .filter(String::isNotEmpty)
+                    .distinct()
                 onSave(
                     KeePassNativeGroupUpdate(
+                        name = name.trim(),
                         notes = notes,
                         icon = selectedPredefinedIcon.takeIf { predefinedIconChanged },
                         customIconUuid = selectedCustomIconUuid,
@@ -3212,10 +3498,13 @@ private fun NativeGroupPropertiesDialog(
                         customIcon = pendingCustomIcon,
                         defaultAutoTypeSequence = defaultSequence,
                         enableSearching = searching,
-                        enableAutoType = autoType
+                        enableAutoType = autoType,
+                        tags = parsedTags,
+                        expires = expires,
+                        expiryTime = expiryTime,
                     )
                 ) { failure -> error = failure }
-            }) { Text(stringResource(R.string.save)) }
+            }, enabled = name.isNotBlank()) { Text(stringResource(R.string.save)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )

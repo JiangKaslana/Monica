@@ -52,6 +52,8 @@ internal data class KeePassNativeGroupUpdate(
     val enableAutoType: GroupOverride? = null,
     val enableSearching: GroupOverride? = null,
     val tags: List<String>? = null,
+    val expires: Boolean? = null,
+    val expiryTime: Instant? = null,
     val customIcon: KeePassNativeCustomIconPayload? = null,
 )
 
@@ -331,7 +333,10 @@ internal object KeePassNativeManagement {
         val generatedIcon = update.customIcon?.let { payload ->
             KeePassCustomIconEditor.newIcon(payload.bytes, payload.name.orEmpty())
         }
-        val updatedGroup = KeePassNativeMutation().editGroup(current) { group ->
+        val mutation = KeePassNativeMutation()
+        val initialized = mutation.initializeGroup(current)
+        val updatedGroup = mutation.editGroup(initialized) { group ->
+            val currentTimes = group.times
             group.copy(
                 name = update.name?.trim()?.takeIf(String::isNotEmpty) ?: group.name,
                 notes = update.notes ?: group.notes,
@@ -346,7 +351,11 @@ internal object KeePassNativeManagement {
                 defaultAutoTypeSequence = update.defaultAutoTypeSequence ?: group.defaultAutoTypeSequence,
                 enableAutoType = update.enableAutoType ?: group.enableAutoType,
                 enableSearching = update.enableSearching ?: group.enableSearching,
-                tags = update.tags ?: group.tags
+                tags = update.tags ?: group.tags,
+                times = currentTimes?.copy(
+                    expires = update.expires ?: currentTimes.expires,
+                    expiryTime = update.expiryTime ?: currentTimes.expiryTime,
+                ),
             )
         }
         val updatedDatabase = database.modifyParentGroup { replaceGroup(this, groupUuid, updatedGroup) }

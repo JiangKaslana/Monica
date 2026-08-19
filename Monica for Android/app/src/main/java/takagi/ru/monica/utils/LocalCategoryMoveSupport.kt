@@ -130,6 +130,81 @@ fun isLocalCategoryDescendantPath(parentPath: String, candidatePath: String): Bo
         normalizedCandidate.startsWith("$normalizedParent/", ignoreCase = true)
 }
 
+fun planLocalCategoryRename(
+    categories: List<Category>,
+    sourceCategory: Category,
+    newLeafName: String,
+): LocalCategoryMovePlan {
+    val sourcePath = normalizeLocalCategoryPath(sourceCategory.name)
+    require(sourcePath.isNotBlank()) { "分类路径无效" }
+
+    val normalizedLeaf = normalizeLocalCategoryPath(newLeafName)
+    require(normalizedLeaf.isNotBlank()) { "分类名称不能为空" }
+    require('/' !in normalizedLeaf) { "分类名称不能包含 /" }
+
+    val sourceParentPath = getLocalCategoryParentPath(sourcePath)
+    val destinationPath = buildLocalCategoryPath(sourceParentPath, normalizedLeaf)
+    if (destinationPath == sourcePath) {
+        return LocalCategoryMovePlan(updatedCategories = emptyList(), destinationPath = destinationPath)
+    }
+
+    val movingCategories = categories.filter { category ->
+        isLocalCategoryDescendantPath(sourcePath, normalizeLocalCategoryPath(category.name))
+    }
+    require(movingCategories.isNotEmpty()) { "分类不存在" }
+
+    val remappedPaths = movingCategories.associate { category ->
+        val oldPath = normalizeLocalCategoryPath(category.name)
+        val suffix = oldPath.removePrefix(sourcePath)
+        category.id to (destinationPath + suffix)
+    }
+    val movingIds = movingCategories.mapTo(mutableSetOf(), Category::id)
+    val existingPaths = categories
+        .asSequence()
+        .filter { it.id !in movingIds }
+        .map { normalizeLocalCategoryPath(it.name).lowercase() }
+        .toSet()
+    require(remappedPaths.values.none { it.lowercase() in existingPaths }) {
+        "重命名后会与现有分类冲突"
+    }
+
+    return LocalCategoryMovePlan(
+        updatedCategories = movingCategories.mapNotNull { category ->
+            val newPath = remappedPaths.getValue(category.id)
+            category.copy(name = newPath).takeUnless { it.name == category.name }
+        },
+        destinationPath = destinationPath,
+    )
+}
+
+fun resolveLocalCategoryIdsInScope(
+    categories: List<Category>,
+    selectedCategoryId: Long,
+    includeDescendants: Boolean
+): Set<Long> {
+    if (!includeDescendants) return setOf(selectedCategoryId)
+
+    val selectedPath = categories
+        .firstOrNull { it.id == selectedCategoryId }
+        ?.name
+        ?.let(::normalizeLocalCategoryPath)
+        ?.takeIf { it.isNotBlank() }
+        ?: return setOf(selectedCategoryId)
+
+    return buildSet {
+        add(selectedCategoryId)
+        categories.forEach { category ->
+            val candidatePath = normalizeLocalCategoryPath(category.name)
+            if (
+                candidatePath.isNotBlank() &&
+                isLocalCategoryDescendantPath(selectedPath, candidatePath)
+            ) {
+                add(category.id)
+            }
+        }
+    }
+}
+
 fun buildLocalCategoryPathOptions(
     categories: List<Category>,
     includeVirtualParents: Boolean = true

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOff
@@ -43,6 +44,7 @@ internal data class PasswordCategoryDialogsParams(
     val onStartRename: ((Category) -> Unit)?,
     val moveCategoryTarget: Category?,
     val onStartMove: ((Category) -> Unit)?,
+    val onStartCopy: ((Category) -> Unit)?,
     val onDismissMove: () -> Unit,
     val availableMoveTargets: List<Category>,
     val onConfirmMove: (Category, Long?) -> Unit,
@@ -91,6 +93,16 @@ internal fun PasswordCategoryDialogs(params: PasswordCategoryDialogsParams) {
                             Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null)
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(stringResource(R.string.move))
+                        }
+                    }
+                    if (params.onStartCopy != null) {
+                        FilledTonalButton(
+                            onClick = { params.onStartCopy.invoke(target) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.copy))
                         }
                     }
                     if (params.onDeleteCategory != null) {

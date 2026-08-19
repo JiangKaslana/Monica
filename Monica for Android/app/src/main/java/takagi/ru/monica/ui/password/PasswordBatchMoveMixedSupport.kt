@@ -87,7 +87,8 @@ internal data class MixedPasswordBatchMoveResult(
     val failedCount: Int,
     val blockedPasskeyCount: Int,
     val copiedPasswordIds: List<Long>,
-    val copiedPasswordIdPairs: List<Pair<Long, Long>> = emptyList()
+    val copiedPasswordIdPairs: List<Pair<Long, Long>> = emptyList(),
+    val keepassFailureMessages: List<String> = emptyList(),
 )
 
 internal fun PasswordListAggregateUiState.resolveBatchAggregateSelection(
@@ -304,6 +305,7 @@ internal suspend fun executeMixedPasswordBatchMove(
 
     var successCount = 0
     var failedCount = 0
+    val keepassFailureMessages = mutableListOf<String>()
     var blockedPasskeyCount = 0
     val copiedPasswordIds = mutableListOf<Long>()
     val copiedPasswordIdPairs = mutableListOf<Pair<Long, Long>>()
@@ -765,11 +767,14 @@ internal suspend fun executeMixedPasswordBatchMove(
                         }
                         successCount += summary.successCount
                         failedCount += summary.failedCount
+                        keepassFailureMessages += summary.failuresByPasswordId.values
                     } else {
                         failedCount += selectedEntries.size
+                        result.exceptionOrNull()?.message?.let(keepassFailureMessages::add)
                     }
-                } catch (_: Exception) {
+                } catch (error: Exception) {
                     failedCount += selectedEntries.size
+                    error.message?.let(keepassFailureMessages::add)
                 }
             }
 
@@ -809,11 +814,14 @@ internal suspend fun executeMixedPasswordBatchMove(
                         }
                         successCount += summary.successCount
                         failedCount += summary.failedCount
+                        keepassFailureMessages += summary.failuresByPasswordId.values
                     } else {
                         failedCount += selectedEntries.size
+                        result.exceptionOrNull()?.message?.let(keepassFailureMessages::add)
                     }
-                } catch (_: Exception) {
+                } catch (error: Exception) {
                     failedCount += selectedEntries.size
+                    error.message?.let(keepassFailureMessages::add)
                 }
             }
 
@@ -1195,7 +1203,8 @@ internal suspend fun executeMixedPasswordBatchMove(
         failedCount = failedCount,
         blockedPasskeyCount = blockedPasskeyCount,
         copiedPasswordIds = copiedPasswordIds,
-        copiedPasswordIdPairs = copiedPasswordIdPairs
+        copiedPasswordIdPairs = copiedPasswordIdPairs,
+        keepassFailureMessages = keepassFailureMessages.distinct(),
     )
 }
 

@@ -125,6 +125,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import takagi.ru.monica.R
 import takagi.ru.monica.bitwarden.sync.isUserVisibleSyncInProgress
 import takagi.ru.monica.bitwarden.ui.BitwardenAutoSyncEffect
@@ -238,6 +240,8 @@ import takagi.ru.monica.ui.components.rememberUnifiedCategoryFilterChipMenuWidth
 import takagi.ru.monica.ui.common.dialog.DeleteConfirmDialog
 import takagi.ru.monica.ui.common.layout.DetailPane
 import takagi.ru.monica.ui.common.layout.InspectorRow
+import takagi.ru.monica.utils.resolveLocalCategoryIdsInScope
+import takagi.ru.monica.utils.planLocalCategoryRename
 import takagi.ru.monica.ui.common.layout.ListPane
 import takagi.ru.monica.ui.common.pull.PullActionVisualState
 import takagi.ru.monica.ui.common.pull.PullGestureIndicator
@@ -299,7 +303,7 @@ private const val PASSWORD_SCROLL_LOG_TAG = "PasswordScrollDebug"
 private const val PASSWORD_EMPTY_STATE_DEBOUNCE_MS = 220L
 
 private fun QuickStatusKeePassSyncState.dialogSuppressionKey(): String {
-    return "$databaseId:$status:$phase:$coordinatorPhase:$coordinatorErrorKind"
+    return "$databaseId:$status:$phase:$coordinatorPhase:$coordinatorErrorKind:$coordinatorErrorMessage"
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
@@ -366,6 +370,22 @@ fun PasswordListContent(
     }
     // settings
     val appSettings by settingsViewModel.settings.collectAsState()
+    val localCategoryIdsInScope = remember(
+        currentFilter,
+        categories,
+        appSettings.passwordParentCategoryIncludesChildren,
+    ) {
+        val selectedCategoryId = (currentFilter as? CategoryFilter.Custom)?.categoryId
+        if (selectedCategoryId == null) {
+            emptySet()
+        } else {
+            resolveLocalCategoryIdsInScope(
+                categories = categories,
+                selectedCategoryId = selectedCategoryId,
+                includeDescendants = appSettings.passwordParentCategoryIncludesChildren,
+            )
+        }
+    }
     val mdbxDatabasesLoaded by remember(mdbxViewModel) {
         mdbxViewModel?.allDatabasesLoaded ?: kotlinx.coroutines.flow.flowOf(true)
     }.collectAsState(initial = mdbxViewModel == null)
@@ -373,6 +393,7 @@ fun PasswordListContent(
         aggregateConfig = aggregateConfig,
         searchQuery = searchQuery,
         currentFilter = currentFilter,
+        localCategoryIdsInScope = localCategoryIdsInScope,
         appSettings = appSettings,
         retainedState = aggregateRetainedStateViewModel.retainedState,
     )
@@ -577,6 +598,7 @@ fun PasswordListContent(
             val coordinatorShouldShow = coordinatorPhase in setOf(
                 SyncPhase.RUNNING,
                 SyncPhase.BLOCKED,
+                SyncPhase.FAILED,
                 SyncPhase.CONFLICT
             )
             val shouldShow = database.lastSyncStatus in setOf(
@@ -599,6 +621,7 @@ fun PasswordListContent(
                     phase = phase,
                     coordinatorPhase = coordinatorPhase,
                     coordinatorErrorKind = selectedKeePassCoordinatorStatus?.lastError?.kind,
+                    coordinatorErrorMessage = selectedKeePassCoordinatorStatus?.lastError?.redactedMessage,
                     onSync = {
                         localKeePassViewModel.syncRemoteDatabase(database.id)
                     }
@@ -645,6 +668,7 @@ fun PasswordListContent(
         quickStatusKeePassSyncState?.phase,
         quickStatusKeePassSyncState?.coordinatorPhase,
         quickStatusKeePassSyncState?.coordinatorErrorKind,
+        quickStatusKeePassSyncState?.coordinatorErrorMessage,
         quickStatusBannerEnabled
     ) {
         val state = quickStatusKeePassSyncState
@@ -687,6 +711,92 @@ fun PasswordListContent(
         attachmentParentIds.toSet()
     }
     val bitwardenRepository = remember { takagi.ru.monica.bitwarden.repository.BitwardenRepository.getInstance(context) }
+    val categoryFolderTransferMutex = remember { Mutex() }
+    var categoryFolderTransferFailure by remember { mutableStateOf<Triple<Int, Int, String>?>(null) }
+
+    fun transferCategoryFolder(
+        category: Category,
+        target: UnifiedMoveCategoryTarget,
+        action: UnifiedMoveAction,
+    ) {
+        if (categoryFolderTransferMutex.isLocked) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.category_folder_transfer_running),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        coroutineScope.launch {
+            categoryFolderTransferMutex.withLock {
+                val targetLabel = buildMoveTargetLabel(
+                    context = context,
+                    target = target,
+                    categories = categories,
+                    keepassDatabases = keepassDatabases,
+                    mdbxDatabases = mdbxDatabases,
+                )
+                try {
+                    val result = executePasswordCategoryFolderTransfer(
+                        context = context,
+                        action = action,
+                        sourceCategory = category,
+                        selectedTarget = target,
+                        categories = categories,
+                        passwords = allPasswords,
+                        secureItems = viewModel.getAllActiveSecureItemsAwait(),
+                        passkeys = aggregateUiState.passkeys,
+                        keepassDatabases = keepassDatabases,
+                        mdbxDatabases = mdbxDatabases,
+                        bitwardenVaults = bitwardenVaults,
+                        localKeePassViewModel = localKeePassViewModel,
+                        securityManager = securityManager,
+                        passwordViewModel = viewModel,
+                        aggregateViewModels = aggregateUiState.toPasswordBatchMoveViewModels(),
+                        bitwardenRepository = bitwardenRepository,
+                        onProgress = { processed, total ->
+                            PasswordBatchTransferProgressTracker.update(
+                                action = action,
+                                targetLabel = targetLabel,
+                                processed = processed,
+                                total = total,
+                            )
+                        },
+                    )
+                    if (result.isCompleteSuccess) {
+                        PasswordBatchTransferProgressTracker.complete(
+                            action = action,
+                            targetLabel = targetLabel,
+                            successCount = result.successCount.coerceAtLeast(result.folderCount),
+                        )
+                        Toast.makeText(
+                            context,
+                            context.getString(
+                                R.string.category_folder_transfer_success,
+                                result.folderCount,
+                                result.successCount,
+                            ),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    } else {
+                        PasswordBatchTransferProgressTracker.clear()
+                        categoryFolderTransferFailure = Triple(
+                            result.successCount,
+                            result.failedCount,
+                            result.failureMessages.joinToString("\n").take(1200),
+                        )
+                    }
+                } catch (error: Exception) {
+                    PasswordBatchTransferProgressTracker.clear()
+                    categoryFolderTransferFailure = Triple(
+                        0,
+                        0,
+                        error.message ?: error::class.java.simpleName,
+                    )
+                }
+            }
+        }
+    }
     val aggregateStackRepository = remember(database) {
         takagi.ru.monica.repository.PasswordPageAggregateStackRepository(
             database.passwordPageAggregateStackDao()
@@ -1708,8 +1818,25 @@ fun PasswordListContent(
             coroutineScope = coroutineScope,
             bitwardenRepository = bitwardenRepository,
             securityManager = securityManager,
-            onRenameCategory = onRenameCategory,
+            onRenameCategory = { category, newLeafName ->
+                runCatching {
+                    planLocalCategoryRename(
+                        categories = categories,
+                        sourceCategory = category,
+                        newLeafName = newLeafName,
+                    )
+                }.onSuccess { plan ->
+                    plan.updatedCategories.forEach(onRenameCategory)
+                }.onFailure { error ->
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.save_failed_with_error, error.message ?: ""),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
             onDeleteCategory = onDeleteCategory,
+            onTransferCategory = ::transferCategoryFolder,
             onOpenCommonAccountTemplates = onOpenCommonAccountTemplates,
             onOpenMdbxCommitHistory = onOpenMdbxCommitHistory,
             onOpenHistory = onOpenHistory,
@@ -1855,6 +1982,32 @@ fun PasswordListContent(
             showQuickStatusKeePassSyncDialog = false
         }
     )
+
+    categoryFolderTransferFailure?.let { (successCount, failedCount, details) ->
+        AlertDialog(
+            onDismissRequest = { categoryFolderTransferFailure = null },
+            title = { Text(stringResource(R.string.category_folder_transfer_partial_title)) },
+            text = {
+                Text(
+                    if (failedCount > 0) {
+                        stringResource(
+                            R.string.category_folder_transfer_partial_message,
+                            successCount,
+                            failedCount,
+                            details,
+                        )
+                    } else {
+                        details
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { categoryFolderTransferFailure = null }) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+        )
+    }
     
     PasswordListDialogs(
         showManualStackConfirmDialog = showManualStackConfirmDialog,

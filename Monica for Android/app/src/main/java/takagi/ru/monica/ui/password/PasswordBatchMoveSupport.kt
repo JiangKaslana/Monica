@@ -52,6 +52,8 @@ import takagi.ru.monica.utils.FieldChange
 import takagi.ru.monica.utils.OperationLogger
 import takagi.ru.monica.viewmodel.CategoryFilter
 import takagi.ru.monica.viewmodel.PasswordViewModel
+import takagi.ru.monica.sync.SyncErrorKind
+import takagi.ru.monica.sync.classifySyncFailure
 
 internal fun CategoryFilter.toUnifiedMoveInitialSource(): UnifiedMoveInitialSource {
     return when (this) {
@@ -108,6 +110,49 @@ internal fun PasswordBatchTransferGlobalProgressState.toDialogUiState(): Passwor
         processed = processed,
         total = total
     )
+
+internal data class KeePassBatchTransferFailure(
+    val kind: SyncErrorKind,
+    val failedCount: Int,
+    val reasons: List<String>,
+    val detail: String,
+)
+
+private data class KeePassBatchTransferFailurePrompt(
+    val targetLabel: String,
+    val failure: KeePassBatchTransferFailure,
+)
+
+private class KeePassBatchTransferException(
+    val failure: KeePassBatchTransferFailure,
+) : Exception(failure.detail)
+
+internal fun resolveKeePassBatchTransferFailure(
+    failures: Map<Long, String>,
+): KeePassBatchTransferFailure {
+    return resolveKeePassBatchTransferFailure(
+        failureCount = failures.size,
+        failureMessages = failures.values,
+    )
+}
+
+internal fun resolveKeePassBatchTransferFailure(
+    failureCount: Int,
+    failureMessages: Collection<String>,
+): KeePassBatchTransferFailure {
+    val reasons = failureMessages
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
+    val detail = reasons.firstOrNull() ?: "KeePass operation failed"
+    val classified = classifySyncFailure(IllegalStateException(reasons.joinToString(" | ").ifBlank { detail }))
+    return KeePassBatchTransferFailure(
+        kind = classified.kind,
+        failedCount = failureCount.coerceAtLeast(1),
+        reasons = reasons,
+        detail = detail,
+    )
+}
 
 private fun formatBatchResultToast(
     context: Context,
@@ -921,6 +966,9 @@ internal fun PasswordBatchMoveSheet(
         mutableStateOf<PasswordBatchPreserveCategoriesPrompt?>(null)
     }
     var preserveCategoriesForNextTransfer by remember { mutableStateOf(false) }
+    var keepassFailurePrompt by remember {
+        mutableStateOf<KeePassBatchTransferFailurePrompt?>(null)
+    }
 
     UnifiedMoveToCategoryBottomSheet(
         visible = visible,
@@ -1230,6 +1278,14 @@ internal fun PasswordBatchMoveSheet(
                         )
                         successCount = result.successCount
                         failedCount = result.failedCount
+                        if (result.keepassFailureMessages.isNotEmpty()) {
+                            throw KeePassBatchTransferException(
+                                resolveKeePassBatchTransferFailure(
+                                    failureCount = result.failedCount,
+                                    failureMessages = result.keepassFailureMessages,
+                                )
+                            )
+                        }
                         if (effectiveAction == UnifiedMoveAction.COPY) {
                             if (targetBitwardenVault != null && targetBitwardenIsPremium) {
                                 completePasswordBatchBitwardenAttachments(
@@ -1587,8 +1643,10 @@ internal fun PasswordBatchMoveSheet(
                                                     )
                                                 }
                                                 if (summary.failedCount > 0) {
-                                                    throw IllegalStateException(
-                                                        "${summary.failedCount} KeePass entries failed to move"
+                                                    throw KeePassBatchTransferException(
+                                                        resolveKeePassBatchTransferFailure(
+                                                            failures = summary.failuresByPasswordId,
+                                                        )
                                                     )
                                                 }
                                             }
@@ -1690,11 +1748,29 @@ internal fun PasswordBatchMoveSheet(
                         successCount = inferredSuccessCount,
                         failedCount = normalizedFailedCount
                     )
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.webdav_operation_failed, e.message ?: ""),
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    val keepassFailure = when {
+                        e is KeePassBatchTransferException -> e.failure
+                        target is UnifiedMoveCategoryTarget.KeePassDatabaseTarget ||
+                            target is UnifiedMoveCategoryTarget.KeePassGroupTarget -> {
+                            resolveKeePassBatchTransferFailure(
+                                failureCount = normalizedFailedCount,
+                                failureMessages = listOfNotNull(e.message),
+                            )
+                        }
+                        else -> null
+                    }
+                    if (keepassFailure != null) {
+                        keepassFailurePrompt = KeePassBatchTransferFailurePrompt(
+                            targetLabel = targetLabel,
+                            failure = keepassFailure,
+                        )
+                    } else {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.webdav_operation_failed, e.message ?: ""),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 } finally {
                     transferProgress = null
                     showProgressDialog = false
@@ -1742,6 +1818,66 @@ internal fun PasswordBatchMoveSheet(
             onDismiss = { preserveCategoriesPrompt = null }
         )
     }
+
+	keepassFailurePrompt?.let { prompt ->
+		KeePassBatchTransferFailureDialog(
+			prompt = prompt,
+			onDismiss = { keepassFailurePrompt = null },
+		)
+	}
+}
+
+@Composable
+private fun KeePassBatchTransferFailureDialog(
+    prompt: KeePassBatchTransferFailurePrompt,
+    onDismiss: () -> Unit,
+) {
+    val failure = prompt.failure
+    val message = when (failure.kind) {
+        SyncErrorKind.CONFLICT -> stringResource(
+            R.string.password_batch_keepass_failure_conflict,
+            prompt.targetLabel,
+            failure.failedCount,
+        )
+        SyncErrorKind.NETWORK_UNAVAILABLE,
+        SyncErrorKind.REMOTE_UNAVAILABLE,
+        SyncErrorKind.RATE_LIMITED -> stringResource(
+            R.string.password_batch_keepass_failure_network,
+            prompt.targetLabel,
+            failure.failedCount,
+        )
+        SyncErrorKind.AUTH_REQUIRED -> stringResource(
+            R.string.password_batch_keepass_failure_auth,
+            prompt.targetLabel,
+            failure.failedCount,
+        )
+        SyncErrorKind.PERMISSION_DENIED -> stringResource(
+            R.string.password_batch_keepass_failure_permission,
+            prompt.targetLabel,
+            failure.failedCount,
+        )
+        SyncErrorKind.TARGET_LOCKED -> stringResource(
+            R.string.password_batch_keepass_failure_locked,
+            prompt.targetLabel,
+            failure.failedCount,
+        )
+        else -> stringResource(
+            R.string.password_batch_keepass_failure_unknown,
+            prompt.targetLabel,
+            failure.failedCount,
+            failure.detail,
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.password_batch_keepass_failure_title)) },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.confirm))
+            }
+        },
+    )
 }
 
 /** 附件感知批量移动弹窗挂起状态。 */

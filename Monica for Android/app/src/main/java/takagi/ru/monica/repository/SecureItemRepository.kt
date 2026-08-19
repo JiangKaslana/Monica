@@ -74,6 +74,8 @@ class SecureItemRepository(
             }
         }
     }
+
+    suspend fun getDeletedItemsSync(): List<SecureItem> = secureItemDao.getDeletedItemsSync()
     
     fun getItemsByType(type: ItemType): Flow<List<SecureItem>> {
         return secureItemDao.getItemsByType(type)

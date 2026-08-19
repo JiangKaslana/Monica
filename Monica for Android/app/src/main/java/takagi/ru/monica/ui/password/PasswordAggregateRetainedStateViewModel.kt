@@ -10,6 +10,7 @@ internal data class PasswordAggregateSnapshotKey(
     val displayedContentTypes: Set<PasswordPageContentType>,
     val searchQuery: String,
     val categoryFilter: CategoryFilter,
+    val localCategoryIdsInScope: Set<Long>,
 )
 
 internal data class PasswordAggregateSnapshotSeed(

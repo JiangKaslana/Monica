@@ -9,15 +9,20 @@ import org.junit.Test
 class VaultV2FirstFramePipelineGuardTest {
 
     @Test
-    fun `first cards require only one asynchronous list model stage`() {
+    fun `display model keeps immediate merge and filtering in one asynchronous stage`() {
         val pane = source("ui/vaultv2/VaultV2Pane.kt")
         val asyncListStages = Regex(
             "val\\s+\\w+\\s*=\\s*rememberVaultV2AsyncComputedValue\\("
         ).findAll(pane).count()
 
-        assertEquals(1, asyncListStages)
-        assertTrue(pane.contains("buildVaultV2VisibleListState("))
-        assertFalse(pane.contains("val visibleListStateAsync ="))
+        assertEquals(2, asyncListStages)
+        val displayBlock = pane
+            .substringAfter("val displayListStateAsync =")
+            .substringBefore("val displayedListState")
+
+        assertTrue(displayBlock.contains("buildVaultV2DisplayListState("))
+        assertTrue(pane.contains("buildVaultV2InitialDisplayListState("))
+        assertFalse(pane.contains("val visibleListState = remember("))
     }
 
     @Test

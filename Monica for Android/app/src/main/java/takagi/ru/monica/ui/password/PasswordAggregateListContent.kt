@@ -87,6 +87,7 @@ internal fun buildPasswordAggregateItems(
     passkeys: List<PasskeyEntry>,
     searchQuery: String,
     categoryFilter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long> = emptySet(),
     parseBankCardData: (SecureItem) -> BankCardData? = {
         CardWalletDataCodec.parseBankCardData(it.itemData)
     },
@@ -109,13 +110,36 @@ internal fun buildPasswordAggregateItems(
         billingAddresses,
         searchQuery,
         categoryFilter,
+        localCategoryIdsInScope,
         parseBankCardData,
         parseDocumentData,
         parseBillingAddressData
     )
-    appendNoteItems(items, selectedContentTypes, notes, searchQuery, categoryFilter)
-    appendAuthenticatorItems(items, selectedContentTypes, totpItems, searchQuery, categoryFilter, parseTotpData)
-    appendPasskeyItems(items, selectedContentTypes, passkeys, searchQuery, categoryFilter)
+    appendNoteItems(
+        items,
+        selectedContentTypes,
+        notes,
+        searchQuery,
+        categoryFilter,
+        localCategoryIdsInScope,
+    )
+    appendAuthenticatorItems(
+        items,
+        selectedContentTypes,
+        totpItems,
+        searchQuery,
+        categoryFilter,
+        localCategoryIdsInScope,
+        parseTotpData,
+    )
+    appendPasskeyItems(
+        items,
+        selectedContentTypes,
+        passkeys,
+        searchQuery,
+        categoryFilter,
+        localCategoryIdsInScope,
+    )
     return items.sortedByDescending(PasswordAggregateListItemUi::sortTime)
 }
 
@@ -136,6 +160,7 @@ internal fun resolveNonEmptyAggregateContentTypes(
     totpItems: List<SecureItem>,
     passkeys: List<PasskeyEntry>,
     categoryFilter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long> = emptySet(),
     parseTotpData: (SecureItem) -> TotpData? = {
         TotpDataResolver.parseStoredItemData(it.itemData, fallbackIssuer = it.title)
     }
@@ -144,22 +169,26 @@ internal fun resolveNonEmptyAggregateContentTypes(
         when (type) {
             PasswordPageContentType.PASSWORD -> true
             PasswordPageContentType.CARD_WALLET ->
-                bankCards.any { it.matchesAggregateCategory(categoryFilter) } ||
-                    documents.any { it.matchesAggregateCategory(categoryFilter) } ||
-                    billingAddresses.any { it.matchesAggregateCategory(categoryFilter) }
+                bankCards.any { it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope = localCategoryIdsInScope) } ||
+                    documents.any { it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope = localCategoryIdsInScope) } ||
+                    billingAddresses.any { it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope = localCategoryIdsInScope) }
             PasswordPageContentType.NOTE ->
-                notes.any { it.matchesAggregateCategory(categoryFilter) }
+                notes.any { it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope = localCategoryIdsInScope) }
             PasswordPageContentType.AUTHENTICATOR ->
                 totpItems.any { item ->
                     val data = parseTotpData(item) ?: return@any false
                     !item.isDeleted &&
                         data.boundPasswordId == null &&
-                        item.matchesAggregateCategory(categoryFilter, data.categoryId)
+                        item.matchesAggregateCategory(
+                            filter = categoryFilter,
+                            effectiveCategoryId = data.categoryId,
+                            localCategoryIdsInScope = localCategoryIdsInScope,
+                        )
                 }
             PasswordPageContentType.PASSKEY ->
                 passkeys.any { passkey ->
                     passkey.boundPasswordId == null &&
-                        passkey.matchesAggregateCategory(categoryFilter)
+                        passkey.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope)
                 }
         }
     }
@@ -240,6 +269,7 @@ private fun appendCardItems(
     billingAddresses: List<SecureItem>,
     searchQuery: String,
     categoryFilter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long>,
     parseBankCardData: (SecureItem) -> BankCardData?,
     parseDocumentData: (SecureItem) -> DocumentData?,
     parseBillingAddressData: (SecureItem) -> BillingAddressData?
@@ -247,7 +277,7 @@ private fun appendCardItems(
     if (!selectedContentTypes.contains(PasswordPageContentType.CARD_WALLET)) return
 
     bankCards
-        .filter { it.matchesAggregateCategory(categoryFilter) }
+        .filter { it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope = localCategoryIdsInScope) }
         .forEach { item ->
             val data = parseBankCardData(item)
             if (!item.matchesAggregateQuery(
@@ -279,7 +309,7 @@ private fun appendCardItems(
         }
 
     documents
-        .filter { it.matchesAggregateCategory(categoryFilter) }
+        .filter { it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope = localCategoryIdsInScope) }
         .forEach { item ->
             val data = parseDocumentData(item)
             if (!item.matchesAggregateQuery(
@@ -309,7 +339,7 @@ private fun appendCardItems(
         }
 
     billingAddresses
-        .filter { it.matchesAggregateCategory(categoryFilter) }
+        .filter { it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope = localCategoryIdsInScope) }
         .forEach { item ->
             val data = parseBillingAddressData(item)
             if (!item.matchesAggregateQuery(
@@ -373,12 +403,18 @@ private fun appendNoteItems(
     selectedContentTypes: Set<PasswordPageContentType>,
     notes: List<SecureItem>,
     searchQuery: String,
-    categoryFilter: CategoryFilter
+    categoryFilter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long>,
 ) {
     if (!selectedContentTypes.contains(PasswordPageContentType.NOTE)) return
 
     notes
-        .filter { it.matchesAggregateCategory(categoryFilter) && it.matchesAggregateQuery(searchQuery) }
+        .filter {
+            it.matchesAggregateCategory(
+                categoryFilter,
+                localCategoryIdsInScope = localCategoryIdsInScope,
+            ) && it.matchesAggregateQuery(searchQuery)
+        }
         .forEach { item ->
             val decodedNote = NoteContentCodec.decodeFromItem(item)
             items += PasswordAggregateListItemUi(
@@ -404,6 +440,7 @@ private fun appendAuthenticatorItems(
     totpItems: List<SecureItem>,
     searchQuery: String,
     categoryFilter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long>,
     parseTotpData: (SecureItem) -> TotpData?
 ) {
     if (!selectedContentTypes.contains(PasswordPageContentType.AUTHENTICATOR)) return
@@ -412,7 +449,12 @@ private fun appendAuthenticatorItems(
         .mapNotNull { item ->
             val data = parseTotpData(item) ?: return@mapNotNull null
             if (item.isDeleted || data.boundPasswordId != null) return@mapNotNull null
-            if (!item.matchesAggregateCategory(categoryFilter, data.categoryId)) return@mapNotNull null
+            if (!item.matchesAggregateCategory(
+                    filter = categoryFilter,
+                    effectiveCategoryId = data.categoryId,
+                    localCategoryIdsInScope = localCategoryIdsInScope,
+                )
+            ) return@mapNotNull null
             if (!item.matchesAggregateQuery(searchQuery, data.issuer, data.accountName)) return@mapNotNull null
             PasswordAggregateListItemUi(
                 key = "totp:${item.id}",
@@ -437,13 +479,17 @@ private fun appendPasskeyItems(
     selectedContentTypes: Set<PasswordPageContentType>,
     passkeys: List<PasskeyEntry>,
     searchQuery: String,
-    categoryFilter: CategoryFilter
+    categoryFilter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long>,
 ) {
     if (!selectedContentTypes.contains(PasswordPageContentType.PASSKEY)) return
 
     passkeys
         .filter { it.boundPasswordId == null }
-        .filter { it.matchesAggregateCategory(categoryFilter) && it.matchesAggregateQuery(searchQuery) }
+        .filter {
+            it.matchesAggregateCategory(categoryFilter, localCategoryIdsInScope) &&
+                it.matchesAggregateQuery(searchQuery)
+        }
         .forEach { passkey ->
             items += PasswordAggregateListItemUi(
                 key = "passkey:${passkey.id.takeIf { it > 0L } ?: passkey.credentialId}",
@@ -514,7 +560,8 @@ private fun PasskeyEntry.toAggregatePasswordEntry(): PasswordEntry {
 
 private fun SecureItem.matchesAggregateCategory(
     filter: CategoryFilter,
-    effectiveCategoryId: Long? = categoryId
+    effectiveCategoryId: Long? = categoryId,
+    localCategoryIdsInScope: Set<Long> = emptySet(),
 ): Boolean {
     if (isDeleted) return false
     return when (filter) {
@@ -528,11 +575,13 @@ private fun SecureItem.matchesAggregateCategory(
             keepassDatabaseId == null && bitwardenVaultId == null && isFavorite
         is CategoryFilter.LocalUncategorized ->
             keepassDatabaseId == null && bitwardenVaultId == null && effectiveCategoryId == null
-        is CategoryFilter.Custom ->
-            effectiveCategoryId == filter.categoryId &&
+        is CategoryFilter.Custom -> {
+            val categoryIds = localCategoryIdsInScope.ifEmpty { setOf(filter.categoryId) }
+            effectiveCategoryId in categoryIds &&
                 keepassDatabaseId == null &&
                 bitwardenVaultId == null &&
                 mdbxDatabaseId == null
+        }
         is CategoryFilter.KeePassDatabase -> keepassDatabaseId == filter.databaseId
         is CategoryFilter.KeePassGroupFilter ->
             keepassDatabaseId == filter.databaseId && keepassGroupPath == filter.groupPath
@@ -552,7 +601,10 @@ private fun SecureItem.matchesAggregateCategory(
     }
 }
 
-private fun PasskeyEntry.matchesAggregateCategory(filter: CategoryFilter): Boolean {
+private fun PasskeyEntry.matchesAggregateCategory(
+    filter: CategoryFilter,
+    localCategoryIdsInScope: Set<Long> = emptySet(),
+): Boolean {
     return when (filter) {
         is CategoryFilter.All -> true
         is CategoryFilter.Archived -> false
@@ -563,11 +615,13 @@ private fun PasskeyEntry.matchesAggregateCategory(filter: CategoryFilter): Boole
         is CategoryFilter.LocalStarred -> false
         is CategoryFilter.LocalUncategorized ->
             keepassDatabaseId == null && bitwardenVaultId == null && mdbxDatabaseId == null && categoryId == null
-        is CategoryFilter.Custom ->
-            categoryId == filter.categoryId &&
+        is CategoryFilter.Custom -> {
+            val categoryIds = localCategoryIdsInScope.ifEmpty { setOf(filter.categoryId) }
+            categoryId in categoryIds &&
                 keepassDatabaseId == null &&
                 bitwardenVaultId == null &&
                 mdbxDatabaseId == null
+        }
         is CategoryFilter.KeePassDatabase -> keepassDatabaseId == filter.databaseId
         is CategoryFilter.KeePassGroupFilter ->
             keepassDatabaseId == filter.databaseId && keepassGroupPath == filter.groupPath

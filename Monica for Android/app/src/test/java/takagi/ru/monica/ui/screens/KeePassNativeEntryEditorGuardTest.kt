@@ -16,8 +16,11 @@ class KeePassNativeEntryEditorGuardTest {
         assertTrue(source.contains("creatingEntryParent"))
         assertTrue(source.contains("onCreateEntry = { creatingEntryParent = it }"))
         assertTrue(source.contains("entry = editing"))
-        assertTrue(source.contains("viewModel.createNativeEntry("))
-        assertTrue(source.contains("fields = fields"))
+        val coordinator = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/KeePassNativeEntrySaveCoordinator.kt",
+        ).readText()
+        assertTrue(coordinator.contains("viewModel.createNativeEntry("))
+        assertTrue(coordinator.contains("fields = fields"))
         assertFalse(source.contains("if (showCreateEntry)"))
     }
 
@@ -30,8 +33,26 @@ class KeePassNativeEntryEditorGuardTest {
         assertTrue(editor.contains("CustomFieldSectionHeader"))
         assertTrue(editor.contains("CustomFieldEditCard"))
         assertTrue(editor.contains("NativeEntryCredentialEditorCard"))
+        assertTrue(editor.contains("NativeTotpEditorCard"))
+        assertTrue(editor.contains("OpenMultipleDocuments"))
+        assertTrue(editor.contains("NativePendingAttachmentsCard"))
         assertFalse(editor.contains("ArrowUpward"))
         assertFalse(editor.contains("ArrowDownward"))
+    }
+
+    @Test
+    fun `predefined icon picker displays a visual grid`() {
+        val editor = projectFile(
+            "app/src/main/java/takagi/ru/monica/ui/screens/KeePassNativeEntryEditorScreen.kt",
+        ).readText()
+
+        val picker = editor
+            .substringAfter("internal fun NativePredefinedIconPickerDialog(")
+            .substringBefore("internal fun KeePassCustomIconNameDialog(")
+
+        assertTrue(picker.contains("LazyVerticalGrid"))
+        assertTrue(picker.contains("keepassPredefinedIconVector(icon)"))
+        assertFalse(picker.contains("Icon(Icons.Default.Edit"))
     }
 
     @Test
@@ -41,7 +62,7 @@ class KeePassNativeEntryEditorGuardTest {
         ).readText()
 
         assertTrue(detail.contains("filter { it != NativeEntryStandardSlot.NOTES }"))
-        assertTrue(detail.contains("@Composable\nprivate fun nativeEntryDetailLabel"))
+        assertTrue(detail.contains("private fun nativeEntryDetailLabel"))
         assertTrue(detail.contains("NativeEntryStandardSlot.TITLE -> stringResource(R.string.title)"))
         assertTrue(detail.contains("NativeEntryStandardSlot.URL -> stringResource(R.string.website_url)"))
         assertFalse(detail.contains("NativeEntryStandardSlot.TITLE -> \"Title\""))

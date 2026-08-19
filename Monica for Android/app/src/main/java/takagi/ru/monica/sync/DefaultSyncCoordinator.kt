@@ -317,13 +317,9 @@ class DefaultSyncCoordinator(
                 reason = error.message
             )
         } catch (error: Exception) {
-            SyncExecutionResult.Failed(
+            syncExecutionFailure(
+                error = error,
                 finishedAtMillis = nowMillis(),
-                error = SyncError(
-                    kind = SyncErrorKind.UNEXPECTED,
-                    redactedMessage = error.message,
-                    retryable = false
-                )
             )
         }
         finishExecution(key, request, result)

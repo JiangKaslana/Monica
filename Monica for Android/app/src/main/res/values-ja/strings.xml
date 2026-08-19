@@ -2972,6 +2972,17 @@
     <string name="password_batch_transfer_progress_title_move">バッチ移動が進行中です</string>
     <string name="password_batch_transfer_target">ターゲット: %1$s</string>
     <string name="password_batch_transfer_partial_result">%1$d は完了しました、%2$d は失敗しました</string>
+    <string name="password_batch_keepass_failure_title">KeePass に移動できませんでした</string>
+    <string name="password_batch_keepass_failure_conflict">%1$s のクラウドファイルと端末上の作業コピーが両方変更されています。データベースを保護するため、%2$d 件は移動されず、移動元の項目は保持されました。「データベースとバックアップ → KeePass → このデータベース → データベースツール → 競合センター」で競合を解決してから、もう一度移動してください。</string>
+    <string name="password_batch_keepass_failure_network">%1$s に接続できませんでした。%2$d 件は移動されず、移動元の項目は保持されました。ネットワークとリモートストレージサービスの状態を確認して、もう一度お試しください。</string>
+    <string name="password_batch_keepass_failure_auth">%1$s のログインの有効期限が切れています。%2$d 件は移動されず、移動元の項目は保持されました。リモートアカウントに再度ログインしてからお試しください。</string>
+    <string name="password_batch_keepass_failure_permission">%1$s に書き込み権限がないか、読み取り専用です。%2$d 件は移動されず、移動元の項目は保持されました。データベースを再認証するか、読み取り専用を解除してください。</string>
+    <string name="password_batch_keepass_failure_locked">%1$s はロックされています。%2$d 件は移動されず、移動元の項目は保持されました。データベースのロックを解除してからお試しください。</string>
+    <string name="password_batch_keepass_failure_unknown">%1$s に %2$d 件を保存できませんでした。移動元の項目は保持されています。理由: %3$s</string>
+    <string name="keepass_sync_conflict_guidance">クラウドデータベースと端末上の作業コピーが両方変更されています。「データベースとバックアップ → KeePass → このデータベース → データベースツール → 競合センター」を開き、競合の解決方法を選択してください。</string>
+    <string name="keepass_sync_network_guidance">ネットワーク接続とリモートストレージサービスの状態を確認してから、もう一度同期してください。</string>
+    <string name="keepass_sync_auth_guidance">リモートアカウントのログインが期限切れの可能性があります。データベース設定で再度ログインしてください。</string>
+    <string name="keepass_sync_permission_guidance">データベースの書き込み権限と読み取り専用設定を確認してから、もう一度お試しください。</string>
     <string name="password_batch_transfer_notification_channel_name">バッチ転送の進行状況</string>
     <string name="password_batch_transfer_notification_channel_desc">データベース間のバッチコピーと移動の進行状況を表示します</string>
     <string name="password_batch_transfer_notification_progress">%1$d/%2$d完成</string>
@@ -3269,6 +3280,8 @@
     <string name="password_list_quick_filters_content_desc">各クイック フィルター項目を切り替え、ドラッグして並べ替えます。</string>
     <string name="password_list_category_quick_filters_switch_title">カテゴリクイックフィルター</string>
     <string name="password_list_category_quick_filters_switch_desc">クイックフィルターの下にフォルダーチップを表示します。もう一度タップすると、上に進むかクリアされます。</string>
+    <string name="password_parent_category_includes_children_title">サブカテゴリの項目を含める</string>
+    <string name="password_parent_category_includes_children_desc">親カテゴリで、すべてのサブカテゴリの項目も表示します。パスワードと保管庫に適用されます。</string>
     <string name="password_list_quick_folders_switch_title">クイックフォルダースイッチ</string>
     <string name="password_list_quick_folders_switch_desc">パスワードリストの上にフォルダーカードを表示します。</string>
     <string name="password_list_quick_folders_style_title">クイックフォルダースタイル</string>
@@ -3527,4 +3540,17 @@
     <string name="steam_mini_profile_background_description">トークンとアカウント詳細カードに Steam のミニプロフィール背景を表示します。動画は表示中のみ再生され、キャッシュは最大 64 MB です。</string>
     <string name="add_credential">資格情報を追加</string>
     <string name="credential_number">資格情報 %1$d</string>
+    <string name="category_folder_transfer_source_missing">移動元のフォルダーは存在しません。</string>
+    <string name="category_folder_transfer_no_change">このフォルダーはすでに選択した場所にあります。</string>
+    <string name="category_folder_transfer_invalid_destination">フォルダーを自身またはそのサブフォルダー内へ移動・コピーすることはできません。</string>
+    <string name="category_folder_transfer_passkey_copy_blocked">このフォルダーにはパスキーが含まれています。各認証情報は一意の秘密鍵を保持する必要があるため、安全に複製できません。フォルダーを移動するか、先にパスキーを移動してください。</string>
+    <string name="category_folder_transfer_identity_items_unsupported">このフォルダーには、選択したデータベースでまだ保存できない請求先住所または支払いアカウントが含まれています。先に Monica または MDBX へ移動してください。</string>
+    <string name="category_folder_transfer_inactive_items_blocked">このフォルダーにはアーカイブ済みまたは削除済みの項目が %1$d 件残っています。フォルダー全体を別のデータベースへ移動する前に、復元または完全に削除してください。</string>
+    <string name="category_folder_transfer_target_missing">選択した移動先データベースは利用できません。</string>
+    <string name="category_folder_transfer_bitwarden_attachments_blocked">このフォルダーには添付ファイルがありますが、選択した Bitwarden アカウントではアップロードできません。添付ファイルの消失を防ぐため、処理を停止しました。</string>
+    <string name="category_folder_transfer_attachment_failed">%1$d 件の項目の添付ファイルをコピーできませんでした。</string>
+    <string name="category_folder_transfer_success">%1$d 個のフォルダーと %2$d 件の項目を処理しました</string>
+    <string name="category_folder_transfer_partial_title">フォルダーの転送が完了していません</string>
+    <string name="category_folder_transfer_partial_message">%1$d 件が完了し、%2$d 件が失敗しました。失敗した移動元項目と元のフォルダー構造は保持されています。%3$s</string>
+    <string name="category_folder_transfer_running">別のフォルダー転送を実行中です。</string>
 </resources>

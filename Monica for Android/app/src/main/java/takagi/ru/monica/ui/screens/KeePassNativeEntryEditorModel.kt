@@ -2,7 +2,9 @@ package takagi.ru.monica.ui.screens
 
 import java.util.Locale
 import takagi.ru.monica.data.CustomFieldDraft
+import takagi.ru.monica.data.model.TotpData
 import takagi.ru.monica.keepass.KeePassFieldChange
+import takagi.ru.monica.keepass.KeePassTotpCodec
 
 /**
  * The five fields that make a native KDBX entry immediately useful in Monica.
@@ -73,7 +75,7 @@ internal fun buildNativeEntryEditorDraft(
 ): NativeEntryEditorDraft {
     val usedSlots = mutableSetOf<NativeEntryStandardSlot>()
     return NativeEntryEditorDraft(
-        fields = fields.mapIndexed { index, field ->
+        fields = fields.filterNot { field -> isNativeTotpFieldName(field.name) }.mapIndexed { index, field ->
             val slot = nativeEntryStandardSlot(field.name)
                 ?.takeIf { usedSlots.add(it) }
             NativeEntryEditorField(
@@ -85,6 +87,51 @@ internal fun buildNativeEntryEditorDraft(
                 slot = slot,
             )
         },
+    )
+}
+
+internal fun isNativeTotpFieldName(name: String): Boolean {
+    return name.trim().lowercase(Locale.ROOT) in NATIVE_TOTP_FIELD_NAMES
+}
+
+internal fun mergeNativeTotpFields(
+    fields: List<KeePassFieldChange>,
+    data: TotpData?,
+    title: String,
+): List<KeePassFieldChange> {
+    val retained = fields.filterNot { field -> isNativeTotpFieldName(field.name) }
+    if (data == null) return retained
+    return retained + KeePassTotpCodec.toKeePassFields(data, title).map { (name, value) ->
+        KeePassFieldChange(
+            name = name,
+            value = value,
+            protected = name.equals(KeePassTotpCodec.FIELD_OTP, ignoreCase = true) ||
+                name.equals(KeePassTotpCodec.FIELD_TOTP_SEED, ignoreCase = true),
+        )
+    }
+}
+
+internal fun parseNativeTotpFields(
+    fields: List<KeePassFieldChange>,
+): TotpData? {
+    fun value(vararg names: String): String = fields.firstOrNull { field ->
+        names.any { name -> field.name.equals(name, ignoreCase = true) }
+    }?.value.orEmpty()
+
+    return KeePassTotpCodec.parse(
+        KeePassTotpCodec.Fields(
+            otp = value("otp"),
+            seed = value("TOTP Seed", "TOTPSeed"),
+            settings = value("TOTP Settings", "TOTPSettings"),
+            period = value("TOTP Period", "TOTPPeriod"),
+            digits = value("TOTP Digits", "TOTPDigits"),
+            algorithm = value("TOTP Algorithm", "TOTPAlgorithm"),
+            counter = value("HOTP Counter", "HOTPCounter"),
+            type = value("OTP Type", "OTPType", "TOTP Type", "TOTPType"),
+            issuer = value("Title", "Name"),
+            accountName = value("UserName", "Login", "User"),
+            link = value("URL", "URI", "Website"),
+        ),
     )
 }
 
@@ -157,3 +204,23 @@ internal fun nativeEntryStandardSlot(name: String): NativeEntryStandardSlot? {
         else -> null
     }
 }
+
+private val NATIVE_TOTP_FIELD_NAMES = setOf(
+    KeePassTotpCodec.FIELD_OTP,
+    KeePassTotpCodec.FIELD_TOTP_SEED,
+    KeePassTotpCodec.FIELD_TOTP_SETTINGS,
+    KeePassTotpCodec.FIELD_TOTP_PERIOD,
+    KeePassTotpCodec.FIELD_TOTP_DIGITS,
+    KeePassTotpCodec.FIELD_TOTP_ALGORITHM,
+    KeePassTotpCodec.FIELD_OTP_TYPE,
+    KeePassTotpCodec.FIELD_HOTP_COUNTER,
+    "TOTPSeed",
+    "TOTPSettings",
+    "TOTPPeriod",
+    "TOTPDigits",
+    "TOTPAlgorithm",
+    "OTPType",
+    "TOTP Type",
+    "TOTPType",
+    "HOTPCounter",
+).mapTo(linkedSetOf()) { it.lowercase(Locale.ROOT) }

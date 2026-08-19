@@ -44,8 +44,7 @@ internal fun PasswordQuickFolderFlow(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         params.quickFolderShortcuts.forEach { shortcut ->
-            val editableCategory = (shortcut.targetFilter as? CategoryFilter.Custom)
-                ?.let { filter -> params.categories.firstOrNull { it.id == filter.categoryId } }
+            val editableCategory = shortcut.resolveEditableCategory(params.categories)
             MonicaExpressiveFilterChip(
                 selected = shortcut.targetFilter == params.currentFilter,
                 onClick = {

@@ -3,9 +3,11 @@ package takagi.ru.monica.ui.password
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import takagi.ru.monica.data.PasskeyEntry
+import takagi.ru.monica.data.ItemType
 import takagi.ru.monica.data.PasswordEntry
 import takagi.ru.monica.data.PasswordListQuickFilterItem
 import takagi.ru.monica.data.PasswordPageContentType
+import takagi.ru.monica.data.SecureItem
 import takagi.ru.monica.viewmodel.CategoryFilter
 
 class PasswordAggregateMdbxFilterTest {
@@ -65,6 +67,28 @@ class PasswordAggregateMdbxFilterTest {
         assertEquals(emptyList<PasswordAggregateListItemUi>(), filtered)
     }
 
+    @Test
+    fun parentCategoryScopeIncludesAggregateItemsFromChildCategories() {
+        val parentNote = note(id = 1L, categoryId = 10L)
+        val childNote = note(id = 2L, categoryId = 11L)
+        val unrelatedNote = note(id = 3L, categoryId = 20L)
+
+        val items = buildPasswordAggregateItems(
+            selectedContentTypes = setOf(PasswordPageContentType.NOTE),
+            bankCards = emptyList(),
+            documents = emptyList(),
+            billingAddresses = emptyList(),
+            notes = listOf(parentNote, childNote, unrelatedNote),
+            totpItems = emptyList(),
+            passkeys = emptyList(),
+            searchQuery = "",
+            categoryFilter = CategoryFilter.Custom(10L),
+            localCategoryIdsInScope = setOf(10L, 11L)
+        )
+
+        assertEquals(listOf(1L, 2L), items.mapNotNull { it.secureItemId }.sorted())
+    }
+
     private fun passkey(id: Long, mdbxDatabaseId: Long?): PasskeyEntry {
         return PasskeyEntry(
             id = id,
@@ -79,4 +103,12 @@ class PasswordAggregateMdbxFilterTest {
             mdbxDatabaseId = mdbxDatabaseId
         )
     }
+
+    private fun note(id: Long, categoryId: Long) = SecureItem(
+        id = id,
+        itemType = ItemType.NOTE,
+        title = "Note $id",
+        itemData = "{}",
+        categoryId = categoryId
+    )
 }

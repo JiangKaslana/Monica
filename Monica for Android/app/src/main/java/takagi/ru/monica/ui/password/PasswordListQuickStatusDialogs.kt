@@ -57,6 +57,27 @@ internal fun PasswordListQuickStatusDialogs(
                 text = {
                     Column {
                         Text(text = keepassQuickSyncStatusLabel(state))
+                        val guidance = when {
+                            state.coordinatorErrorKind == takagi.ru.monica.sync.SyncErrorKind.CONFLICT ||
+                                state.coordinatorPhase == takagi.ru.monica.sync.SyncPhase.CONFLICT ||
+                                state.status == takagi.ru.monica.data.KeePassSyncStatus.CONFLICT -> {
+                                stringResource(R.string.keepass_sync_conflict_guidance)
+                            }
+                            state.coordinatorErrorKind in setOf(
+                                takagi.ru.monica.sync.SyncErrorKind.NETWORK_UNAVAILABLE,
+                                takagi.ru.monica.sync.SyncErrorKind.REMOTE_UNAVAILABLE,
+                                takagi.ru.monica.sync.SyncErrorKind.RATE_LIMITED,
+                            ) -> stringResource(R.string.keepass_sync_network_guidance)
+                            state.coordinatorErrorKind == takagi.ru.monica.sync.SyncErrorKind.AUTH_REQUIRED ->
+                                stringResource(R.string.keepass_sync_auth_guidance)
+                            state.coordinatorErrorKind == takagi.ru.monica.sync.SyncErrorKind.PERMISSION_DENIED ->
+                                stringResource(R.string.keepass_sync_permission_guidance)
+                            else -> state.coordinatorErrorMessage
+                        }
+                        if (!guidance.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = guidance)
+                        }
                         if (state.isRunning) {
                             Spacer(modifier = Modifier.height(12.dp))
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -67,7 +88,13 @@ internal fun PasswordListQuickStatusDialogs(
                     TextButton(
                         onClick = { onMoveKeePassSyncToBackground(state) }
                     ) {
-                        Text(text = stringResource(R.string.password_batch_transfer_continue_in_background))
+                        Text(
+                            text = if (state.isRunning) {
+                                stringResource(R.string.password_batch_transfer_continue_in_background)
+                            } else {
+                                stringResource(R.string.close)
+                            }
+                        )
                     }
                 },
                 dismissButton = if (!state.isRunning) {

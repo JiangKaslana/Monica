@@ -66,9 +66,35 @@ class WebDavSettingsBackupRegressionGuardTest {
     }
 
     @Test
+    fun webDavPageSettingsKeepParentCategoryScopePreference() {
+        val source = projectFile("app/src/main/java/takagi/ru/monica/utils/WebDavHelper.kt")
+        val backupModel = source.substringAfter("private data class PageAdjustmentSettingsBackupEntry(")
+            .substringBefore("private data class BitwardenVaultBackupEntry(")
+        val snapshotMapping = source.substringAfter(
+            "private fun PageAdjustmentSettingsSnapshot.toBackupEntry()"
+        ).substringBefore("private suspend fun writePortableAppSettingsBackup(")
+
+        assertTrue(
+            backupModel.contains("val passwordParentCategoryIncludesChildren: Boolean = false")
+        )
+        assertTrue(
+            snapshotMapping.contains(
+                "passwordParentCategoryIncludesChildren = passwordParentCategoryIncludesChildren"
+            )
+        )
+        assertTrue(
+            source.contains(
+                "passwordParentCategoryIncludesChildren =\n" +
+                    "                                                    pageAdjustmentBackup.passwordParentCategoryIncludesChildren"
+            )
+        )
+    }
+
+    @Test
     fun restoredPlusPreferencesStayInactiveUntilPlusIsActivatedLocally() {
         val steamSource = projectFile("app/src/main/java/takagi/ru/monica/steam/ui/SteamScreen.kt")
         val totpSource = projectFile("app/src/main/java/takagi/ru/monica/ui/components/TotpCodeCard.kt")
+        val totpListSource = projectFile("app/src/main/java/takagi/ru/monica/ui/totp/TotpListContent.kt")
         val mainSource = projectFile("app/src/main/java/takagi/ru/monica/MainActivity.kt")
 
         assertTrue(
@@ -78,7 +104,7 @@ class WebDavSettingsBackupRegressionGuardTest {
             ).containsMatchIn(steamSource)
         )
         assertTrue(totpSource.contains("settings.isPlusActivated &&"))
-        assertTrue(totpSource.contains("settings.validatorVibrationEnabled"))
+        assertTrue(totpListSource.contains("appSettings.validatorVibrationEnabled"))
         assertTrue(totpSource.contains("settings.copyNextCodeWhenExpiring"))
         assertTrue(mainSource.contains("effectiveColorSchemeForPlusAccess("))
     }
@@ -117,7 +143,7 @@ class WebDavSettingsBackupRegressionGuardTest {
         var cursor = start
         while (cursor.parent != null) {
             val candidate = cursor.resolve(relativePath).toFile()
-            if (candidate.exists()) return candidate.readText()
+            if (candidate.exists()) return candidate.readText().replace("\r\n", "\n")
             cursor = cursor.parent
         }
         error("Project file not found from $start: $relativePath")

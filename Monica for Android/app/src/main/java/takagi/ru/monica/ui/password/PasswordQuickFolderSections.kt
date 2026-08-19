@@ -93,6 +93,7 @@ internal data class QuickStatusKeePassSyncState(
     val phase: KeePassSyncPhase?,
     val coordinatorPhase: SyncPhase? = null,
     val coordinatorErrorKind: SyncErrorKind? = null,
+    val coordinatorErrorMessage: String? = null,
     val onSync: () -> Unit
 ) {
     val isRunning: Boolean
@@ -325,7 +326,13 @@ internal fun keepassQuickSyncStatusLabel(state: QuickStatusKeePassSyncState): St
             SyncErrorKind.TARGET_LOCKED -> "数据库未解锁"
             else -> "同步受阻"
         }
-        SyncPhase.FAILED -> return "同步失败"
+        SyncPhase.FAILED -> return when (state.coordinatorErrorKind) {
+            SyncErrorKind.CONFLICT -> "同步冲突"
+            SyncErrorKind.NETWORK_UNAVAILABLE -> "网络连接失败"
+            SyncErrorKind.AUTH_REQUIRED -> "登录状态已失效"
+            SyncErrorKind.PERMISSION_DENIED -> "缺少写入权限"
+            else -> "同步失败"
+        }
         SyncPhase.CONFLICT -> return "同步冲突"
         SyncPhase.CANCELED -> return "同步已取消"
         else -> Unit

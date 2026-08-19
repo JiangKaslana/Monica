@@ -440,12 +440,14 @@ class LocalKeePassViewModel(
         databaseId: Long,
         parentGroupUuid: UUID,
         name: String,
-        expectedRevisionToken: String
+        expectedRevisionToken: String,
+        properties: KeePassNativeGroupUpdate? = null
     ): Result<KeePassNativeGroupRecord> = workspaceRepository.createNativeGroup(
         databaseId,
         parentGroupUuid,
         name,
-        expectedRevisionToken
+        expectedRevisionToken,
+        properties,
     )
 
     internal suspend fun renameNativeGroup(
@@ -503,6 +505,20 @@ class LocalKeePassViewModel(
         databaseId,
         parentGroupUuid,
         fields,
+        expectedRevisionToken
+    )
+
+    internal suspend fun createNativeEntryWithAttachments(
+        databaseId: Long,
+        parentGroupUuid: UUID,
+        fields: List<KeePassFieldChange>,
+        sourceUris: List<Uri>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.createNativeEntryWithAttachments(
+        databaseId,
+        parentGroupUuid,
+        fields,
+        sourceUris,
         expectedRevisionToken
     )
 
@@ -603,6 +619,18 @@ class LocalKeePassViewModel(
         databaseId = databaseId,
         entryUuid = entryUuid,
         sourceUri = sourceUri,
+        expectedRevisionToken = expectedRevisionToken
+    )
+
+    internal suspend fun addNativeAttachments(
+        databaseId: Long,
+        entryUuid: UUID,
+        sourceUris: List<Uri>,
+        expectedRevisionToken: String
+    ): Result<KeePassNativeEntryRecord> = workspaceRepository.addNativeAttachmentsFromUris(
+        databaseId = databaseId,
+        entryUuid = entryUuid,
+        sourceUris = sourceUris,
         expectedRevisionToken = expectedRevisionToken
     )
 

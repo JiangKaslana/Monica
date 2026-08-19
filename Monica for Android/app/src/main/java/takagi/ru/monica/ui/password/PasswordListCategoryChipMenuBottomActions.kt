@@ -10,27 +10,38 @@ import kotlinx.coroutines.flow.Flow
 import takagi.ru.monica.R
 import takagi.ru.monica.data.Category
 import takagi.ru.monica.data.LocalKeePassDatabase
+import takagi.ru.monica.data.LocalMdbxDatabase
 import takagi.ru.monica.data.bitwarden.BitwardenFolder
 import takagi.ru.monica.data.bitwarden.BitwardenVault
 import takagi.ru.monica.data.model.StorageTarget
+import takagi.ru.monica.repository.MdbxStoredFolderEntry
 import takagi.ru.monica.ui.components.MultiStorageTargetPickerBottomSheet
+import takagi.ru.monica.ui.components.UnifiedMoveAction
+import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
+import takagi.ru.monica.ui.components.UnifiedMoveInitialSource
+import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
 import takagi.ru.monica.utils.KeePassGroupInfo
+import takagi.ru.monica.utils.getLocalCategoryLeafName
 import takagi.ru.monica.utils.isLocalCategoryDescendantPath
 
 @Composable
 internal fun PasswordListCategoryChipMenuBottomActions(
     categories: List<Category>,
     keepassDatabases: List<LocalKeePassDatabase>,
+    mdbxDatabases: List<LocalMdbxDatabase> = emptyList(),
     bitwardenVaults: List<BitwardenVault>,
     getBitwardenFolders: (Long) -> Flow<List<BitwardenFolder>>,
     getKeePassGroups: (Long) -> Flow<List<KeePassGroupInfo>>,
+    getMdbxFolders: (Long) -> Flow<List<MdbxStoredFolderEntry>> = { kotlinx.coroutines.flow.flowOf(emptyList()) },
+    refreshMdbxFolders: (Long) -> Unit = {},
     categoryEditMode: Boolean,
     onCategoryEditModeChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onCreateCategory: (() -> Unit)?,
     onMoveCategory: ((Category, Long?) -> Unit)?,
     onMoveCategoryToStorageTarget: ((Category, StorageTarget) -> Unit)?,
-    onRenameCategory: ((Category) -> Unit)?,
+    onTransferCategory: ((Category, UnifiedMoveCategoryTarget, UnifiedMoveAction) -> Unit)? = null,
+    onRenameCategory: ((Category, String) -> Unit)?,
     onDeleteCategory: ((Category) -> Unit)?,
     categoryActionTarget: Category?,
     onCategoryActionTargetChange: (Category?) -> Unit,
@@ -41,6 +52,8 @@ internal fun PasswordListCategoryChipMenuBottomActions(
 ) {
     var moveCategoryTarget by remember { mutableStateOf<Category?>(null) }
     var moveCategoryTargets by remember { mutableStateOf<List<StorageTarget>>(emptyList()) }
+    var unifiedTransferCategoryTarget by remember { mutableStateOf<Category?>(null) }
+    var unifiedTransferAction by remember { mutableStateOf(UnifiedMoveAction.MOVE) }
     val availableMoveTargets = moveCategoryTarget?.let { moving ->
         categories.filter { candidate ->
             candidate.id != moving.id && !isLocalCategoryDescendantPath(moving.name, candidate.name)
@@ -51,7 +64,7 @@ internal fun PasswordListCategoryChipMenuBottomActions(
         params = PasswordCategoryActionButtonsParams(
             canCreateCategory = onCreateCategory != null,
             canManageExistingCategories =
-                (onMoveCategory != null || onMoveCategoryToStorageTarget != null || onRenameCategory != null || onDeleteCategory != null) &&
+                (onMoveCategory != null || onMoveCategoryToStorageTarget != null || onTransferCategory != null || onRenameCategory != null || onDeleteCategory != null) &&
                 categories.isNotEmpty(),
             categoryEditMode = categoryEditMode,
             onCreateCategory = {
@@ -65,7 +78,7 @@ internal fun PasswordListCategoryChipMenuBottomActions(
 
     PasswordCategoryDialogs(
         params = PasswordCategoryDialogsParams(
-            categoryActionTarget = if (onDeleteCategory != null || onRenameCategory != null || onMoveCategory != null || onMoveCategoryToStorageTarget != null) {
+            categoryActionTarget = if (onDeleteCategory != null || onRenameCategory != null || onMoveCategory != null || onMoveCategoryToStorageTarget != null || onTransferCategory != null) {
                 categoryActionTarget
             } else {
                 null
@@ -81,21 +94,33 @@ internal fun PasswordListCategoryChipMenuBottomActions(
                 { target: Category ->
                     onCategoryActionTargetChange(null)
                     onRenameCategoryTargetChange(target)
-                    onRenameCategoryInputChange(target.name)
+                    onRenameCategoryInputChange(getLocalCategoryLeafName(target.name))
                 }
             },
-            onStartMove = if (onMoveCategory != null || onMoveCategoryToStorageTarget != null) {
+            onStartMove = if (onMoveCategory != null || onMoveCategoryToStorageTarget != null || onTransferCategory != null) {
                 { target: Category ->
                     onCategoryActionTargetChange(null)
-                    moveCategoryTarget = target
-                    moveCategoryTargets = listOf(
-                        target.bitwardenVaultId?.let { vaultId ->
-                            StorageTarget.Bitwarden(vaultId = vaultId, folderId = target.bitwardenFolderId?.ifBlank { null })
-                        } ?: StorageTarget.MonicaLocal(categoryId = null)
-                    )
+                    if (onTransferCategory != null) {
+                        unifiedTransferAction = UnifiedMoveAction.MOVE
+                        unifiedTransferCategoryTarget = target
+                    } else {
+                        moveCategoryTarget = target
+                        moveCategoryTargets = listOf(
+                            target.bitwardenVaultId?.let { vaultId ->
+                                StorageTarget.Bitwarden(vaultId = vaultId, folderId = target.bitwardenFolderId?.ifBlank { null })
+                            } ?: StorageTarget.MonicaLocal(categoryId = null)
+                        )
+                    }
                 }
             } else {
                 null
+            },
+            onStartCopy = onTransferCategory?.let {
+                { target: Category ->
+                    onCategoryActionTargetChange(null)
+                    unifiedTransferAction = UnifiedMoveAction.COPY
+                    unifiedTransferCategoryTarget = target
+                }
             },
             moveCategoryTarget = null,
             onDismissMove = { moveCategoryTarget = null },
@@ -116,13 +141,38 @@ internal fun PasswordListCategoryChipMenuBottomActions(
             onConfirmRename = { target, input ->
                 val newName = input.trim()
                 if (newName.isNotBlank()) {
-                    onRenameCategory?.invoke(target.copy(name = newName))
+                    onRenameCategory?.invoke(target, newName)
                     onRenameCategoryTargetChange(null)
                 }
             },
             onDismissRename = { onRenameCategoryTargetChange(null) }
         )
     )
+
+    val unifiedMovingCategory = unifiedTransferCategoryTarget
+    if (onTransferCategory != null && unifiedMovingCategory != null) {
+        UnifiedMoveToCategoryBottomSheet(
+            visible = true,
+            onDismiss = { unifiedTransferCategoryTarget = null },
+            initialSource = UnifiedMoveInitialSource.MonicaLocal,
+            categories = availableMoveTargets,
+            keepassDatabases = keepassDatabases,
+            mdbxDatabases = mdbxDatabases,
+            bitwardenVaults = bitwardenVaults,
+            getBitwardenFolders = getBitwardenFolders,
+            getKeePassGroups = getKeePassGroups,
+            getMdbxFolders = getMdbxFolders,
+            refreshMdbxFolders = refreshMdbxFolders,
+            showBitwardenFolderTargets = true,
+            allowCopy = unifiedTransferAction == UnifiedMoveAction.COPY,
+            allowMove = unifiedTransferAction == UnifiedMoveAction.MOVE,
+            onTargetSelected = { target, action ->
+                onTransferCategory(unifiedMovingCategory, target, action)
+                unifiedTransferCategoryTarget = null
+                onDismiss()
+            },
+        )
+    }
 
     val movingCategory = moveCategoryTarget
     if ((onMoveCategory != null || onMoveCategoryToStorageTarget != null) && movingCategory != null) {

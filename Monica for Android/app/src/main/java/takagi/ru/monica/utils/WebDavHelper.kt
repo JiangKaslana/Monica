@@ -379,6 +379,7 @@ private data class PageAdjustmentSettingsBackupEntry(
     val passwordListQuickFiltersEnabled: Boolean = false,
     val passwordListQuickFilterItems: List<String> = emptyList(),
     val passwordListCategoryQuickFiltersEnabled: Boolean = false,
+    val passwordParentCategoryIncludesChildren: Boolean = false,
     val passwordListQuickFoldersEnabled: Boolean = false,
     val passwordListQuickFolderStyle: String = "CLASSIC",
     val passwordListQuickFolderPathBannerEnabled: Boolean = false,
@@ -681,6 +682,7 @@ class WebDavHelper(
             passwordListQuickFiltersEnabled = passwordListQuickFiltersEnabled,
             passwordListQuickFilterItems = passwordListQuickFilterItems,
             passwordListCategoryQuickFiltersEnabled = passwordListCategoryQuickFiltersEnabled,
+            passwordParentCategoryIncludesChildren = passwordParentCategoryIncludesChildren,
             passwordListQuickFoldersEnabled = passwordListQuickFoldersEnabled,
             passwordListQuickFolderStyle = passwordListQuickFolderStyle,
             passwordListQuickFolderPathBannerEnabled = passwordListQuickFolderPathBannerEnabled,
@@ -3767,6 +3769,8 @@ class WebDavHelper(
                                                     pageAdjustmentBackup.passwordListQuickFilterItems,
                                                 passwordListCategoryQuickFiltersEnabled =
                                                     pageAdjustmentBackup.passwordListCategoryQuickFiltersEnabled,
+                                                passwordParentCategoryIncludesChildren =
+                                                    pageAdjustmentBackup.passwordParentCategoryIncludesChildren,
                                                 passwordListQuickFoldersEnabled =
                                                     pageAdjustmentBackup.passwordListQuickFoldersEnabled,
                                                 passwordListQuickFolderStyle =

@@ -178,6 +178,8 @@ import takagi.ru.monica.ui.PasswordBatchMoveViewModels
 import takagi.ru.monica.ui.PasswordBatchTransferNotificationHelper
 import takagi.ru.monica.ui.buildMoveTargetLabel
 import takagi.ru.monica.ui.executeMixedPasswordBatchMove
+import takagi.ru.monica.ui.executePasswordCategoryFolderTransfer
+import takagi.ru.monica.utils.resolveLocalCategoryIdsInScope
 import takagi.ru.monica.ui.resolvePasswordBatchMoveAction
 import takagi.ru.monica.ui.shouldForceSupplementaryKeePassCopy
 import takagi.ru.monica.ui.supportsQuickFolders
@@ -228,6 +230,7 @@ import takagi.ru.monica.utils.KEEPASS_DISPLAY_PATH_SEPARATOR
 import takagi.ru.monica.utils.decodeKeePassPathSegments
 import takagi.ru.monica.utils.SavedCategoryFilterState
 import takagi.ru.monica.utils.planLocalCategoryMove
+import takagi.ru.monica.utils.planLocalCategoryRename
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.ui.components.CreateCategoryDialog
 import takagi.ru.monica.ui.components.CreateDialogTarget
@@ -258,6 +261,47 @@ internal data class VaultV2Item(
 	val passkeyEntry: PasskeyEntry? = null,
 	val boundPasswordId: Long? = null,
 )
+
+internal fun buildVaultV2PasswordItems(entries: List<PasswordEntry>): List<VaultV2Item> {
+	return entries.map { entry ->
+		val displayTitle = entry.title.ifBlank { "(Untitled)" }
+		val subtitle = entry.username.ifBlank { entry.website }.ifBlank { "-" }
+		VaultV2Item(
+			key = "password:${entry.id}",
+			type = VaultV2ItemType.PASSWORD,
+			title = displayTitle,
+			subtitle = subtitle,
+			isFavorite = entry.isFavorite,
+			sortKey = normalizedVaultV2SortKey(displayTitle),
+			searchableValues = listOf(
+				displayTitle,
+				entry.username,
+				entry.website,
+				entry.appName,
+				entry.notes
+			).filter { it.isNotBlank() },
+			passwordEntry = entry,
+		)
+	}
+}
+
+internal fun mergeVaultV2ImmediatePasswordItems(
+	computedItems: List<VaultV2Item>,
+	currentPasswordItems: List<VaultV2Item>,
+): List<VaultV2Item> {
+	val currentPasswordIds = currentPasswordItems
+		.mapNotNullTo(hashSetOf()) { it.passwordEntry?.id }
+	val retainedSecondaryItems = computedItems.filter { item ->
+		item.type != VaultV2ItemType.PASSWORD &&
+			!(item.type == VaultV2ItemType.AUTHENTICATOR && item.boundPasswordId in currentPasswordIds)
+	}
+	return dedupeExactVaultItems(currentPasswordItems + retainedSecondaryItems)
+		.sortedWith(
+			compareBy<VaultV2Item> { it.sortKey.lowercase(Locale.ROOT) }
+				.thenBy { it.type.ordinal }
+				.thenBy { it.key }
+		)
+}
 
 private fun parseVaultV2TotpItemData(
 	item: SecureItem,
@@ -323,6 +367,11 @@ internal data class VaultV2VisibleListState(
 	val sectionLayouts: List<VaultV2SectionLayout> = emptyList(),
 )
 
+internal data class VaultV2DisplayListState(
+	val allItemsRaw: List<VaultV2Item> = emptyList(),
+	val visibleListState: VaultV2VisibleListState = VaultV2VisibleListState(),
+)
+
 private data class VaultV2AsyncComputedValue<T>(
 	val value: T,
 	val isComputing: Boolean,
@@ -345,6 +394,7 @@ internal data class VaultV2ComputedSources(
 
 internal data class VaultV2VisibleSnapshotKey(
 	val storageSelection: UnifiedCategoryFilterSelection,
+	val localCategoryIdsInScope: Set<Long>,
 	val displayedContentTypes: Set<PasswordPageContentType>,
 	val configuredQuickFilterItems: List<PasswordListQuickFilterItem>,
 	val quickFilterStates: List<Boolean>,
@@ -365,6 +415,7 @@ private data class VaultV2SecondaryLists(
 
 internal data class VaultV2VisibleListConfig(
 	val storageSelection: UnifiedCategoryFilterSelection,
+	val localCategoryIdsInScope: Set<Long> = emptySet(),
 	val displayedContentTypes: Set<PasswordPageContentType>,
 	val configuredQuickFilterItems: List<PasswordListQuickFilterItem>,
 	val quickFilterFavorite: Boolean,
@@ -996,7 +1047,10 @@ private fun BitwardenVault.displayLabel(): String {
 	return displayName?.takeIf { it.isNotBlank() } ?: email
 }
 
-private fun VaultV2Item.matchesStorageFilter(selection: UnifiedCategoryFilterSelection): Boolean {
+private fun VaultV2Item.matchesStorageFilter(
+	selection: UnifiedCategoryFilterSelection,
+	localCategoryIdsInScope: Set<Long>,
+): Boolean {
 	return when (selection) {
 		UnifiedCategoryFilterSelection.All -> true
 		UnifiedCategoryFilterSelection.Local -> isLocalOnly()
@@ -1004,7 +1058,10 @@ private fun VaultV2Item.matchesStorageFilter(selection: UnifiedCategoryFilterSel
 		UnifiedCategoryFilterSelection.Uncategorized -> categoryId() == null
 		UnifiedCategoryFilterSelection.LocalStarred -> isLocalOnly() && isFavorite
 		UnifiedCategoryFilterSelection.LocalUncategorized -> isLocalOnly() && categoryId() == null
-		is UnifiedCategoryFilterSelection.Custom -> isLocalOnly() && categoryId() == selection.categoryId
+		is UnifiedCategoryFilterSelection.Custom -> {
+			val categoryIds = localCategoryIdsInScope.ifEmpty { setOf(selection.categoryId) }
+			isLocalOnly() && categoryId() in categoryIds
+		}
 		is UnifiedCategoryFilterSelection.KeePassDatabaseFilter -> {
 			keepassDatabaseId() == selection.databaseId
 		}
@@ -1300,7 +1357,10 @@ internal fun buildVaultV2VisibleListState(
 	config: VaultV2VisibleListConfig,
 ): VaultV2VisibleListState {
 	val filteredItems = allItems.asSequence().filter { item ->
-		config.isArchiveView || item.matchesStorageFilter(config.storageSelection)
+		config.isArchiveView || item.matchesStorageFilter(
+			selection = config.storageSelection,
+			localCategoryIdsInScope = config.localCategoryIdsInScope,
+		)
 	}.filter { item ->
 		if (!item.matchesDisplayedTypes(config.displayedContentTypes)) return@filter false
 		if (
@@ -1350,6 +1410,43 @@ internal fun buildVaultV2VisibleListState(
 		filteredItems = filteredItems,
 		sectionedItems = sectionedItems,
 		sectionLayouts = sectionLayouts,
+	)
+}
+
+internal fun buildVaultV2DisplayListState(
+	computedItems: List<VaultV2Item>,
+	currentPasswordEntries: List<PasswordEntry>,
+	config: VaultV2VisibleListConfig,
+): VaultV2DisplayListState {
+	val allItemsRaw = mergeVaultV2ImmediatePasswordItems(
+		computedItems = computedItems,
+		currentPasswordItems = buildVaultV2PasswordItems(currentPasswordEntries),
+	)
+	return VaultV2DisplayListState(
+		allItemsRaw = allItemsRaw,
+		visibleListState = buildVaultV2VisibleListState(
+			allItems = allItemsRaw,
+			config = config,
+		),
+	)
+}
+
+internal fun buildVaultV2InitialDisplayListState(
+	currentPasswordEntries: List<PasswordEntry>,
+	config: VaultV2VisibleListConfig,
+	retainedComputedItems: List<VaultV2Item>?,
+	retainedVisibleListState: VaultV2VisibleListState?,
+): VaultV2DisplayListState {
+	if (retainedComputedItems != null && retainedVisibleListState != null) {
+		return VaultV2DisplayListState(
+			allItemsRaw = retainedComputedItems,
+			visibleListState = retainedVisibleListState,
+		)
+	}
+	return buildVaultV2DisplayListState(
+		computedItems = retainedVisibleListState?.filteredItems.orEmpty(),
+		currentPasswordEntries = currentPasswordEntries,
+		config = config,
 	)
 }
 
@@ -1457,6 +1554,8 @@ fun VaultV2Pane(
 	}
 	val selectedKeys = remember { mutableStateListOf<String>() }
 	var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+	var categoryFolderTransferRunning by remember { mutableStateOf(false) }
+	var categoryFolderTransferFailure by remember { mutableStateOf<Triple<Int, Int, String>?>(null) }
 	var pendingFolderScrollRestore by remember {
 		mutableStateOf<VaultV2FolderNavigationEntry?>(null)
 	}
@@ -1519,6 +1618,97 @@ fun VaultV2Pane(
 	val documentItems by documentViewModel.allDocuments.collectAsState()
 	val noteItems by noteViewModel.allNotes.collectAsState()
 	val passkeyItems by passkeyViewModel.allPasskeys.collectAsState()
+
+	fun transferCategoryFolder(
+		category: takagi.ru.monica.data.Category,
+		target: UnifiedMoveCategoryTarget,
+		action: UnifiedMoveAction,
+	) {
+		if (categoryFolderTransferRunning) {
+			Toast.makeText(
+				context,
+				context.getString(R.string.category_folder_transfer_running),
+				Toast.LENGTH_SHORT,
+			).show()
+			return
+		}
+		categoryFolderTransferRunning = true
+		val targetLabel = buildMoveTargetLabel(
+			context = context,
+			target = target,
+			categories = categories,
+			keepassDatabases = keepassDatabases,
+			mdbxDatabases = mdbxDatabases,
+		)
+		scope.launch {
+			try {
+				val result = executePasswordCategoryFolderTransfer(
+					context = context,
+					action = action,
+					sourceCategory = category,
+					selectedTarget = target,
+					categories = categories,
+					passwords = passwordEntries,
+					secureItems = passwordViewModel.getAllActiveSecureItemsAwait(),
+					passkeys = passkeyItems,
+					keepassDatabases = keepassDatabases,
+					mdbxDatabases = mdbxDatabases,
+					bitwardenVaults = bitwardenVaults,
+					localKeePassViewModel = localKeePassViewModel,
+					securityManager = securityManager,
+					passwordViewModel = passwordViewModel,
+					aggregateViewModels = PasswordBatchMoveViewModels(
+						totpViewModel = totpViewModel,
+						bankCardViewModel = bankCardViewModel,
+						documentViewModel = documentViewModel,
+						noteViewModel = noteViewModel,
+						passkeyViewModel = passkeyViewModel,
+					),
+					bitwardenRepository = bitwardenRepository,
+					onProgress = { processed, total ->
+						PasswordBatchTransferProgressTracker.update(
+							action = action,
+							targetLabel = targetLabel,
+							processed = processed,
+							total = total,
+						)
+					},
+				)
+				if (result.isCompleteSuccess) {
+					PasswordBatchTransferProgressTracker.complete(
+						action = action,
+						targetLabel = targetLabel,
+						successCount = result.successCount.coerceAtLeast(result.folderCount),
+					)
+					Toast.makeText(
+						context,
+						context.getString(
+							R.string.category_folder_transfer_success,
+							result.folderCount,
+							result.successCount,
+						),
+						Toast.LENGTH_SHORT,
+					).show()
+				} else {
+					PasswordBatchTransferProgressTracker.clear()
+					categoryFolderTransferFailure = Triple(
+						result.successCount,
+						result.failedCount,
+						result.failureMessages.joinToString("\n").take(1200),
+					)
+				}
+			} catch (error: Exception) {
+				PasswordBatchTransferProgressTracker.clear()
+				categoryFolderTransferFailure = Triple(
+					0,
+					0,
+					error.message ?: error::class.java.simpleName,
+				)
+			} finally {
+				categoryFolderTransferRunning = false
+			}
+		}
+	}
 	val savedCategoryFilterFlow = remember(settingsViewModel) {
 		settingsViewModel.categoryFilterStateFlow(VAULT_V2_CATEGORY_FILTER_SCOPE)
 	}
@@ -1569,6 +1759,22 @@ fun VaultV2Pane(
 		state.storageFilterIdentityKey,
 	) {
 		state.toUnifiedCategoryFilterSelection()
+	}
+	val localCategoryIdsInScope = remember(
+		storageSelection,
+		categories,
+		appSettings.passwordParentCategoryIncludesChildren,
+	) {
+		val selectedCategoryId = (storageSelection as? UnifiedCategoryFilterSelection.Custom)?.categoryId
+		if (selectedCategoryId == null) {
+			emptySet()
+		} else {
+			resolveLocalCategoryIdsInScope(
+				categories = categories,
+				selectedCategoryId = selectedCategoryId,
+				includeDescendants = appSettings.passwordParentCategoryIncludesChildren,
+			)
+		}
 	}
 	val selectedBitwardenVaultId = remember(storageSelection) {
 		when (storageSelection) {
@@ -2077,21 +2283,7 @@ fun VaultV2Pane(
 		initialValue = computedSnapshotSeed.value,
 		initialHasComputed = computedSnapshotSeed.hasSnapshot,
 	) {
-		val passwordList = visiblePasswordEntries.map { entry ->
-			val displayTitle = entry.title.ifBlank { "(Untitled)" }
-			val subtitle = entry.username.ifBlank { entry.website }.ifBlank { "-" }
-			VaultV2Item(
-				key = "password:${entry.id}",
-				type = VaultV2ItemType.PASSWORD,
-				title = displayTitle,
-				subtitle = subtitle,
-				isFavorite = entry.isFavorite,
-				sortKey = normalizedVaultV2SortKey(displayTitle),
-				searchableValues = listOf(displayTitle, entry.username, entry.website, entry.appName, entry.notes)
-					.filter { it.isNotBlank() },
-				passwordEntry = entry,
-			)
-		}
+		val passwordList = buildVaultV2PasswordItems(visiblePasswordEntries)
 		val visiblePasswordIds = visiblePasswordEntries.mapTo(hashSetOf()) { it.id }
 
 		val secondaryLists = coroutineScope {
@@ -2271,33 +2463,14 @@ fun VaultV2Pane(
 		}
 	}
 	val computedListState = computedListStateAsync.value
-	val allItemsRaw = computedListState.allItemsRaw
-	val passwordById = computedListState.passwordById
-
-	var allItems by remember(computedSnapshotKey) { mutableStateOf(allItemsRaw) }
-	var pendingAllItems by remember(computedSnapshotKey) {
-		mutableStateOf<List<VaultV2Item>?>(null)
+	val passwordById = remember(visiblePasswordEntries) {
+		visiblePasswordEntries.associateBy { it.id }
 	}
+
 	var isAutoScrollingToTop by remember { mutableStateOf(false) }
 	var lastHandledScrollToTopRequestKey by rememberSaveable { mutableStateOf(0) }
 	var lastHandledFastScrollRequestKey by remember {
 		mutableStateOf(fastScrollRequestKey)
-	}
-	LaunchedEffect(allItemsRaw) {
-		if (isAutoScrollingToTop) {
-			pendingAllItems = allItemsRaw
-		} else {
-			allItems = allItemsRaw
-		}
-	}
-
-	LaunchedEffect(isAutoScrollingToTop) {
-		if (!isAutoScrollingToTop) {
-			pendingAllItems?.let { buffered ->
-				allItems = buffered
-				pendingAllItems = null
-			}
-		}
 	}
 
 	val normalizedQuery = remember(searchQuery) { searchQuery.trim() }
@@ -2383,6 +2556,7 @@ fun VaultV2Pane(
 	}
 	val visibleSnapshotKey = remember(
 		storageSelection,
+		localCategoryIdsInScope,
 		displayedContentTypes,
 		configuredQuickFilterItems,
 		quickFilterFavorite,
@@ -2404,6 +2578,7 @@ fun VaultV2Pane(
 	) {
 		VaultV2VisibleSnapshotKey(
 			storageSelection = storageSelection,
+			localCategoryIdsInScope = localCategoryIdsInScope,
 			displayedContentTypes = displayedContentTypes,
 			configuredQuickFilterItems = configuredQuickFilterItems,
 			quickFilterStates = listOf(
@@ -2439,25 +2614,9 @@ fun VaultV2Pane(
 			)
 		}
 	}
-	val allItemsForVisibleList = remember(
-		allItems,
-		allItemsRaw,
-		pendingAllItems,
-		listState.isScrollInProgress,
-	) {
-		if (
-			allItems.isEmpty() &&
-			allItemsRaw.isNotEmpty() &&
-			pendingAllItems == null &&
-			!listState.isScrollInProgress
-		) {
-			allItemsRaw
-		} else {
-			allItems
-		}
-	}
 	val visibleListConfig = remember(
 		storageSelection,
+		localCategoryIdsInScope,
 		displayedContentTypes,
 		configuredQuickFilterItems,
 		quickFilterFavorite,
@@ -2479,6 +2638,7 @@ fun VaultV2Pane(
 	) {
 		VaultV2VisibleListConfig(
 			storageSelection = storageSelection,
+			localCategoryIdsInScope = localCategoryIdsInScope,
 			displayedContentTypes = displayedContentTypes,
 			configuredQuickFilterItems = configuredQuickFilterItems,
 			quickFilterFavorite = quickFilterFavorite,
@@ -2499,32 +2659,68 @@ fun VaultV2Pane(
 			isArchiveView = state.isArchiveView,
 		)
 	}
-	val visibleListState = remember(
-		allItemsForVisibleList,
-		visibleListConfig,
-		computedListStateAsync.hasComputed,
+	val displayListSeed = remember(
+		computedSnapshotSeed,
 		visibleSnapshotSeed,
+		visibleListConfig,
+		visiblePasswordEntries,
 	) {
-		if (
-			allItemsForVisibleList.isEmpty() &&
-			!computedListStateAsync.hasComputed &&
-			visibleSnapshotSeed.hasSnapshot
-		) {
-			visibleSnapshotSeed.value
+		buildVaultV2InitialDisplayListState(
+			currentPasswordEntries = visiblePasswordEntries,
+			config = visibleListConfig,
+			retainedComputedItems = computedSnapshotSeed.value.allItemsRaw
+				.takeIf { computedSnapshotSeed.hasSnapshot },
+			retainedVisibleListState = visibleSnapshotSeed.value
+				.takeIf { visibleSnapshotSeed.hasSnapshot },
+		)
+	}
+	val displayListStateAsync = rememberVaultV2AsyncComputedValue(
+		computationKey = Triple(
+			computedListState.allItemsRaw,
+			visiblePasswordEntries,
+			visibleListConfig,
+		),
+		initialValue = displayListSeed,
+		initialHasComputed = computedSnapshotSeed.hasSnapshot && visibleSnapshotSeed.hasSnapshot,
+	) {
+		buildVaultV2DisplayListState(
+			computedItems = computedListState.allItemsRaw,
+			currentPasswordEntries = visiblePasswordEntries,
+			config = visibleListConfig,
+		)
+	}
+	var displayedListState by remember(computedSnapshotKey) {
+		mutableStateOf(displayListStateAsync.value)
+	}
+	var pendingDisplayListState by remember(computedSnapshotKey) {
+		mutableStateOf<VaultV2DisplayListState?>(null)
+	}
+	LaunchedEffect(displayListStateAsync.value) {
+		if (isAutoScrollingToTop) {
+			pendingDisplayListState = displayListStateAsync.value
 		} else {
-			buildVaultV2VisibleListState(
-				allItems = allItemsForVisibleList,
-				config = visibleListConfig,
-			)
+			displayedListState = displayListStateAsync.value
 		}
 	}
+	LaunchedEffect(isAutoScrollingToTop) {
+		if (!isAutoScrollingToTop) {
+			pendingDisplayListState?.let { buffered ->
+				displayedListState = buffered
+				pendingDisplayListState = null
+			}
+		}
+	}
+	val allItems = displayedListState.allItemsRaw
+	val visibleListState = displayedListState.visibleListState
 	LaunchedEffect(
 		visibleSnapshotKey,
 		visibleListState,
+		displayListStateAsync.hasComputed,
 		computedListStateAsync.hasComputed,
 		selectedPasswordEntriesReady,
 	) {
 		if (
+			displayListStateAsync.hasComputed &&
 			computedListStateAsync.hasComputed &&
 			selectedPasswordEntriesReady &&
 			normalizedQuery.isBlank()
@@ -2542,7 +2738,7 @@ fun VaultV2Pane(
 	val hierarchicalContent = remember(
 		useHierarchicalLayout,
 		storageSelection,
-		allItemsForVisibleList,
+		allItems,
 		baseFilteredItems,
 		categoryMenuQuickFolderShortcuts,
 		quickFolderNodes,
@@ -2556,7 +2752,7 @@ fun VaultV2Pane(
 		if (useHierarchicalLayout) {
 			buildVaultV2HierarchicalContent(
 				storageSelection = storageSelection,
-				allItems = allItemsForVisibleList,
+				allItems = allItems,
 				filteredItems = baseFilteredItems,
 				folderShortcuts = categoryMenuQuickFolderShortcuts,
 				quickFolderNodes = quickFolderNodes,
@@ -2602,8 +2798,9 @@ fun VaultV2Pane(
 	}
 	val hasDisplayedContent = folderRows.isNotEmpty() || sectionedItems.isNotEmpty()
 	val isVaultListLoading = remember(
+		displayListStateAsync.isComputing,
 		computedListStateAsync.isComputing,
-		pendingAllItems,
+		pendingDisplayListState,
 		hasDisplayedContent,
 		normalizedQuery,
 		selectedPasswordEntriesReady,
@@ -2614,8 +2811,8 @@ fun VaultV2Pane(
 			hasVisibleSections = hasDisplayedContent,
 			hasRetainedSnapshot = visibleSnapshotSeed.hasSnapshot,
 			passwordEntriesReady = selectedPasswordEntriesReady,
-			computedListIsComputing = computedListStateAsync.isComputing,
-			hasPendingItems = pendingAllItems != null,
+			computedListIsComputing = displayListStateAsync.isComputing || computedListStateAsync.isComputing,
+			hasPendingItems = pendingDisplayListState != null,
 		)
 	}
 	var showVaultEmptyState by remember(visibleSnapshotKey) {
@@ -2965,7 +3162,24 @@ fun VaultV2Pane(
 											}
 										}
 									},
-									onRenameCategory = passwordViewModel::updateCategory,
+									onTransferCategory = ::transferCategoryFolder,
+									onRenameCategory = { category, newLeafName ->
+										runCatching {
+											planLocalCategoryRename(
+												categories = categories,
+												sourceCategory = category,
+												newLeafName = newLeafName,
+											)
+										}.onSuccess { plan ->
+											plan.updatedCategories.forEach(passwordViewModel::updateCategory)
+										}.onFailure { error ->
+											Toast.makeText(
+												context,
+												context.getString(R.string.save_failed_with_error, error.message ?: ""),
+												Toast.LENGTH_SHORT,
+											).show()
+										}
+									},
 									onDeleteCategory = passwordViewModel::deleteCategory,
 									getBitwardenFolders = passwordViewModel::getBitwardenFolders,
 									getKeePassGroups = localKeePassViewModel::getGroups,
@@ -3458,6 +3672,32 @@ fun VaultV2Pane(
 						}
 					}
 				}
+			)
+		}
+
+		categoryFolderTransferFailure?.let { (successCount, failedCount, details) ->
+			AlertDialog(
+				onDismissRequest = { categoryFolderTransferFailure = null },
+				title = { Text(stringResource(R.string.category_folder_transfer_partial_title)) },
+				text = {
+					Text(
+						if (failedCount > 0) {
+							stringResource(
+								R.string.category_folder_transfer_partial_message,
+								successCount,
+								failedCount,
+								details,
+							)
+						} else {
+							details
+						}
+					)
+				},
+				confirmButton = {
+					TextButton(onClick = { categoryFolderTransferFailure = null }) {
+						Text(stringResource(R.string.confirm))
+					}
+				},
 			)
 		}
 

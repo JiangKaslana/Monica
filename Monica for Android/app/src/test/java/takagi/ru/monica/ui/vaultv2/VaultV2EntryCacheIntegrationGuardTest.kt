@@ -19,7 +19,7 @@ class VaultV2EntryCacheIntegrationGuardTest {
         assertTrue(pane.contains("computationKey = computedSnapshotKey to computedSources"))
         assertTrue(pane.contains("state.visibleListSnapshots.seed("))
         assertTrue(pane.contains("state.visibleListSnapshots.update("))
-        assertTrue(pane.contains("initialHasComputed = computedSnapshotSeed.hasSnapshot"))
+        assertTrue(pane.contains("initialHasComputed = computedSnapshotSeed.hasSnapshot && visibleSnapshotSeed.hasSnapshot"))
         assertTrue(pane.contains("visibleSnapshotSeed.value"))
         assertTrue(
             pane.contains(
@@ -28,13 +28,14 @@ class VaultV2EntryCacheIntegrationGuardTest {
         )
         assertTrue(
             pane.contains(
-                "showVaultLoadingIndicator = sectionedItems.isEmpty() && isVaultListLoading"
+                "showVaultLoadingIndicator = !hasDisplayedContent && isVaultListLoading"
             )
         )
         assertTrue(pane.contains("shouldShowVaultV2InitialLoading("))
         assertTrue(pane.contains("hasRetainedSnapshot = visibleSnapshotSeed.hasSnapshot"))
         assertTrue(pane.contains("value = visibleListState"))
-        assertTrue(pane.contains("val allItemsForVisibleList = remember("))
+        assertTrue(pane.contains("val displayListStateAsync = rememberVaultV2AsyncComputedValue("))
+        assertTrue(pane.contains("buildVaultV2DisplayListState("))
         assertTrue(paneState.contains("VaultV2RetainedSourceSnapshotStore<"))
         assertTrue(retainedState.contains("computedListSnapshots: VaultV2RetainedSourceSnapshotStore<"))
     }
