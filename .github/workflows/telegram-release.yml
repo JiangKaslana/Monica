@@ -13,11 +13,9 @@ on:
         required: false
         type: string
 
-  # 自动触发：GitHub Release 正式发布后自动运行（与 contributor-flag.yml 保持一致，
-  # 该事件类型在本仓库已验证可稳定送达；created 事件在多数发布流程下不会独立触发）。
-  # Android.yml 已不再直接发送 Telegram，改由本工作流统一负责，确保每次发布只发送一次。
+  # 兼容直接发布和草稿转正式发布；预览版由 job 条件排除。
   release:
-    types: [released]
+    types: [published, released]
 
 permissions:
   contents: read
@@ -29,7 +27,13 @@ concurrency:
 jobs:
   send:
     name: Send existing arm64 APK
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.release.draft == false && github.event.release.prerelease == false)
+      }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Download arm64 APK from GitHub Release
         id: release_apk
@@ -46,29 +50,27 @@ jobs:
             exit 1
           fi
 
-          # 查找 arm64 APK
-          shopt -s nocasematch
-          arm64_assets=()
-          while IFS= read -r asset_name; do
-            if [[ "$asset_name" =~ arm64.*\.apk$ ]]; then
-              arm64_assets+=("$asset_name")
+          # Release 事件可能先于 Android 构建上传资源到达。最多等待 5 分钟，
+          # 并按上传时间选择最新的 arm64 APK，避免误发同一 Release 中的旧包。
+          asset_name=""
+          for attempt in $(seq 1 30); do
+            asset_name="$(
+              gh release view "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json assets \
+                --jq '[.assets[] | select(.name | test("arm64.*\\.apk$"; "i"))] | sort_by(.createdAt) | last | .name // empty'
+            )"
+            if [ -n "$asset_name" ]; then
+              break
             fi
-          done < <(
-            gh release view "$tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json assets \
-              --jq '.assets[].name'
-          )
-          shopt -u nocasematch
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error title=arm64 APK missing::Release $tag still has no arm64 APK after waiting 5 minutes."
+              exit 1
+            fi
+            echo "arm64 APK is not available yet (attempt $attempt/30); retrying in 10 seconds..."
+            sleep 10
+          done
 
-          if [ "${#arm64_assets[@]}" -eq 0 ]; then
-            echo "::error title=arm64 APK missing::Release $tag has no arm64 APK asset."
-            exit 1
-          fi
-
-          # 数组按 gh api 返回顺序排列，通常是上传时间顺序；取最后一个即最新上传的 arm64 APK，
-          # 避免同一 Release 中残留的旧版本资产被误发送。
-          asset_name="${arm64_assets[-1]}"
           rm -rf release-assets
           mkdir -p release-assets
           gh release download "$tag" \
