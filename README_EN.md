@@ -34,8 +34,6 @@
 Monica is a local password vault that aggregates **Bitwarden** and **KeePass**.
 It is built around local-first storage and helps you manage passwords, 2FA, secure notes, and sensitive attachments across Android and browser clients.
 
-This project is AI-assisted. Please build a habit of backing up regularly to avoid data loss. Data privacy is priceless, so do not keep all of your data in a single app.
-
 Website: https://monica-pass.github.io/MonicaDocs/
 
 > Monica for Windows is archived. Historical code: [Monica-for-Windows](https://github.com/JoyinJoester/Monica-for-Windows)

@@ -34,8 +34,6 @@
 Monica は **Bitwarden** と **KeePass** を統合するローカルパスワード保管庫です。
 ローカル優先の保存を中心に、Android とブラウザでパスワード、2FA、セキュアノート、添付ファイルを一元管理できます。
 
-このプロジェクトは AI を活用して作られています。データ損失を防ぐため、定期的なバックアップを習慣にしてください。データのプライバシーは何にも代えがたいので、重要なデータを1つのアプリだけにまとめないようにしてください。
-
 サイト: https://monica-pass.github.io/MonicaDocs/
 
 > Monica for Windows はアーカイブ済みです。過去コード: [Monica-for-Windows](https://github.com/JoyinJoester/Monica-for-Windows)
