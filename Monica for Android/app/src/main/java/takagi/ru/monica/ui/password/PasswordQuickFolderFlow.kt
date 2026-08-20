@@ -48,8 +48,12 @@ internal fun PasswordQuickFolderFlow(
             MonicaExpressiveFilterChip(
                 selected = shortcut.targetFilter == params.currentFilter,
                 onClick = {
-                    if (params.categoryEditMode && editableCategory != null) {
-                        params.onRequestCategoryAction(editableCategory)
+                    if (params.categoryEditMode && !shortcut.isBack) {
+                        // Never fall back to navigation while editing. The
+                        // category list can briefly lag behind the shortcut
+                        // snapshot; navigating in that window made edit mode
+                        // indistinguishable from normal browsing.
+                        editableCategory?.let(params.onRequestCategoryAction)
                     } else {
                         params.onSelectFilter(shortcut.targetFilter)
                     }

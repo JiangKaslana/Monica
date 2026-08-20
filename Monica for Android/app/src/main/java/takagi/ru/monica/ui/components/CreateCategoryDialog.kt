@@ -95,6 +95,7 @@ internal fun CreateCategoryDialog(
     initialLocalParentPath: String? = null,
     initialTarget: CreateDialogTarget? = null,
     initialKeePassDbId: Long? = null,
+    initialKeePassParentPath: String? = null,
     initialMdbxDbId: Long? = null,
     initialMdbxParentFolderId: String? = null,
     initialBitwardenVaultId: Long? = null
@@ -124,11 +125,11 @@ internal fun CreateCategoryDialog(
         stiffness = Spring.StiffnessMediumLow
     )
 
-    LaunchedEffect(visible, canCreateLocal, canCreateBitwarden, canCreateKeePass, canCreateMdbx, initialLocalParentPath, initialTarget, initialKeePassDbId, initialMdbxDbId, initialMdbxParentFolderId, initialBitwardenVaultId) {
+    LaunchedEffect(visible, canCreateLocal, canCreateBitwarden, canCreateKeePass, canCreateMdbx, initialLocalParentPath, initialTarget, initialKeePassDbId, initialKeePassParentPath, initialMdbxDbId, initialMdbxParentFolderId, initialBitwardenVaultId) {
         if (!visible) return@LaunchedEffect
         createNameInput = ""
         createLocalParentPath = initialLocalParentPath
-        createKeePassParentPath = null
+        createKeePassParentPath = initialKeePassParentPath
         createMdbxParentFolderId = initialMdbxParentFolderId
         createOptionsExpanded = true
         createTarget = when {

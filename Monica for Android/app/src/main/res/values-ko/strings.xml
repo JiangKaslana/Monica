@@ -3859,8 +3859,6 @@
     <string name="password_list_quick_filters_content_desc">각 빠른 필터 항목을 전환하고 드래그하여 재정렬합니다.</string>
     <string name="password_list_category_quick_filters_switch_title">범주 빠른 필터</string>
     <string name="password_list_category_quick_filters_switch_desc">빠른 필터 아래에 폴더 칩을 표시합니다. 위로 이동하거나 삭제하려면 다시 탭하세요.</string>
-    <string name="password_parent_category_includes_children_title">하위 범주 항목 포함</string>
-    <string name="password_parent_category_includes_children_desc">상위 범주에서 모든 하위 범주의 항목도 함께 표시합니다. 비밀번호와 보관소 페이지에 적용됩니다.</string>
     <string name="password_list_quick_folders_switch_title">빠른 폴더 전환</string>
     <string name="password_list_quick_folders_switch_desc">비밀번호 목록 위에 폴더 카드를 표시합니다.</string>
     <string name="password_list_quick_folders_style_title">빠른 폴더 스타일</string>

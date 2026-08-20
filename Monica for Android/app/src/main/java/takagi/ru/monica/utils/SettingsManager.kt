@@ -73,7 +73,6 @@ data class PageAdjustmentSettingsSnapshot(
     val passwordListQuickFiltersEnabled: Boolean = false,
     val passwordListQuickFilterItems: List<String> = emptyList(),
     val passwordListCategoryQuickFiltersEnabled: Boolean = false,
-    val passwordParentCategoryIncludesChildren: Boolean = false,
     val passwordListQuickFoldersEnabled: Boolean = false,
     val passwordListQuickFolderStyle: String = takagi.ru.monica.data.PasswordListQuickFolderStyle.CLASSIC.name,
     val passwordListQuickFolderPathBannerEnabled: Boolean = false,
@@ -229,8 +228,6 @@ class SettingsManager(private val context: Context) {
         private val PASSWORD_LIST_QUICK_FILTERS_ENABLED_KEY = booleanPreferencesKey("password_list_quick_filters_enabled") // 密码列表快捷筛选开关
         private val PASSWORD_LIST_QUICK_FILTER_ITEMS_KEY = stringPreferencesKey("password_list_quick_filter_items") // 密码列表快捷筛选显示内容
         private val PASSWORD_LIST_CATEGORY_QUICK_FILTERS_ENABLED_KEY = booleanPreferencesKey("password_list_category_quick_filters_enabled") // 密码列表分类快捷筛选开关
-        private val PASSWORD_PARENT_CATEGORY_INCLUDES_CHILDREN_KEY =
-            booleanPreferencesKey("password_parent_category_includes_children")
         private val PASSWORD_LIST_QUICK_FOLDERS_ENABLED_KEY = booleanPreferencesKey("password_list_quick_folders_enabled") // 密码列表快捷文件夹开关
         private val PASSWORD_LIST_QUICK_FOLDER_STYLE_KEY = stringPreferencesKey("password_list_quick_folder_style") // 密码列表快捷文件夹展示样式
         private val PASSWORD_LIST_QUICK_FOLDER_PATH_BANNER_ENABLED_KEY = booleanPreferencesKey("password_list_quick_folder_path_banner_enabled") // 密码列表路径横幅开关
@@ -645,8 +642,6 @@ class SettingsManager(private val context: Context) {
             passwordListQuickFilterItems = parsedQuickFilterItems,
             passwordListCategoryQuickFiltersEnabled =
                 preferences[PASSWORD_LIST_CATEGORY_QUICK_FILTERS_ENABLED_KEY] ?: false,
-            passwordParentCategoryIncludesChildren =
-                preferences[PASSWORD_PARENT_CATEGORY_INCLUDES_CHILDREN_KEY] ?: false,
             passwordListQuickFoldersEnabled = preferences[PASSWORD_LIST_QUICK_FOLDERS_ENABLED_KEY] ?: false,
             passwordListQuickFolderStyle = runCatching {
                 PasswordListQuickFolderStyle.valueOf(
@@ -1136,12 +1131,6 @@ class SettingsManager(private val context: Context) {
         }
     }
 
-    suspend fun updatePasswordParentCategoryIncludesChildren(enabled: Boolean) {
-        dataStore.edit { preferences ->
-            preferences[PASSWORD_PARENT_CATEGORY_INCLUDES_CHILDREN_KEY] = enabled
-        }
-    }
-
     suspend fun updatePasswordListQuickFoldersEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PASSWORD_LIST_QUICK_FOLDERS_ENABLED_KEY] = enabled
@@ -1272,7 +1261,6 @@ class SettingsManager(private val context: Context) {
             passwordListQuickFiltersEnabled = settings.passwordListQuickFiltersEnabled,
             passwordListQuickFilterItems = settings.passwordListQuickFilterItems.map { it.name },
             passwordListCategoryQuickFiltersEnabled = settings.passwordListCategoryQuickFiltersEnabled,
-            passwordParentCategoryIncludesChildren = settings.passwordParentCategoryIncludesChildren,
             passwordListQuickFoldersEnabled = settings.passwordListQuickFoldersEnabled,
             passwordListQuickFolderStyle = settings.passwordListQuickFolderStyle.name,
             passwordListQuickFolderPathBannerEnabled = settings.passwordListQuickFolderPathBannerEnabled,
@@ -1439,8 +1427,6 @@ class SettingsManager(private val context: Context) {
                 parsedQuickFilterItems.joinToString(",") { it.name }
             preferences[PASSWORD_LIST_CATEGORY_QUICK_FILTERS_ENABLED_KEY] =
                 snapshot.passwordListCategoryQuickFiltersEnabled
-            preferences[PASSWORD_PARENT_CATEGORY_INCLUDES_CHILDREN_KEY] =
-                snapshot.passwordParentCategoryIncludesChildren
             preferences[PASSWORD_LIST_QUICK_FOLDERS_ENABLED_KEY] = snapshot.passwordListQuickFoldersEnabled
             preferences[PASSWORD_LIST_QUICK_FOLDER_STYLE_KEY] = parsedQuickFolderStyle.name
             preferences[PASSWORD_LIST_QUICK_FOLDER_PATH_BANNER_ENABLED_KEY] =

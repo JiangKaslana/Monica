@@ -66,31 +66,6 @@ class WebDavSettingsBackupRegressionGuardTest {
     }
 
     @Test
-    fun webDavPageSettingsKeepParentCategoryScopePreference() {
-        val source = projectFile("app/src/main/java/takagi/ru/monica/utils/WebDavHelper.kt")
-        val backupModel = source.substringAfter("private data class PageAdjustmentSettingsBackupEntry(")
-            .substringBefore("private data class BitwardenVaultBackupEntry(")
-        val snapshotMapping = source.substringAfter(
-            "private fun PageAdjustmentSettingsSnapshot.toBackupEntry()"
-        ).substringBefore("private suspend fun writePortableAppSettingsBackup(")
-
-        assertTrue(
-            backupModel.contains("val passwordParentCategoryIncludesChildren: Boolean = false")
-        )
-        assertTrue(
-            snapshotMapping.contains(
-                "passwordParentCategoryIncludesChildren = passwordParentCategoryIncludesChildren"
-            )
-        )
-        assertTrue(
-            source.contains(
-                "passwordParentCategoryIncludesChildren =\n" +
-                    "                                                    pageAdjustmentBackup.passwordParentCategoryIncludesChildren"
-            )
-        )
-    }
-
-    @Test
     fun restoredPlusPreferencesStayInactiveUntilPlusIsActivatedLocally() {
         val steamSource = projectFile("app/src/main/java/takagi/ru/monica/steam/ui/SteamScreen.kt")
         val totpSource = projectFile("app/src/main/java/takagi/ru/monica/ui/components/TotpCodeCard.kt")

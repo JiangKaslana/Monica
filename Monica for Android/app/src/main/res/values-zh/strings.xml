@@ -2663,6 +2663,9 @@
     <string name="v2_create_folder">创建文件夹</string>
     <string name="v2_edit_folder">编辑文件夹</string>
     <string name="v2_delete_folder">删除文件夹</string>
+    <string name="vault_v2_folder_action_hint">选择文件夹操作。移动或复制会保留其中的子文件夹和项目。</string>
+    <string name="move_copy">移动或复制</string>
+    <string name="vault_v2_folder_select_contents">选择文件夹内容</string>
     <string name="v2_delete_folder_confirm">确定要删除文件夹 \"%1$s\" 吗？此操作无法撤销。</string>
     <string name="v2_folder_name">文件夹名称</string>
     <string name="v2_not_synced">未同步</string>
@@ -3674,8 +3677,6 @@
     <string name="password_list_quick_filters_content_desc">可单独开关筛选项，并拖拽调整显示顺序。</string>
     <string name="password_list_category_quick_filters_switch_title">分类快捷筛选</string>
     <string name="password_list_category_quick_filters_switch_desc">开启后会把密码列表顶部快捷筛选扩展为两行，第二行直接显示分类文件夹。Monica 文件夹支持返回上一级目录，Bitwarden 文件夹再次点击当前选中项即可取消选中。</string>
-    <string name="password_parent_category_includes_children_title">父分类包含子分类内容</string>
-    <string name="password_parent_category_includes_children_desc">开启后，进入父分类时会同时显示所有子分类中的内容，适用于“密码”和“密码库”页面。</string>
     <string name="password_list_quick_folders_switch_title">快捷文件夹开关</string>
     <string name="password_list_quick_folders_switch_desc">开启后在密码列表顶部显示快捷文件夹卡片，可快速返回上一级目录或进入子目录。</string>
     <string name="password_list_quick_folders_style_title">快捷文件夹展示样式</string>

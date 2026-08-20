@@ -62,7 +62,6 @@ import takagi.ru.monica.utils.KeePassUriPermissionState
 import takagi.ru.monica.utils.keePassUriPermissionState
 import takagi.ru.monica.utils.KeePassSecureItemData
 import takagi.ru.monica.utils.buildKeePassPathKey
-import takagi.ru.monica.utils.resolveLocalCategoryIdsInScope
 import takagi.ru.monica.data.model.StorageTarget
 import takagi.ru.monica.data.model.applyToPasswordEntry
 import takagi.ru.monica.data.model.toStorageTarget
@@ -281,8 +280,6 @@ private data class KeePassCustomFieldFingerprint(
 private data class PasswordEntriesFilterRequest(
     val query: String,
     val filter: CategoryFilter,
-    val categories: List<Category>,
-    val includeDescendantCategories: Boolean,
 )
 private const val PASSWORD_SCROLL_DEBUG_LOGS_ENABLED = false
 
@@ -451,11 +448,6 @@ class PasswordViewModel(
     private val smartDeduplicationEnabled = settingsManager?.settingsFlow?.map { 
         it.smartDeduplicationEnabled 
     }?.stateIn(viewModelScope, SharingStarted.Eagerly, true) ?: kotlinx.coroutines.flow.MutableStateFlow(true)
-    private val passwordParentCategoryIncludesChildren = settingsManager?.settingsFlow?.map {
-        it.passwordParentCategoryIncludesChildren
-    }?.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-        ?: kotlinx.coroutines.flow.MutableStateFlow(false)
-    
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
     
@@ -618,27 +610,18 @@ class PasswordViewModel(
     private val passwordEntriesSource: Flow<List<PasswordEntry>> = combine(
         debouncedSearchQuery,
         _categoryFilter,
-        categoriesSource,
-        passwordParentCategoryIncludesChildren,
-    ) { query, filter, categoryList, includeDescendants ->
+    ) { query, filter ->
         PasswordEntriesFilterRequest(
             query = query,
             filter = filter,
-            categories = categoryList,
-            includeDescendantCategories = includeDescendants,
         )
     }
         .distinctUntilChanged()
         .flatMapLatest { request ->
             val query = request.query
             val filter = request.filter
-            val localCategoryIdsInScope = (filter as? CategoryFilter.Custom)?.let { customFilter ->
-                resolveLocalCategoryIdsInScope(
-                    categories = request.categories,
-                    selectedCategoryId = customFilter.categoryId,
-                    includeDescendants = request.includeDescendantCategories,
-                )
-            }.orEmpty()
+            val localCategoryIdsInScope =
+                (filter as? CategoryFilter.Custom)?.categoryId?.let(::setOf).orEmpty()
             val baseFlow: Flow<List<PasswordEntry>> = if (query.isNotBlank()) {
                 // Extended search: query + custom fields, then apply current category filter in-memory.
                 val searchFlow = repository.searchPasswordEntries(query).map { baseResults ->
@@ -2371,6 +2354,20 @@ class PasswordViewModel(
     fun updateCategory(category: Category) {
         viewModelScope.launch {
             repository.updateCategory(category)
+        }
+    }
+
+    fun deleteMdbxFolder(
+        databaseId: Long,
+        folderId: String,
+        onResult: (Result<Unit>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { repository.deleteMdbxFolder(databaseId, folderId) }
+            }
+            if (result.isSuccess) refreshMdbxFolders(databaseId)
+            onResult(result)
         }
     }
 

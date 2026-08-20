@@ -3211,6 +3211,9 @@ fun SimpleMainScreen(
         onBankCardAddOpen = handleBankCardAddOpen,
         onWalletAddOpen = handleWalletAddOpen,
         onNavigateToWalletAdd = onNavigateToWalletAdd,
+        onCreateVaultFolder = vaultV2PaneState::requestCreateFolderDialog,
+        allowVaultFolderCreation = currentTab == BottomNavItem.VaultV2 &&
+            vaultV2PaneState.storageFilterType != takagi.ru.monica.ui.vaultv2.VAULT_V2_STORAGE_FILTER_ALL,
         passwordPageAggregateEnabled =
             if (currentTab == BottomNavItem.VaultV2) true else appSettings.passwordPageAggregateEnabled,
         passwordNewItemDefaults = passwordNewItemDefaults,

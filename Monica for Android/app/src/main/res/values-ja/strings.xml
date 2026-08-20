@@ -3280,8 +3280,6 @@
     <string name="password_list_quick_filters_content_desc">各クイック フィルター項目を切り替え、ドラッグして並べ替えます。</string>
     <string name="password_list_category_quick_filters_switch_title">カテゴリクイックフィルター</string>
     <string name="password_list_category_quick_filters_switch_desc">クイックフィルターの下にフォルダーチップを表示します。もう一度タップすると、上に進むかクリアされます。</string>
-    <string name="password_parent_category_includes_children_title">サブカテゴリの項目を含める</string>
-    <string name="password_parent_category_includes_children_desc">親カテゴリで、すべてのサブカテゴリの項目も表示します。パスワードと保管庫に適用されます。</string>
     <string name="password_list_quick_folders_switch_title">クイックフォルダースイッチ</string>
     <string name="password_list_quick_folders_switch_desc">パスワードリストの上にフォルダーカードを表示します。</string>
     <string name="password_list_quick_folders_style_title">クイックフォルダースタイル</string>

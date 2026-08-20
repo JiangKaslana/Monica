@@ -102,6 +102,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import takagi.ru.monica.R
@@ -1613,6 +1614,17 @@ fun VaultV2Pane(
 	val archivedPasswordsReady by passwordViewModel.archivedPasswordsForUiReady.collectAsState()
 	val categories by passwordViewModel.categories.collectAsState()
 	var showCreateCategoryDialog by remember { mutableStateOf(false) }
+	var selectedFolderKey by remember { mutableStateOf<String?>(null) }
+	var folderActionCategory by remember { mutableStateOf<Category?>(null) }
+	var folderActionRow by remember { mutableStateOf<VaultV2FolderRowModel?>(null) }
+	var showFolderActionDialog by remember { mutableStateOf(false) }
+	var showFolderMoveSheet by remember { mutableStateOf(false) }
+	var showFolderDeleteConfirmDialog by remember { mutableStateOf(false) }
+	LaunchedEffect(state.hasPendingCreateFolderDialogRequest) {
+		if (state.consumeCreateFolderDialogRequest()) {
+			showCreateCategoryDialog = true
+		}
+	}
 	val totpItems by totpViewModel.allTotpItems.collectAsState()
 	val bankCardItems by bankCardViewModel.allCards.collectAsState()
 	val documentItems by documentViewModel.allDocuments.collectAsState()
@@ -1711,21 +1723,19 @@ fun VaultV2Pane(
 	}
 	val savedCategoryFilterFlow = remember(settingsViewModel) {
 		settingsViewModel.categoryFilterStateFlow(VAULT_V2_CATEGORY_FILTER_SCOPE)
+			.map<SavedCategoryFilterState, SavedCategoryFilterState?> { it }
 	}
-	val savedCategoryFilterState by savedCategoryFilterFlow.collectAsState(initial = SavedCategoryFilterState())
+	val savedCategoryFilterState by savedCategoryFilterFlow.collectAsState(initial = null)
 	val fastScrollRequestKey = state.fastScrollRequestKey
 	val fastScrollProgress = state.fastScrollProgress
 	LaunchedEffect(
 		state,
 		state.hasInitializedStorageFilter,
-		savedCategoryFilterState.type,
-		savedCategoryFilterState.primaryId,
-		savedCategoryFilterState.secondaryId,
-		savedCategoryFilterState.text,
-		savedCategoryFilterState.groupUuid,
+		savedCategoryFilterState,
 	) {
 		if (state.hasInitializedStorageFilter) return@LaunchedEffect
-		val restoredFilter = savedCategoryFilterState.toVaultV2SavedStorageFilter()
+		val persistedFilter = savedCategoryFilterState ?: return@LaunchedEffect
+		val restoredFilter = persistedFilter.toVaultV2SavedStorageFilter()
 		state.updateStorageFilter(
 			type = restoredFilter.type,
 			primaryId = restoredFilter.primaryId,
@@ -1763,7 +1773,6 @@ fun VaultV2Pane(
 	val localCategoryIdsInScope = remember(
 		storageSelection,
 		categories,
-		appSettings.passwordParentCategoryIncludesChildren,
 	) {
 		val selectedCategoryId = (storageSelection as? UnifiedCategoryFilterSelection.Custom)?.categoryId
 		if (selectedCategoryId == null) {
@@ -1772,7 +1781,9 @@ fun VaultV2Pane(
 			resolveLocalCategoryIdsInScope(
 				categories = categories,
 				selectedCategoryId = selectedCategoryId,
-				includeDescendants = appSettings.passwordParentCategoryIncludesChildren,
+				// Password Library follows folder navigation semantics: child-folder
+				// content appears only after entering that child folder.
+				includeDescendants = false,
 			)
 		}
 	}
@@ -3415,8 +3426,9 @@ fun VaultV2Pane(
 				currentFilter = categoryMenuFilter,
 				onNavigateFilter = navigateCategoryFilter,
 				folderRows = folderRows,
+				selectedFolderKey = selectedFolderKey,
 				showCurrentFolderHeader = useHierarchicalLayout && sectionedItems.isNotEmpty(),
-				onOpenFolder = { filter ->
+					onOpenFolder = { filter ->
 					filter.toUnifiedCategoryFilterSelectionOrNull()?.let { selection ->
 						state.pushFolderNavigationPosition(
 							index = listState.firstVisibleItemIndex,
@@ -3427,6 +3439,21 @@ fun VaultV2Pane(
 						state.updateStorageFilter(selection)
 						state.requestScrollToTop()
 					}
+				},
+				onLongClickFolder = { row ->
+					selectedFolderKey = row.key
+					folderActionRow = row
+					folderActionCategory = (row.targetFilter as? CategoryFilter.Custom)?.categoryId
+						?.let { id -> categories.firstOrNull { it.id == id } }
+					val folderItems = vaultV2ItemsInFolder(
+						targetFilter = row.targetFilter,
+						allItems = allItems,
+						quickFolderNodes = quickFolderNodes,
+						selectedMdbxFolders = selectedMdbxFolders,
+					)
+					selectedKeys.clear()
+					selectedKeys.addAll(folderItems.map(VaultV2Item::key))
+					showFolderActionDialog = row.kind == VaultV2FolderRowKind.FOLDER
 				},
 				sections = sectionedItems,
 				showLoadingIndicator = showVaultLoadingIndicator,
@@ -3701,6 +3728,110 @@ fun VaultV2Pane(
 			)
 		}
 
+		if (showFolderActionDialog) {
+			val category = folderActionCategory
+			val row = folderActionRow
+			val canDeleteFolder = category != null || row?.targetFilter is CategoryFilter.KeePassGroupFilter ||
+				row?.targetFilter is CategoryFilter.MdbxFolderFilter ||
+				row?.targetFilter is CategoryFilter.BitwardenFolderFilter
+			AlertDialog(
+				onDismissRequest = {
+					showFolderActionDialog = false
+					selectedFolderKey = null
+				},
+				title = { Text(row?.title ?: category?.name ?: stringResource(R.string.v2_create_folder)) },
+				text = { Text(stringResource(R.string.vault_v2_folder_action_hint)) },
+				confirmButton = {
+					TextButton(
+						onClick = {
+							showFolderActionDialog = false
+							if (category != null) showFolderMoveSheet = true else selectedFolderKey = null
+						}
+					) { Text(stringResource(if (category != null) R.string.move_copy else R.string.vault_v2_folder_select_contents)) }
+				},
+				dismissButton = {
+					Row {
+						TextButton(
+							enabled = canDeleteFolder,
+							onClick = {
+								showFolderActionDialog = false
+								showFolderDeleteConfirmDialog = true
+							}
+						) { Text(stringResource(R.string.v2_delete_folder)) }
+						TextButton(onClick = {
+							showFolderActionDialog = false
+							selectedFolderKey = null
+						}) { Text(stringResource(R.string.cancel)) }
+					}
+				}
+			)
+		}
+
+		if (showFolderDeleteConfirmDialog) {
+			val row = folderActionRow
+			AlertDialog(
+				onDismissRequest = { showFolderDeleteConfirmDialog = false },
+				title = { Text(stringResource(R.string.v2_delete_folder)) },
+				text = { Text(stringResource(R.string.v2_delete_folder_confirm, row?.title.orEmpty())) },
+				confirmButton = {
+					TextButton(onClick = {
+						when (val filter = row?.targetFilter) {
+							is CategoryFilter.Custom -> folderActionCategory?.let(passwordViewModel::deleteCategory)
+							is CategoryFilter.KeePassGroupFilter -> localKeePassViewModel.deleteGroup(
+								databaseId = filter.databaseId,
+								groupPath = filter.groupPath,
+							)
+							is CategoryFilter.MdbxFolderFilter -> passwordViewModel.deleteMdbxFolder(
+								databaseId = filter.databaseId,
+								folderId = filter.folderId,
+							)
+							is CategoryFilter.BitwardenFolderFilter -> scope.launch {
+								bitwardenRepository.deleteFolder(filter.vaultId, filter.folderId)
+							}
+							else -> Unit
+						}
+						showFolderDeleteConfirmDialog = false
+						folderActionRow = null
+						folderActionCategory = null
+						selectedFolderKey = null
+						selectedKeys.clear()
+					}) { Text(stringResource(R.string.v2_delete_folder)) }
+				},
+				dismissButton = {
+					TextButton(onClick = { showFolderDeleteConfirmDialog = false }) {
+						Text(stringResource(R.string.cancel))
+					}
+				},
+			)
+		}
+
+		UnifiedMoveToCategoryBottomSheet(
+			visible = showFolderMoveSheet && folderActionCategory != null,
+			onDismiss = {
+				showFolderMoveSheet = false
+				folderActionCategory = null
+				selectedFolderKey = null
+			},
+			initialSource = takagi.ru.monica.ui.components.UnifiedMoveInitialSource.MonicaLocal,
+			categories = categories,
+			keepassDatabases = keepassDatabases,
+			mdbxDatabases = mdbxDatabases,
+			bitwardenVaults = bitwardenVaults,
+			getBitwardenFolders = passwordViewModel::getBitwardenFolders,
+			getKeePassGroups = localKeePassViewModel::getGroups,
+			getMdbxFolders = passwordViewModel::getMdbxFolders,
+			allowCopy = true,
+			allowMove = true,
+			onTargetSelected = { target, action ->
+				folderActionCategory?.let { category ->
+					transferCategoryFolder(category, target, action)
+				}
+				showFolderMoveSheet = false
+				folderActionCategory = null
+				selectedFolderKey = null
+			}
+		)
+
 		if (selectedCount > 0) {
 			var showVaultMoveSheet by remember { mutableStateOf(false) }
 
@@ -3837,10 +3968,10 @@ fun VaultV2Pane(
 				getBitwardenFolders = passwordViewModel::getBitwardenFolders,
 				getKeePassGroups = localKeePassViewModel::getGroups,
 				getMdbxFolders = passwordViewModel::getMdbxFolders,
-				allowCopy = false,
+				allowCopy = true,
 				allowMove = true,
 				allowArchiveTarget = false,
-				onTargetSelected = { target, _ ->
+				onTargetSelected = { target, requestedAction ->
 					showVaultMoveSheet = false
 					val movePlan = buildVaultV2BatchMovePlan(selectedItems.toList())
 					if (movePlan.totalCount <= 0) {
@@ -3854,14 +3985,14 @@ fun VaultV2Pane(
 							mdbxDatabases = mdbxDatabases,
 						)
 						val actionResolution = resolvePasswordBatchMoveAction(
-							requestedAction = UnifiedMoveAction.MOVE,
+							requestedAction = requestedAction,
 							selectedEntries = movePlan.passwordEntries,
 							target = target,
 						)
 						val effectiveAction = if (
 							actionResolution.effectiveAction == UnifiedMoveAction.COPY ||
 							shouldForceSupplementaryKeePassCopy(
-								requestedAction = UnifiedMoveAction.MOVE,
+								requestedAction = requestedAction,
 								hasKeePassOwnedItems = movePlan.aggregateSelection.hasKeePassOwned,
 								target = target,
 							)
@@ -4043,6 +4174,7 @@ fun VaultV2Pane(
 			initialLocalParentPath = initialLocalParentPath,
 			initialTarget = initialDialogTarget,
 			initialKeePassDbId = initialDialogKeePassDbId,
+			initialKeePassParentPath = (currentSelection as? UnifiedCategoryFilterSelection.KeePassGroupFilter)?.groupPath,
 			initialMdbxDbId = selectedMdbxDatabaseId,
 			initialBitwardenVaultId = initialDialogBitwardenVaultId
 		)
@@ -4061,8 +4193,10 @@ private fun VaultV2List(
 	currentFilter: CategoryFilter,
 	onNavigateFilter: (CategoryFilter) -> Unit,
 	folderRows: List<VaultV2FolderRowModel>,
+	selectedFolderKey: String?,
 	showCurrentFolderHeader: Boolean,
 	onOpenFolder: (CategoryFilter) -> Unit,
+	onLongClickFolder: (VaultV2FolderRowModel) -> Unit,
 	sections: List<Pair<String, List<VaultV2Item>>>,
 	showLoadingIndicator: Boolean,
 	showEmptyState: Boolean,
@@ -4118,6 +4252,8 @@ private fun VaultV2List(
 			VaultV2FolderRow(
 				row = folderRow,
 				onClick = { onOpenFolder(folderRow.targetFilter) },
+				onLongClick = { onLongClickFolder(folderRow) },
+				selected = selectedFolderKey == folderRow.key,
 			)
 		}
 

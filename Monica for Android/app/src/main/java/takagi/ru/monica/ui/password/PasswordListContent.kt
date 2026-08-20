@@ -240,7 +240,6 @@ import takagi.ru.monica.ui.components.rememberUnifiedCategoryFilterChipMenuWidth
 import takagi.ru.monica.ui.common.dialog.DeleteConfirmDialog
 import takagi.ru.monica.ui.common.layout.DetailPane
 import takagi.ru.monica.ui.common.layout.InspectorRow
-import takagi.ru.monica.utils.resolveLocalCategoryIdsInScope
 import takagi.ru.monica.utils.planLocalCategoryRename
 import takagi.ru.monica.ui.common.layout.ListPane
 import takagi.ru.monica.ui.common.pull.PullActionVisualState
@@ -372,19 +371,9 @@ fun PasswordListContent(
     val appSettings by settingsViewModel.settings.collectAsState()
     val localCategoryIdsInScope = remember(
         currentFilter,
-        categories,
-        appSettings.passwordParentCategoryIncludesChildren,
     ) {
         val selectedCategoryId = (currentFilter as? CategoryFilter.Custom)?.categoryId
-        if (selectedCategoryId == null) {
-            emptySet()
-        } else {
-            resolveLocalCategoryIdsInScope(
-                categories = categories,
-                selectedCategoryId = selectedCategoryId,
-                includeDescendants = appSettings.passwordParentCategoryIncludesChildren,
-            )
-        }
+        selectedCategoryId?.let(::setOf).orEmpty()
     }
     val mdbxDatabasesLoaded by remember(mdbxViewModel) {
         mdbxViewModel?.allDatabasesLoaded ?: kotlinx.coroutines.flow.flowOf(true)
@@ -1340,10 +1329,7 @@ fun PasswordListContent(
             config = groupingConfig,
         )
     }
-    val retainedGroupingSeed = remember(
-        groupingSnapshotKey,
-        hasManualStackMetadataForCurrentInputs,
-    ) {
+    val initialRetainedGroupingSeed = remember {
         if (hasManualStackMetadataForCurrentInputs) {
             aggregateRetainedStateViewModel.retainedState.groupingSeed(groupingSnapshotKey)
         } else {
@@ -1353,34 +1339,39 @@ fun PasswordListContent(
             )
         }
     }
-    var groupedPasswords by remember(groupingSnapshotKey, hasManualStackMetadataForCurrentInputs) {
-        mutableStateOf(retainedGroupingSeed.groups)
+    // Keep the last complete grouping visible while a new folder is being calculated. Resetting
+    // this state with groupingSnapshotKey causes a full-screen loading flash on every folder hop.
+    var groupedPasswords by remember {
+        mutableStateOf(initialRetainedGroupingSeed.groups)
     }
-    var hasGroupedPasswordsReadyForCurrentInputs by remember(
-        groupingSnapshotKey,
-        hasManualStackMetadataForCurrentInputs,
-    ) {
-        mutableStateOf(retainedGroupingSeed.hasSnapshot)
+    var completedGroupingSnapshotKey by remember {
+        mutableStateOf(
+            if (initialRetainedGroupingSeed.hasSnapshot) groupingSnapshotKey else null
+        )
     }
+    val hasGroupedPasswordsReadyForCurrentInputs =
+        hasManualStackMetadataForCurrentInputs &&
+            completedGroupingSnapshotKey == groupingSnapshotKey
     LaunchedEffect(groupingSnapshotKey, hasManualStackMetadataForCurrentInputs) {
         val generation = aggregateRetainedStateViewModel.retainedState.currentGeneration()
         val sourceEntries = visiblePasswordsForAutoGrouping
         if (!hasManualStackMetadataForCurrentInputs) {
-            hasGroupedPasswordsReadyForCurrentInputs = false
             return@LaunchedEffect
+        }
+        val retainedSeed = aggregateRetainedStateViewModel.retainedState.groupingSeed(groupingSnapshotKey)
+        if (retainedSeed.hasSnapshot) {
+            groupedPasswords = retainedSeed.groups
+            completedGroupingSnapshotKey = groupingSnapshotKey
         }
         if (sourceEntries.isEmpty()) {
             groupedPasswords = emptyMap()
-            hasGroupedPasswordsReadyForCurrentInputs = true
+            completedGroupingSnapshotKey = groupingSnapshotKey
             aggregateRetainedStateViewModel.retainedState.updateGroupingIfCurrent(
                 expectedGeneration = generation,
                 key = groupingSnapshotKey,
                 groups = emptyMap(),
             )
             return@LaunchedEffect
-        }
-        if (!retainedGroupingSeed.hasSnapshot) {
-            hasGroupedPasswordsReadyForCurrentInputs = false
         }
         val computedGroups = withContext(Dispatchers.Default) {
             buildGroupedPasswordsForEntries(
@@ -1389,7 +1380,7 @@ fun PasswordListContent(
             )
         }
         groupedPasswords = computedGroups
-        hasGroupedPasswordsReadyForCurrentInputs = true
+        completedGroupingSnapshotKey = groupingSnapshotKey
         aggregateRetainedStateViewModel.retainedState.updateGroupingIfCurrent(
             expectedGeneration = generation,
             key = groupingSnapshotKey,

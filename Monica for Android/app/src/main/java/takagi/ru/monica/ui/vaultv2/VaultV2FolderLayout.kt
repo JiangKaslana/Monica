@@ -1,6 +1,8 @@
 package takagi.ru.monica.ui.vaultv2
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -173,30 +175,43 @@ internal fun countVaultV2FolderDescendants(
     quickFolderNodes: List<PasswordQuickFolderNode>,
     selectedMdbxFolders: List<MdbxStoredFolderEntry>,
 ): Int {
+    return vaultV2ItemsInFolder(targetFilter, allItems, quickFolderNodes, selectedMdbxFolders).size
+}
+
+internal fun vaultV2ItemsInFolder(
+    targetFilter: CategoryFilter,
+    allItems: List<VaultV2Item>,
+    quickFolderNodes: List<PasswordQuickFolderNode>,
+    selectedMdbxFolders: List<MdbxStoredFolderEntry>,
+): List<VaultV2Item> {
     return when (targetFilter) {
+        CategoryFilter.Local -> allItems.filter(VaultV2Item::isLocalOnly)
+        is CategoryFilter.KeePassDatabase -> allItems.filter { it.keepassDatabaseId() == targetFilter.databaseId }
+        is CategoryFilter.BitwardenVault -> allItems.filter { it.bitwardenVaultId() == targetFilter.vaultId }
+        is CategoryFilter.MdbxDatabase -> allItems.filter { it.mdbxDatabaseId() == targetFilter.databaseId }
         is CategoryFilter.Custom -> {
             val pathByCategoryId = quickFolderNodes.associate { it.category.id to it.path }
             val targetPath = pathByCategoryId[targetFilter.categoryId]
-            allItems.count { item ->
-                if (!item.isLocalOnly()) return@count false
-                val itemCategoryId = item.categoryId() ?: return@count false
-                if (itemCategoryId == targetFilter.categoryId) return@count true
-                val itemPath = pathByCategoryId[itemCategoryId] ?: return@count false
+            allItems.filter { item ->
+                if (!item.isLocalOnly()) return@filter false
+                val itemCategoryId = item.categoryId() ?: return@filter false
+                if (itemCategoryId == targetFilter.categoryId) return@filter true
+                val itemPath = pathByCategoryId[itemCategoryId] ?: return@filter false
                 targetPath != null && (itemPath == targetPath || itemPath.startsWith("$targetPath/"))
             }
         }
 
         is CategoryFilter.KeePassGroupFilter -> {
             val targetSegments = encodedKeePassPathSegments(targetFilter.groupPath)
-            allItems.count { item ->
-                if (item.keepassDatabaseId() != targetFilter.databaseId) return@count false
+            allItems.filter { item ->
+                if (item.keepassDatabaseId() != targetFilter.databaseId) return@filter false
                 val itemSegments = encodedKeePassPathSegments(item.keepassGroupPath())
                 itemSegments.size >= targetSegments.size &&
                     itemSegments.take(targetSegments.size) == targetSegments
             }
         }
 
-        is CategoryFilter.BitwardenFolderFilter -> allItems.count { item ->
+        is CategoryFilter.BitwardenFolderFilter -> allItems.filter { item ->
             item.bitwardenVaultId() == targetFilter.vaultId &&
                 item.bitwardenFolderId()?.trim() == targetFilter.folderId.trim()
         }
@@ -206,7 +221,7 @@ internal fun countVaultV2FolderDescendants(
                 rootFolderId = targetFilter.folderId,
                 folders = selectedMdbxFolders,
             )
-            allItems.count { item ->
+            allItems.filter { item ->
                 item.mdbxDatabaseId() == targetFilter.databaseId &&
                     descendantFolderIds.any { folderId ->
                         item.matchesMdbxFolder(targetFilter.databaseId, folderId)
@@ -214,7 +229,7 @@ internal fun countVaultV2FolderDescendants(
             }
         }
 
-        else -> 0
+        else -> emptyList()
     }
 }
 
@@ -415,10 +430,13 @@ private fun encodedKeePassPathSegments(path: String?): List<String> = path
     ?.filter(String::isNotBlank)
     .orEmpty()
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun VaultV2FolderRow(
     row: VaultV2FolderRowModel,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    selected: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val isSource = row.kind != VaultV2FolderRowKind.FOLDER
@@ -443,12 +461,12 @@ internal fun VaultV2FolderRow(
         .joinToString(" · ")
 
     Surface(
-        onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 68.dp),
+            .heightIn(min = 68.dp)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = if (isSource) 1.dp else 0.dp,
         shadowElevation = if (isSource) 1.dp else 0.dp,
     ) {

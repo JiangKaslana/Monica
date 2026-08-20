@@ -420,12 +420,6 @@ class SettingsViewModel(
         }
     }
 
-    fun updatePasswordParentCategoryIncludesChildren(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsManager.updatePasswordParentCategoryIncludesChildren(enabled)
-        }
-    }
-
     fun updatePasswordListQuickFoldersEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsManager.updatePasswordListQuickFoldersEnabled(enabled)

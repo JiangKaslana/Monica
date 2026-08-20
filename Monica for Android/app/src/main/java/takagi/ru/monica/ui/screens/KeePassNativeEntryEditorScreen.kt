@@ -1126,7 +1126,7 @@ internal fun NativePredefinedIconPickerDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                gridItems(PredefinedIcon.values().toList(), key = { it.name }) { icon ->
+                gridItems(predefinedIconPickerItems(selectedIcon), key = { it.name }) { icon ->
                     Surface(
                         modifier = Modifier
                             .size(64.dp)
@@ -1190,6 +1190,23 @@ internal fun keepassPredefinedIconVector(icon: PredefinedIcon): ImageVector {
         "work" in name || "briefcase" in name -> Icons.Default.Work
         "lock" in name || "secure" in name -> Icons.Default.Lock
         else -> Icons.Default.VpnKey
+    }
+}
+
+/**
+ * The KeePass format has more predefined IDs than the Material icon set used
+ * by Monica. Several IDs therefore render to the same fallback vector. Keep a
+ * single representative in the picker, but retain an existing selected ID so
+ * editing an older entry never makes its icon appear unavailable.
+ */
+internal fun predefinedIconPickerItems(selectedIcon: PredefinedIcon?): List<PredefinedIcon> {
+    val visible = PredefinedIcon.values()
+        .toList()
+        .distinctBy { keepassPredefinedIconVector(it).name }
+    return if (selectedIcon != null && selectedIcon !in visible) {
+        listOf(selectedIcon) + visible
+    } else {
+        visible
     }
 }
 

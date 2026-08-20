@@ -125,6 +125,12 @@ class PasswordRepository(
         return mdbxRepository?.listFolders(databaseId).orEmpty()
     }
 
+    suspend fun deleteMdbxFolder(databaseId: Long, folderId: String) {
+        val repository = mdbxRepository
+            ?: throw IllegalStateException("MDBX repository unavailable")
+        repository.deleteFolder(databaseId, folderId)
+    }
+
     suspend fun updateCategory(category: Category) {
         categoryDao?.update(category)
     }

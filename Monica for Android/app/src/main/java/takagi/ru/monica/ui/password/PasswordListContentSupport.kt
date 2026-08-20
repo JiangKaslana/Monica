@@ -159,7 +159,11 @@ internal fun resolvePasswordGroupsForRender(
     groupedPasswords: Map<String, List<PasswordEntry>>,
     hasGroupedPasswordsReadyForCurrentInputs: Boolean,
 ): Map<String, List<PasswordEntry>> =
-    if (hasGroupedPasswordsReadyForCurrentInputs) groupedPasswords else emptyMap()
+    if (hasGroupedPasswordsReadyForCurrentInputs || groupedPasswords.isNotEmpty()) {
+        groupedPasswords
+    } else {
+        emptyMap()
+    }
 
 internal data class PasswordListQuickFolderUiState(
     val nodes: List<PasswordQuickFolderNode>,
@@ -1264,10 +1268,8 @@ internal fun resolvePasswordListInitialRenderState(
         isGroupedPasswordModelReady
     }
     val shouldGateInitialContent =
-        (
-            !isPasswordPageListModelReady ||
-                (!hasCompletedInitialPasswordListStabilization && !isHeaderDataLoaded)
-            ) &&
+        !hasCompletedInitialPasswordListStabilization &&
+            (!isPasswordPageListModelReady || !isHeaderDataLoaded) &&
             PasswordPageContentType.PASSWORD in displayedContentTypes &&
             searchQuery.isEmpty()
 

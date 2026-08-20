@@ -52,6 +52,7 @@ class KeePassNativeEntryEditorGuardTest {
 
         assertTrue(picker.contains("LazyVerticalGrid"))
         assertTrue(picker.contains("keepassPredefinedIconVector(icon)"))
+        assertTrue(picker.contains("predefinedIconPickerItems(selectedIcon)"))
         assertFalse(picker.contains("Icon(Icons.Default.Edit"))
     }
 

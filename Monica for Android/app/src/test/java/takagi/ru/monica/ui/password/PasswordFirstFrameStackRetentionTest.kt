@@ -81,9 +81,42 @@ class PasswordFirstFrameStackRetentionTest {
     }
 
     @Test
-    fun `completed page still gates a frame whose grouping model is pending`() {
+    fun `pending folder grouping keeps the previous complete grouped model`() {
+        val first = password(1L, "github.com")
+        val second = password(2L, "github.com")
+        val previousGroups = mapOf("github.com" to listOf(first, second))
+
+        val result = resolvePasswordGroupsForRender(
+            groupedPasswords = previousGroups,
+            hasGroupedPasswordsReadyForCurrentInputs = false,
+        )
+
+        assertSame(previousGroups, result)
+    }
+
+    @Test
+    fun `completed page does not show initial loader while folder grouping is pending`() {
         val renderState = resolvePasswordListInitialRenderState(
             hasCompletedInitialPasswordListStabilization = true,
+            passwordEntriesReady = true,
+            allPasswordsForUiReady = true,
+            categoriesReady = true,
+            shouldRenderPasswordGroups = true,
+            hasGroupedPasswordsReadyForCurrentInputs = false,
+            visiblePasswordIds = listOf(1L, 2L),
+            groupedPasswordIds = emptyList(),
+            displayedContentTypes = setOf(PasswordPageContentType.PASSWORD),
+            searchQuery = "",
+        )
+
+        assertFalse(renderState.isPasswordPageListModelReady)
+        assertFalse(renderState.shouldGateInitialContent)
+    }
+
+    @Test
+    fun `first page load still waits for its grouping model`() {
+        val renderState = resolvePasswordListInitialRenderState(
+            hasCompletedInitialPasswordListStabilization = false,
             passwordEntriesReady = true,
             allPasswordsForUiReady = true,
             categoriesReady = true,

@@ -99,6 +99,8 @@ internal fun BoxScope.MainScreenFabOverlay(
     onBankCardAddOpen: () -> Unit,
     onWalletAddOpen: () -> Unit,
     onNavigateToWalletAdd: (CardWalletTab) -> Unit,
+    onCreateVaultFolder: () -> Unit,
+    allowVaultFolderCreation: Boolean,
     passwordPageAggregateEnabled: Boolean,
     passwordNewItemDefaults: NewItemStorageDefaults,
     onPreparePasswordAddStorageDefaults: (Long?, Long?, String?, Long?, String?, Long?, String?) -> Unit,
@@ -368,6 +370,8 @@ internal fun BoxScope.MainScreenFabOverlay(
                 onBankCardAddOpen = onBankCardAddOpen,
                 onWalletAddOpen = onWalletAddOpen,
                 onNavigateToWalletAdd = onNavigateToWalletAdd,
+                onCreateVaultFolder = onCreateVaultFolder,
+                allowVaultFolderCreation = allowVaultFolderCreation,
                 passwordPageAggregateEnabled = passwordPageAggregateEnabled,
                 passwordNewItemDefaults = passwordNewItemDefaults,
                 onPreparePasswordAddStorageDefaults = onPreparePasswordAddStorageDefaults,
@@ -666,6 +670,8 @@ internal fun MainScreenAddFab(
     onBankCardAddOpen: () -> Unit,
     onWalletAddOpen: () -> Unit,
     onNavigateToWalletAdd: (CardWalletTab) -> Unit,
+    onCreateVaultFolder: () -> Unit,
+    allowVaultFolderCreation: Boolean,
     passwordPageAggregateEnabled: Boolean,
     passwordNewItemDefaults: NewItemStorageDefaults,
     onPreparePasswordAddStorageDefaults: (Long?, Long?, String?, Long?, String?, Long?, String?) -> Unit,
@@ -740,11 +746,15 @@ internal fun MainScreenAddFab(
                 onPreparePasswordAddStorageDefaults,
                 onPrepareTotpAddStorageDefaults,
                 onPrepareNoteAddStorageDefaults,
-                onPrepareWalletAddStorageDefaults
+                onPrepareWalletAddStorageDefaults,
+                currentTab,
+                onCreateVaultFolder,
+                allowVaultFolderCreation,
             ) {
-                addButtonMenuOrder
-                    .filter { addButtonMenuEnabledActions.contains(it) }
-                    .map { action ->
+                buildList {
+                    addAll(addButtonMenuOrder
+                        .filter { addButtonMenuEnabledActions.contains(it) }
+                        .map { action ->
                         when (action) {
                             AddButtonMenuAction.PASSWORD -> {
                                 VaultV2FabMenuAction(
@@ -830,7 +840,17 @@ internal fun MainScreenAddFab(
                                 )
                             }
                         }
+                    })
+                    if (currentTab == BottomNavItem.VaultV2 && allowVaultFolderCreation) {
+                        add(
+                            VaultV2FabMenuAction(
+                                icon = Icons.Default.CreateNewFolder,
+                                labelRes = R.string.v2_create_folder,
+                                onClick = onCreateVaultFolder,
+                            )
+                        )
                     }
+                }
             }
             if (effectiveAddButtonBehaviorMode == AddButtonBehaviorMode.EXPANDABLE_MENU) {
                 VaultV2FabMenu(

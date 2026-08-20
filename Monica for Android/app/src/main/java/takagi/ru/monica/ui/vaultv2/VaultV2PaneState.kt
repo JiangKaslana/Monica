@@ -72,6 +72,11 @@ class VaultV2PaneState internal constructor(
 
     var fastScrollIndicatorLabel by mutableStateOf<String?>(null)
 
+    private var createFolderDialogRequested by mutableStateOf(false)
+
+    val hasPendingCreateFolderDialogRequest: Boolean
+        get() = createFolderDialogRequested
+
     var storageFilterType by mutableStateOf(storageFilterType)
         private set
 
@@ -123,6 +128,16 @@ class VaultV2PaneState internal constructor(
 
     fun requestScrollToTop() {
         scrollToTopRequestKey += 1
+    }
+
+    fun requestCreateFolderDialog() {
+        createFolderDialogRequested = true
+    }
+
+    fun consumeCreateFolderDialogRequest(): Boolean {
+        if (!createFolderDialogRequested) return false
+        createFolderDialogRequested = false
+        return true
     }
 
     fun updateStorageFilter(

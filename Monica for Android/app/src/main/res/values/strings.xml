@@ -2821,7 +2821,10 @@
     <string name="v2_create_first_folder">Create first folder</string>
     <string name="v2_create_folder">Create Folder</string>
     <string name="v2_edit_folder">Edit Folder</string>
-    <string name="v2_delete_folder">Delete Folder</string>
+<string name="v2_delete_folder">Delete Folder</string>
+<string name="vault_v2_folder_action_hint">Choose an action for this folder. Moving or copying keeps its child folders and items.</string>
+<string name="move_copy">Move or copy</string>
+<string name="vault_v2_folder_select_contents">Select contents</string>
     <string name="v2_delete_folder_confirm">Are you sure you want to delete folder \"%1$s\"? This cannot be undone.</string>
     <string name="v2_folder_name">Folder Name</string>
     <string name="v2_not_synced">Not synced</string>
@@ -3891,8 +3894,6 @@
     <string name="password_list_quick_filters_content_desc">Toggle each quick filter item and drag to reorder.</string>
     <string name="password_list_category_quick_filters_switch_title">Category Quick Filters</string>
     <string name="password_list_category_quick_filters_switch_desc">Show folder chips under quick filters. Tap again to go up or clear.</string>
-    <string name="password_parent_category_includes_children_title">Include subcategory items</string>
-    <string name="password_parent_category_includes_children_desc">When viewing a parent category, also show items stored in all of its subcategories. Applies to Passwords and Vault.</string>
     <string name="password_list_quick_folders_switch_title">Quick Folder Switch</string>
     <string name="password_list_quick_folders_switch_desc">Show folder cards above the password list.</string>
     <string name="password_list_quick_folders_style_title">Quick Folder Style</string>

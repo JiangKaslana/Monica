@@ -2,7 +2,9 @@ package takagi.ru.monica.ui.components
 
 import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +50,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -113,6 +118,7 @@ private data class MovePickerTarget(
     val title: String,
     val icon: ImageVector,
     val supportingText: String? = null,
+    val depth: Int = 0,
 )
 
 // Sentinel target id for "Archive" in move sheet without introducing a new persisted category.
@@ -379,7 +385,8 @@ fun UnifiedMoveToCategoryBottomSheet(
                                 .joinToString(" / "),
                             title = node.displayName,
                             icon = Icons.Default.Folder,
-                            supportingText = node.parentPathLabel
+                            supportingText = node.parentPathLabel,
+                            depth = node.depth
                         )
                     )
                 }
@@ -409,7 +416,8 @@ fun UnifiedMoveToCategoryBottomSheet(
                             ).joinToString(" / "),
                             title = groupNode.displayName,
                             icon = Icons.Default.Folder,
-                            supportingText = groupNode.parentPathLabel
+                            supportingText = groupNode.parentPathLabel,
+                            depth = groupNode.depth
                         )
                     )
                 }
@@ -438,7 +446,8 @@ fun UnifiedMoveToCategoryBottomSheet(
                             ).joinToString(" / "),
                             title = folderNode.displayName,
                             icon = Icons.Default.Folder,
-                            supportingText = folderNode.parentPathLabel
+                            supportingText = folderNode.parentPathLabel,
+                            depth = folderNode.depth
                         )
                     )
                 }
@@ -551,7 +560,7 @@ fun UnifiedMoveToCategoryBottomSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 item {
                     MoveSelectorSectionTitle(text = stringResource(R.string.category_selection_menu_databases))
@@ -595,6 +604,7 @@ fun UnifiedMoveToCategoryBottomSheet(
                         MoveTargetItem(
                             title = target.title,
                             icon = target.icon,
+                            depth = target.depth,
                             supportingText = target.supportingText
                                 ?: supportingLabelForSource(activeSource),
                             selected = selectedTarget.value == target.target,
@@ -670,50 +680,62 @@ private fun MoveTargetItem(
     onClick: () -> Unit,
     supportingText: String? = null,
     selected: Boolean = false,
+    depth: Int = 0,
     menu: (@Composable () -> Unit)? = null
 ) {
-    ListItem(
+    val safeDepth = depth.coerceIn(0, 8)
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .padding(start = (safeDepth * 20).dp)
+            .clipToBounds()
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
-        colors = ListItemDefaults.colors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.34f)
-            },
-            headlineColor = if (selected) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-            leadingIconColor = if (selected) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-            supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
-        ),
-        leadingContent = { Icon(icon, contentDescription = null) },
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = if (supportingText.isNullOrBlank()) {
-            null
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (safeDepth > 0) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 6.dp, end = 8.dp)
+                    .width(1.dp)
+                    .height(42.dp)
+                    .alpha(0.45f)
+                    .background(MaterialTheme.colorScheme.outlineVariant)
+            )
         } else {
-            {
-                Text(
-                    text = supportingText,
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-        },
-        trailingContent = menu ?: if (selected) {
-            { Icon(Icons.Default.Check, contentDescription = null) }
-        } else {
-            null
+            Spacer(modifier = Modifier.width(8.dp))
         }
-    )
+        ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = ListItemDefaults.colors(
+                containerColor = if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.34f)
+                },
+                headlineColor = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                leadingIconColor = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ),
+            leadingContent = { Icon(icon, contentDescription = null) },
+            headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+            supportingContent = if (supportingText.isNullOrBlank()) null else {
+                { Text(supportingText, style = MaterialTheme.typography.labelSmall) }
+            },
+            trailingContent = menu ?: if (selected) {
+                { Icon(Icons.Default.Check, contentDescription = null) }
+            } else null
+        )
+    }
 }
 
 private data class MonicaCategoryNode(

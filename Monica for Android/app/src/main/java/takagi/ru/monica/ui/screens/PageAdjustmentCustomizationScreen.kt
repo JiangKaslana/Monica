@@ -691,9 +691,6 @@ fun PasswordListCustomizationScreen(
     var previewCategoryQuickFiltersEnabled by remember(settings.passwordListCategoryQuickFiltersEnabled) {
         mutableStateOf(settings.passwordListCategoryQuickFiltersEnabled)
     }
-    var previewParentCategoryIncludesChildren by remember(settings.passwordParentCategoryIncludesChildren) {
-        mutableStateOf(settings.passwordParentCategoryIncludesChildren)
-    }
     var previewQuickFolderPathBannerEnabled by remember(settings.passwordListQuickFolderPathBannerEnabled) {
         mutableStateOf(settings.passwordListQuickFolderPathBannerEnabled)
     }
@@ -1223,16 +1220,6 @@ fun PasswordListCustomizationScreen(
                 onCheckedChange = { checked ->
                     previewCategoryQuickFiltersEnabled = checked
                     viewModel.updatePasswordListCategoryQuickFiltersEnabled(checked)
-                }
-            )
-
-            SwitchSettingsCard(
-                title = stringResource(R.string.password_parent_category_includes_children_title),
-                subtitle = stringResource(R.string.password_parent_category_includes_children_desc),
-                checked = previewParentCategoryIncludesChildren,
-                onCheckedChange = { checked ->
-                    previewParentCategoryIncludesChildren = checked
-                    viewModel.updatePasswordParentCategoryIncludesChildren(checked)
                 }
             )
 
