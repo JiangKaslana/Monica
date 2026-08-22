@@ -1444,7 +1444,8 @@ fun PasswordCardAdjustmentScreen(
             GroupModeOption("note", "按备注堆叠", "取备注首个非空行", Icons.Default.Description),
             GroupModeOption("website", "按网站堆叠", "网站优先", Icons.Default.Language),
             GroupModeOption("app", "按应用堆叠", "应用名/包名优先", Icons.Default.Apps),
-            GroupModeOption("title", "按标题堆叠", "严格按完整标题分组", Icons.Default.Person)
+            GroupModeOption("title", "按标题堆叠", "严格按完整标题分组", Icons.Default.Person),
+            GroupModeOption("folder", "按文件夹堆叠", "按数据库文件夹分别堆叠", Icons.Default.Folder)
         )
     }
     val selectedGroupOption = remember(settings.passwordGroupMode, groupOptions) {

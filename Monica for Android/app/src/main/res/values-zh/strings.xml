@@ -263,6 +263,8 @@
     <string name="group_mode_app_desc">应用名/包名优先</string>
     <string name="group_mode_title">按标题堆叠</string>
     <string name="group_mode_title_desc">严格按完整标题分组</string>
+    <string name="group_mode_folder">按文件夹堆叠</string>
+    <string name="group_mode_folder_desc">按数据库文件夹分别堆叠</string>
     
     <!-- Add/Edit Password Screen -->
     <string name="add_password_title">添加密码</string>

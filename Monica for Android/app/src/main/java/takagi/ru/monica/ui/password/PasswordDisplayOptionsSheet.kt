@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DashboardCustomize
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Title
@@ -148,6 +149,11 @@ internal fun PasswordDisplayOptionsSheet(
                     stringResource(R.string.group_mode_title),
                     stringResource(R.string.group_mode_title_desc),
                     Icons.Default.Title,
+                ),
+                "folder" to Triple(
+                    stringResource(R.string.group_mode_folder),
+                    stringResource(R.string.group_mode_folder_desc),
+                    Icons.Default.Folder,
                 )
             )
             groupModes.forEach { (modeKey, meta) ->

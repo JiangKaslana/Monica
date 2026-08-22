@@ -71,6 +71,7 @@ fun getGroupKeyForMode(
     val idKey = "id-${entry.id}"
 
     return when (mode) {
+        "folder" -> getPasswordFolderStackKey(entry)
         "note" -> noteLabel.takeUnless { it.isNullOrEmpty() } ?: idKey
         "website" -> website.takeUnless { it.isEmpty() } ?: idKey
         "app" -> appName.takeUnless { it.isEmpty() }
@@ -86,6 +87,32 @@ fun getGroupKeyForMode(
                 ?: idKey
         }
     }
+}
+
+/** Stable folder identity for the password page. External database paths are preferred;
+ * local categories fall back to their numeric id so same-named folders never merge. */
+fun getPasswordFolderStackKey(entry: PasswordEntry): String {
+    return when {
+        entry.keepassDatabaseId != null ->
+            "kp-folder:${entry.keepassDatabaseId}:${entry.keepassGroupPath.orEmpty().ifBlank { "root" }}"
+        entry.bitwardenVaultId != null ->
+            "bw-folder:${entry.bitwardenVaultId}:${entry.bitwardenFolderId.orEmpty().ifBlank { "root" }}"
+        entry.mdbxDatabaseId != null ->
+            "mdbx-folder:${entry.mdbxDatabaseId}:${entry.mdbxFolderId.orEmpty().ifBlank { "root" }}"
+        entry.categoryId != null -> "local-folder:${entry.categoryId}"
+        else -> "root"
+    }
+}
+
+fun getPasswordFolderStackLabel(entry: PasswordEntry): String {
+    val raw = when {
+        !entry.keepassGroupPath.isNullOrBlank() -> entry.keepassGroupPath.orEmpty()
+        !entry.bitwardenFolderId.isNullOrBlank() -> entry.bitwardenFolderId.orEmpty()
+        !entry.mdbxFolderId.isNullOrBlank() -> entry.mdbxFolderId.orEmpty()
+        entry.categoryId != null -> "Category ${entry.categoryId}"
+        else -> "Root"
+    }
+    return raw.substringAfterLast('/').substringAfterLast('\\').ifBlank { "Root" }
 }
 
 fun getPasswordGroupTitle(

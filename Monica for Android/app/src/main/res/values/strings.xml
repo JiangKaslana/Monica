@@ -245,6 +245,8 @@
     <string name="group_mode_app_desc">App name/package first</string>
     <string name="group_mode_title">Stack by title</string>
     <string name="group_mode_title_desc">Group strictly by full title</string>
+    <string name="group_mode_folder">Stack by folder</string>
+    <string name="group_mode_folder_desc">Keep entries together by their database folder</string>
     
     <!-- Add/Edit Password Screen -->
     <string name="add_password_title">Add Password</string>

@@ -114,6 +114,7 @@ private fun resolvePasswordGroupDisplayTitle(
     return when (groupMode) {
         "note" -> noteLabel
         "smart" -> noteLabel
+        "folder" -> getPasswordFolderStackLabel(first)
         else -> null
     }
 }
