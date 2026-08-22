@@ -7,6 +7,7 @@ import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.HttpsURLConnection
 
 /**
  * WebDAV 客户端工厂。
@@ -49,6 +50,32 @@ object WebDavGateway {
                 init(null, arrayOf(trustManager), SecureRandom())
             }
             builder.sslSocketFactory(sslContext.socketFactory, trustManager)
+            // Keep Android's normal hostname verification by default. If a self-hosted
+            // certificate is valid but issued for another name (for example fnOS),
+            // require the same explicit per-host fingerprint confirmation as the trust
+            // manager instead of silently disabling hostname verification globally.
+            builder.hostnameVerifier { requestedHost, session ->
+                val verifier = HttpsURLConnection.getDefaultHostnameVerifier()
+                if (verifier.verify(requestedHost, session)) {
+                    true
+                } else {
+                    val certificate = session.peerCertificates
+                        .firstOrNull() as? X509Certificate
+                        ?: return@hostnameVerifier false
+                    val fingerprint = WebDavCertificateTrustStore.fingerprint(certificate)
+                    if (WebDavCertificateTrustStore.isTrusted(host, fingerprint)) {
+                        true
+                    } else {
+                        throw WebDavUntrustedCertificateException(
+                            host,
+                            fingerprint,
+                            javax.net.ssl.SSLPeerUnverifiedException(
+                                "Hostname $requestedHost is not verified by the certificate"
+                            )
+                        )
+                    }
+                }
+            }
         }
         return builder.build()
     }
