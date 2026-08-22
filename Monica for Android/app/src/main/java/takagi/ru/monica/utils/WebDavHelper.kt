@@ -1452,6 +1452,8 @@ class WebDavHelper(
         val urlHint = if (normalizedUrl.isNotEmpty()) " ($normalizedUrl)" else ""
         val kind = classified?.kind ?: takagi.ru.monica.webdav.WebDavErrorKind.Unknown
         return when (kind) {
+            takagi.ru.monica.webdav.WebDavErrorKind.CertificateUntrusted ->
+                "服务器 HTTPS 证书不受信任，请确认证书后重试$urlHint"
             takagi.ru.monica.webdav.WebDavErrorKind.RateLimited -> {
                 val waitSec = ((classified?.retryAfterMillis ?: 0L) / 1000L).coerceAtLeast(1L)
                 context.getString(R.string.webdav_error_rate_limited, waitSec) + urlHint
