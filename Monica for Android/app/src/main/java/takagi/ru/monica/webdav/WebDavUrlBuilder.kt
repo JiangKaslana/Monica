@@ -109,4 +109,12 @@ object WebDavUrlBuilder {
         val normalized = normalizeServer(url).ifEmpty { return "" }
         return normalized.toHttpUrlOrNull()?.host.orEmpty()
     }
+
+    fun authorityOf(url: String): String {
+        val normalized = normalizeServer(url).ifEmpty { return "" }
+        return normalized.toHttpUrlOrNull()?.let { parsed ->
+            if (parsed.port == HttpUrl.defaultPort(parsed.scheme)) parsed.host
+            else "${parsed.host}:${parsed.port}"
+        }.orEmpty()
+    }
 }

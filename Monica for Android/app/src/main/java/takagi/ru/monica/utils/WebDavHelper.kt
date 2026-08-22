@@ -1170,6 +1170,7 @@ class WebDavHelper(
      * 
      */
     fun clearConfig() {
+        val previousAuthority = takagi.ru.monica.webdav.WebDavUrlBuilder.authorityOf(serverUrl)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit()
             .remove(KEY_ENABLE_ENCRYPTION)
@@ -1203,6 +1204,9 @@ class WebDavHelper(
         enableEncryption = false
         encryptionPassword = ""
         sardine = null
+        if (previousAuthority.isNotBlank()) {
+            takagi.ru.monica.webdav.WebDavCertificateTrustStore.remove(previousAuthority)
+        }
     }
     
     /**
@@ -5420,7 +5424,8 @@ class WebDavHelper(
         // 通过统一的 Gateway 构造，确保所有请求都经过预置式 Basic 鉴权、
         // 速率限制与 User-Agent 拦截器链（与 Kazumi webdav_client 一致）。
         return takagi.ru.monica.webdav.WebDavGateway.buildClient(
-            takagi.ru.monica.webdav.WebDavCredentials(username, password)
+            takagi.ru.monica.webdav.WebDavCredentials(username, password),
+            serverUrl
         )
     }
 

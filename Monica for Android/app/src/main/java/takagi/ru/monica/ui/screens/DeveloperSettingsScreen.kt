@@ -791,19 +791,21 @@ private object DeveloperLogDebugHelper {
             )
         )
         val selectedLogs = buildString {
+            val filteredAppProcessLogs = filterExpectedSystemNoise(appProcessLogs)
+            val filteredCrashLogs = filterExpectedSystemNoise(crashLogs)
             if (autofillTagLogs.isNotBlank()) {
                 appendLine("---- autofill-tags ----")
                 appendLine(autofillTagLogs.trim())
             }
-            if (appProcessLogs.isNotBlank()) {
+            if (filteredAppProcessLogs.isNotBlank()) {
                 if (isNotBlank()) appendLine()
                 appendLine("---- app-process ----")
-                appendLine(appProcessLogs.trim())
+                appendLine(filteredAppProcessLogs)
             }
-            if (crashLogs.isNotBlank()) {
+            if (filteredCrashLogs.isNotBlank()) {
                 if (isNotBlank()) appendLine()
                 appendLine("---- crash/system ----")
-                appendLine(crashLogs.trim())
+                appendLine(filteredCrashLogs)
             }
         }.trim()
 
@@ -1032,6 +1034,30 @@ private object DeveloperLogDebugHelper {
 
         runCatching { process.waitFor() }
         return output.trim()
+    }
+
+    /**
+     * Android and vendor ROMs may emit predictive-back capability probes even though Monica
+     * explicitly disables that API. They are expected framework noise, not app failures.
+     * Keep this list deliberately narrow so real navigation and crash diagnostics remain intact.
+     */
+    private fun filterExpectedSystemNoise(raw: String): String {
+        if (raw.isBlank()) return raw
+        val predictiveBackNoise = listOf(
+            "OnBackInvokedCallback",
+            "OnBackAnimationCallback",
+            "OnBackInvokedDispatcher",
+            "BackEvent",
+            "predictive back",
+            "predictiveBack",
+            "enableOnBackInvokedCallback"
+        )
+        return raw.lineSequence()
+            .filter { line ->
+                predictiveBackNoise.none { marker -> line.contains(marker, ignoreCase = true) }
+            }
+            .joinToString("\n")
+            .trim()
     }
 
     private fun readAutofillTagLogs(): String {

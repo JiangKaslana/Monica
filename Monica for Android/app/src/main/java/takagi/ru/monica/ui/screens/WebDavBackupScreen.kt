@@ -40,6 +40,7 @@ import takagi.ru.monica.utils.BackupContentScope
 import takagi.ru.monica.utils.BackupRestoreApplier
 import takagi.ru.monica.utils.RestoreResult
 import takagi.ru.monica.utils.WebDavHelper
+import takagi.ru.monica.webdav.WebDavUntrustedCertificateException
 import takagi.ru.monica.utils.AutoBackupManager
 import takagi.ru.monica.utils.CustomFieldBackupEntry
 import takagi.ru.monica.data.PasswordEntry
@@ -191,6 +192,7 @@ fun WebDavBackupScreen(
     var backupList by remember { mutableStateOf<List<BackupFile>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var pendingUntrustedCertificate by remember { mutableStateOf<WebDavUntrustedCertificateException?>(null) }
     
     // 自动备份状态
     var autoBackupEnabled by remember { mutableStateOf(false) }
@@ -515,6 +517,11 @@ fun WebDavBackupScreen(
                                             },
                                             onFailure = { e -> 
                                                 isTesting = false
+                                                val certificateError = e.findWebDavCertificateError()
+                                                if (certificateError != null) {
+                                                    pendingUntrustedCertificate = certificateError
+                                                    return@fold
+                                                }
                                                 // 提供更友好的错误信息
                                                 val message = e.message.orEmpty()
                                                 val userFriendlyMessage = when {
@@ -1077,6 +1084,34 @@ fun WebDavBackupScreen(
                     context.getString(R.string.webdav_fill_from_password_applied),
                     Toast.LENGTH_SHORT
                 ).show()
+            }
+        )
+    }
+
+    pendingUntrustedCertificate?.let { certificate ->
+        WebDavCertificateDialog(
+            certificate = certificate,
+            onDismiss = { pendingUntrustedCertificate = null },
+            onContinue = {
+                    pendingUntrustedCertificate = null
+                    isTesting = true
+                    coroutineScope.launch {
+                        webDavHelper.configure(serverUrl, username, password)
+                        webDavHelper.testConnection().fold(
+                            onSuccess = {
+                                isTesting = false
+                                isConfigured = true
+                                loadBackups(webDavHelper) { list, error ->
+                                    backupList = list
+                                    error?.let { errorMessage = it }
+                                }
+                            },
+                            onFailure = { retryError ->
+                                isTesting = false
+                                errorMessage = retryError.message ?: context.getString(R.string.webdav_connection_failed, "")
+                            }
+                        )
+                    }
             }
         )
     }

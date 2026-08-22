@@ -2,6 +2,10 @@ package takagi.ru.monica.webdav
 
 import com.thegrizzlylabs.sardineandroid.impl.OkHttpSardine
 import okhttp3.OkHttpClient
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 import java.util.concurrent.TimeUnit
 
 /**
@@ -27,7 +31,10 @@ object WebDavGateway {
      * sardine 走 challenge-response 逻辑，与 OpenList 的速率策略冲突。
      */
     fun buildHttpClient(credentials: WebDavCredentials): OkHttpClient =
-        OkHttpClient.Builder()
+        buildHttpClient(credentials, null)
+
+    fun buildHttpClient(credentials: WebDavCredentials, serverUrl: String?): OkHttpClient {
+        val builder = OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -35,11 +42,47 @@ object WebDavGateway {
             .addInterceptor(PreemptiveBasicAuthInterceptor(credentials))
             .addInterceptor(RateLimitInterceptor())
             .addInterceptor(UserAgentInterceptor())
-            .build()
+        val host = serverUrl?.let(WebDavUrlBuilder::authorityOf)?.takeIf { it.isNotBlank() }
+        if (host != null) {
+            val trustManager = webDavTrustManager(host)
+            val sslContext = SSLContext.getInstance("TLS").apply {
+                init(null, arrayOf(trustManager), SecureRandom())
+            }
+            builder.sslSocketFactory(sslContext.socketFactory, trustManager)
+        }
+        return builder.build()
+    }
 
     fun buildClient(credentials: WebDavCredentials): OkHttpSardine =
         OkHttpSardine(buildHttpClient(credentials))
 
+    fun buildClient(credentials: WebDavCredentials, serverUrl: String): OkHttpSardine =
+        OkHttpSardine(buildHttpClient(credentials, serverUrl))
+
     /** 从任意 URL 字符串中提取 host；若无法解析返回空串。 */
     fun hostOf(url: String): String = WebDavUrlBuilder.hostOf(url)
+
+    private fun webDavTrustManager(host: String): X509TrustManager {
+        val defaults = javax.net.ssl.TrustManagerFactory.getInstance(
+            javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm()
+        ).apply { init(null as java.security.KeyStore?) }
+        val delegate = defaults.trustManagers.filterIsInstance<X509TrustManager>().single()
+        return object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> = delegate.acceptedIssuers
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) =
+                delegate.checkClientTrusted(chain, authType)
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                try {
+                    delegate.checkServerTrusted(chain, authType)
+                } catch (error: java.security.cert.CertificateException) {
+                    val certificate = chain.firstOrNull()
+                        ?: throw error
+                    val fingerprint = WebDavCertificateTrustStore.fingerprint(certificate)
+                    if (!WebDavCertificateTrustStore.isTrusted(host, fingerprint)) {
+                        throw WebDavUntrustedCertificateException(host, fingerprint, error)
+                    }
+                }
+            }
+        }
+    }
 }

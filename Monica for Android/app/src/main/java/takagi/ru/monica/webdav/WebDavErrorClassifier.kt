@@ -40,6 +40,10 @@ object WebDavErrorClassifier {
         if (error == null) return ClassifiedError(WebDavErrorKind.Ok)
 
         return when (val unwrapped = unwrap(error)) {
+            is WebDavUntrustedCertificateException -> ClassifiedError(
+                kind = WebDavErrorKind.CertificateUntrusted,
+                cause = unwrapped,
+            )
             is RateLimitedIOException -> ClassifiedError(
                 kind = WebDavErrorKind.RateLimited,
                 retryAfterMillis = unwrapped.retryAfterMillis,
@@ -93,7 +97,8 @@ object WebDavErrorClassifier {
         while (depth < 8) {
             val cause = current.cause ?: return current
             if (cause === current) return current
-            if (current is RateLimitedIOException || current is SardineException) return current
+            if (current is RateLimitedIOException || current is SardineException ||
+                current is WebDavUntrustedCertificateException) return current
             current = cause
             depth++
         }

@@ -10,6 +10,9 @@ enum class WebDavErrorKind {
     /** 调用成功。 */
     Ok,
 
+    /** The server certificate was rejected and requires explicit user approval. */
+    CertificateUntrusted,
+
     /**
      * 服务器返回 429 或带 Retry-After 的 503，或本地 backoff 阻止了请求。
      *

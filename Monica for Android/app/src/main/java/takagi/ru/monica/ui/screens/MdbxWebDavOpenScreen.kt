@@ -36,6 +36,7 @@ import takagi.ru.monica.data.MdbxTigaMode
 import takagi.ru.monica.utils.FileSourceEntry
 import takagi.ru.monica.utils.WebDavHelper
 import takagi.ru.monica.utils.WebDavKeePassFileSource
+import takagi.ru.monica.webdav.WebDavUntrustedCertificateException
 import takagi.ru.monica.viewmodel.MdbxKeyFileSelection
 import takagi.ru.monica.viewmodel.MdbxViewModel
 import java.text.Normalizer
@@ -58,6 +59,7 @@ fun MdbxWebDavOpenScreen(
     var webDavPassword by remember { mutableStateOf(webDavHelper.getCurrentPasswordForEdit()) }
     var showWebDavPassword by remember { mutableStateOf(false) }
     var connectionState by remember { mutableStateOf<ConnectionState>(ConnectionState.NotTested) }
+    var pendingCertificate by remember { mutableStateOf<WebDavUntrustedCertificateException?>(null) }
 
     var webDavCurrentPath by remember { mutableStateOf("") }
     var webDavEntries by remember { mutableStateOf<List<FileSourceEntry>>(emptyList()) }
@@ -149,6 +151,23 @@ fun MdbxWebDavOpenScreen(
         }
     }
 
+    fun testConnection() {
+        connectionState = ConnectionState.Testing
+        scope.launch {
+            val result = viewModel.testWebDavConnection(serverUrl, username, webDavPassword)
+            val error = result.exceptionOrNull()
+            val certificateError = error?.findWebDavCertificateError()
+            if (certificateError != null) {
+                pendingCertificate = certificateError
+                connectionState = ConnectionState.NotTested
+                return@launch
+            }
+            connectionState = if (result.isSuccess) ConnectionState.Connected
+            else ConnectionState.Failed(error?.message ?: "Unknown error")
+            if (result.isSuccess) webDavHelper.configure(serverUrl, username, webDavPassword)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -208,26 +227,7 @@ fun MdbxWebDavOpenScreen(
                         showPassword = showWebDavPassword,
                         onTogglePasswordVisibility = { showWebDavPassword = !showWebDavPassword },
                         connectionState = connectionState,
-                        onTestConnection = {
-                            connectionState = ConnectionState.Testing
-                            scope.launch {
-                                val result = viewModel.testWebDavConnection(
-                                    serverUrl = serverUrl,
-                                    username = username,
-                                    password = webDavPassword
-                                )
-                                connectionState = if (result.isSuccess) {
-                                    ConnectionState.Connected
-                                } else {
-                                    ConnectionState.Failed(
-                                        result.exceptionOrNull()?.message ?: "Unknown error"
-                                    )
-                                }
-                                if (connectionState is ConnectionState.Connected) {
-                                    webDavHelper.configure(serverUrl, username, webDavPassword)
-                                }
-                            }
-                        }
+                        onTestConnection = ::testConnection
                     )
                 }
             }
@@ -509,5 +509,15 @@ fun MdbxWebDavOpenScreen(
 
             MdbxOperationFeedback(operationState)
         }
+    }
+    pendingCertificate?.let { certificate ->
+        WebDavCertificateDialog(
+            certificate = certificate,
+            onDismiss = { pendingCertificate = null },
+            onContinue = {
+                pendingCertificate = null
+                testConnection()
+            },
+        )
     }
 }

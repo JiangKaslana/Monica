@@ -23,7 +23,7 @@ class WebDavMdbxFileSource(
 
     private val normalizedServerUrl = serverUrl.trim().trimEnd('/')
     private val credentials = WebDavCredentials(username, password)
-    private val httpClient by lazy { WebDavGateway.buildHttpClient(credentials) }
+    private val httpClient by lazy { WebDavGateway.buildHttpClient(credentials, normalizedServerUrl) }
     private val sardine: OkHttpSardine by lazy { OkHttpSardine(httpClient) }
     private val conditionalWriter by lazy { WebDavConditionalWriter(httpClient) }
 

@@ -22,6 +22,7 @@ import takagi.ru.monica.utils.AppLauncherIconManager
 import takagi.ru.monica.security.SessionManager
 import takagi.ru.monica.utils.SettingsManager
 import takagi.ru.monica.webdav.WebDavBackoffState
+import takagi.ru.monica.webdav.WebDavCertificateTrustStore
 import takagi.ru.monica.workers.KeePassRemoteUploadWorker
 
 /**
@@ -56,6 +57,7 @@ class MonicaApplication : Application() {
         MdbxDiagLogger.initialize(this)
         syncLauncherEntryPointsWithSettings()
         WebDavBackoffState.attachPersistence(this)
+        WebDavCertificateTrustStore.attach(this)
         scheduleKeePassRemoteUploadRecovery()
         scheduleAttachmentHousekeeping()
     }
