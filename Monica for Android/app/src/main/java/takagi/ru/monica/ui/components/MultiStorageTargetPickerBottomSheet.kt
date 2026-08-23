@@ -186,7 +186,9 @@ fun MultiStorageTargetPickerBottomSheet(
     }
     val primaryTarget = selectedTargets.firstOrNull() ?: StorageTarget.MonicaLocal(null)
     val primarySourceKey = primaryTarget.toSourceKey()
-    val singleModeAllowed = lockedTargetKeys.isEmpty()
+    // Existing targets are protected only while editing in multi-select mode.
+    // Single-select is the explicit "move" workflow and replaces the target.
+    val singleModeAllowed = true
     var selectionMode by remember(visible, selectedTargets, singleModeAllowed) {
         mutableStateOf(
             if (forceMultiSelectionMode) {

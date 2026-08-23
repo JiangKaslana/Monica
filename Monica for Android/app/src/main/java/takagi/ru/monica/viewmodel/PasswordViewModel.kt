@@ -4888,10 +4888,18 @@ class PasswordViewModel(
                     it.toStorageTarget().stableKey !in selectedTargetKeys
                 }
                 if (staleReplicas.isNotEmpty()) {
-                    Log.w(
-                        "PasswordViewModel",
-                        "Preserving ${staleReplicas.size} existing password replicas not present in the edited target selection: ids=${staleReplicas.map { it.id }}"
-                    )
+                    if (distinctTargets.size == 1 && originalIds.isNotEmpty()) {
+                        repository.deletePasswordEntries(staleReplicas)
+                        Log.i(
+                            "PasswordViewModel",
+                            "Moved edited password entry by removing ${staleReplicas.size} old storage replicas: ids=${staleReplicas.map { it.id }}"
+                        )
+                    } else {
+                        Log.w(
+                            "PasswordViewModel",
+                            "Preserving ${staleReplicas.size} existing password replicas not present in the edited target selection: ids=${staleReplicas.map { it.id }}"
+                        )
+                    }
                 }
 
                     PasswordSaveAcrossTargetsResult(
