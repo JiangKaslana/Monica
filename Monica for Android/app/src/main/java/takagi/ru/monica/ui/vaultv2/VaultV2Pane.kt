@@ -4228,7 +4228,7 @@ private fun VaultV2List(
 	verticalArrangement = Arrangement.spacedBy(6.dp),
 	) {
 		if (hasVisibleQuickFilters || hasVisibleCategoryQuickFilters) {
-			item(key = "filter_row") {
+			item(key = "filter_row", contentType = "filter_row") {
 				Column(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -4257,7 +4257,11 @@ private fun VaultV2List(
 			}
 		}
 
-		items(folderRows, key = VaultV2FolderRowModel::key) { folderRow ->
+		items(
+			items = folderRows,
+			key = VaultV2FolderRowModel::key,
+			contentType = { "folder_row" },
+		) { folderRow ->
 			VaultV2FolderRow(
 				row = folderRow,
 				onClick = { onOpenFolder(folderRow.targetFilter) },
@@ -4267,7 +4271,7 @@ private fun VaultV2List(
 		}
 
 		if (showCurrentFolderHeader && sections.isNotEmpty()) {
-			item(key = "current_folder_header") {
+			item(key = "current_folder_header", contentType = "section_header") {
 				Text(
 					text = stringResource(R.string.vault_v2_hierarchy_current_folder),
 					style = MaterialTheme.typography.titleSmall,
@@ -4280,7 +4284,7 @@ private fun VaultV2List(
 		}
 
 		if (folderRows.isEmpty() && sections.isEmpty() && showLoadingIndicator) {
-			item(key = "loading") {
+			item(key = "loading", contentType = "loading") {
 				Box(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -4293,7 +4297,7 @@ private fun VaultV2List(
 		}
 
 		if (folderRows.isEmpty() && sections.isEmpty() && showEmptyState) {
-			item(key = "empty") {
+			item(key = "empty", contentType = "empty") {
 				Box(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -4310,7 +4314,7 @@ private fun VaultV2List(
 		}
 
 		sections.forEach { (section, itemsInSection) ->
-			item(key = "header:$section") {
+			item(key = "header:$section", contentType = "section_header") {
 				Text(
 					text = section,
 					style = MaterialTheme.typography.titleSmall,
@@ -4321,7 +4325,11 @@ private fun VaultV2List(
 				)
 			}
 
-			items(itemsInSection, key = { item -> item.key }) { item ->
+			items(
+				items = itemsInSection,
+				key = { item -> item.key },
+				contentType = { item -> item.type },
+			) { item ->
 				val selected = item.key in selectedKeys
 				SwipeActions(
 					onSwipeLeft = { onRequestDeleteItem(item) },
