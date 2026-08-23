@@ -962,11 +962,20 @@ private fun <T> rememberVaultV2AsyncComputedValue(
 			return@LaunchedEffect
 		}
 		isComputing = true
-		value = withContext(Dispatchers.Default) {
-			latestCompute()
+		try {
+			value = withContext(Dispatchers.Default) {
+				latestCompute()
+			}
+			computedKey = computationKey
+		} catch (cancellation: CancellationException) {
+			throw cancellation
+		} catch (error: Throwable) {
+			// Keep the retained value visible when one source item cannot be parsed.
+			// The next source update will retry the computation without taking down the page.
+			Log.e("VaultV2List", "Async list computation failed; retaining previous value", error)
+		} finally {
+			isComputing = false
 		}
-		computedKey = computationKey
-		isComputing = false
 	}
 
 	return VaultV2AsyncComputedValue(
