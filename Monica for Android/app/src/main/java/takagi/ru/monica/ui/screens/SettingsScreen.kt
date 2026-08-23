@@ -107,6 +107,8 @@ private fun VersionLinkButton(
     }
 }
 
+private val LocalSettingsSectionContent = compositionLocalOf { false }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun SettingsScreen(
@@ -2151,7 +2153,16 @@ fun SettingsSection(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 8.dp)
         )
-        content()
+        CompositionLocalProvider(LocalSettingsSectionContent provides true) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            ) {
+                content()
+            }
+        }
         Spacer(modifier = Modifier.height(8.dp))
     }
 }
@@ -2167,13 +2178,19 @@ fun SettingsItem(
     trailingContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val isInSection = LocalSettingsSectionContent.current
     Card(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = if (isInSection) 0.dp else 16.dp, vertical = if (isInSection) 1.dp else 4.dp),
+        shape = if (isInSection) RoundedCornerShape(0.dp) else RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            containerColor = if (isInSection) {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            }
         )
     ) {
         Row(
@@ -2229,10 +2246,12 @@ fun SettingsItemWithSwitch(
     onCheckedChange: (Boolean) -> Unit,
     iconTint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary
 ) {
+    val isInSection = LocalSettingsSectionContent.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = if (isInSection) 0.dp else 16.dp, vertical = if (isInSection) 1.dp else 4.dp),
+        shape = if (isInSection) RoundedCornerShape(0.dp) else RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (enabled) {
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
