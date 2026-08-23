@@ -607,7 +607,10 @@ private fun ManualInputDialog(
 
                 val appName = activityInfo.loadLabel(packageManager).toString()
 
-                appList.add(AppInfo(packageName, appName, icon = null))
+                // Keep the application icon with the lightweight app model. The
+                // blacklist picker uses this same loader and should not fall back
+                // to a generic grid icon for every package.
+                appList.add(AppInfo(packageName, appName, icon = activityInfo.loadIcon(packageManager)))
                 
             } catch (e: Exception) {
                 android.util.Log.w("AppSelector", "跳过无效应用: ${e.message}")

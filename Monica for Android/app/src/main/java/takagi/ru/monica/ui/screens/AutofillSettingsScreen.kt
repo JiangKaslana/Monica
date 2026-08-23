@@ -908,14 +908,18 @@ fun BlacklistManagementDialog(
     }
 
     val filteredApps = remember(installedApps, searchQuery) {
-        if (searchQuery.isBlank()) installedApps
-        else {
+        val matchingApps = if (searchQuery.isBlank()) installedApps else {
             val query = searchQuery.trim().lowercase(java.util.Locale.getDefault())
             installedApps.filter { app ->
                 app.appName.lowercase(java.util.Locale.getDefault()).contains(query) ||
                 app.packageName.lowercase(java.util.Locale.getDefault()).contains(query)
             }
         }
+        matchingApps.sortedWith(
+            compareByDescending<AppInfo> { blacklistPackages.contains(it.packageName) }
+                .thenBy { it.appName.lowercase(java.util.Locale.getDefault()) }
+                .thenBy { it.packageName.lowercase(java.util.Locale.getDefault()) }
+        )
     }
 
     AlertDialog(
@@ -1105,7 +1109,6 @@ fun InfoCard() {
         }
     }
 }
-
 
 
 
