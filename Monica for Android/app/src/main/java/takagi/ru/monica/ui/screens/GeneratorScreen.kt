@@ -81,6 +81,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -502,63 +503,65 @@ fun GeneratorScreen(
             }
         }
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize(),
-            state = listState,
-            contentPadding = PaddingValues(bottom = 96.dp)
-        ) {
-            item {
-                // 页面标题和历史按钮
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.generator_title),
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+        val topAppBarState = rememberTopAppBarState()
+        val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
 
-                    IconButton(
-                        onClick = { showHistorySheet = true }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = stringResource(R.string.history),
-                            tint = MaterialTheme.colorScheme.primary
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
+            topBar = {
+                LargeTopAppBar(
+                    title = {
+                        Text(
+                            text = stringResource(R.string.generator_title),
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    if (showStandaloneSettingsEntry) {
-                        Box {
-                            IconButton(onClick = { showTopActionsMenu = true }) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = stringResource(R.string.more_options),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = showTopActionsMenu,
-                                onDismissRequest = { showTopActionsMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.nav_settings)) },
-                                    leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                    onClick = {
-                                        showTopActionsMenu = false
-                                        onOpenStandaloneSettings()
-                                    }
-                                )
+                    },
+                    actions = {
+                        IconButton(onClick = { showHistorySheet = true }) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = stringResource(R.string.history),
+                            )
+                        }
+                        if (showStandaloneSettingsEntry) {
+                            Box {
+                                IconButton(onClick = { showTopActionsMenu = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = stringResource(R.string.more_options),
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showTopActionsMenu,
+                                    onDismissRequest = { showTopActionsMenu = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.nav_settings)) },
+                                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                        onClick = {
+                                            showTopActionsMenu = false
+                                            onOpenStandaloneSettings()
+                                        },
+                                    )
+                                }
                             }
                         }
-                    }
-                }
-            }
+                    },
+                    scrollBehavior = topAppBarScrollBehavior,
+                )
+            },
+        ) { innerPadding ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                state = listState,
+                contentPadding = PaddingValues(bottom = 96.dp),
+            ) {
 
             item {
                 Column(
@@ -1120,6 +1123,8 @@ fun GeneratorScreen(
                     }
                 }
             }
+        }
+
         }
         
         if (!useExternalRefreshFab) {
