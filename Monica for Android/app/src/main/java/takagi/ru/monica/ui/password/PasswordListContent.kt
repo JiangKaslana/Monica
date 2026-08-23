@@ -209,7 +209,6 @@ import takagi.ru.monica.ui.password.PasswordAggregateCardStyle
 import takagi.ru.monica.ui.password.PasswordAggregateListItemUi
 import takagi.ru.monica.ui.password.PasswordAggregateRetainedStateViewModel
 import takagi.ru.monica.ui.password.PasswordGroupingEntryRevision
-import takagi.ru.monica.ui.password.PasswordGroupingSnapshotSeed
 import takagi.ru.monica.ui.password.PasswordGroupingSnapshotKey
 import takagi.ru.monica.ui.password.PasswordManualStackMetadata
 import takagi.ru.monica.ui.password.PasswordAggregateWalletItemType
@@ -1330,14 +1329,10 @@ fun PasswordListContent(
         )
     }
     val initialRetainedGroupingSeed = remember {
-        if (hasManualStackMetadataForCurrentInputs) {
-            aggregateRetainedStateViewModel.retainedState.groupingSeed(groupingSnapshotKey)
-        } else {
-            PasswordGroupingSnapshotSeed(
-                groups = emptyMap(),
-                hasSnapshot = false,
-            )
-        }
+        // The retained grouping is safe to show while metadata is being refreshed:
+        // the input snapshot still carries the previous complete list and the
+        // async computation below will replace it once the current data is ready.
+        aggregateRetainedStateViewModel.retainedState.groupingSeed(groupingSnapshotKey)
     }
     // Keep the last complete grouping visible while a new folder is being calculated. Resetting
     // this state with groupingSnapshotKey causes a full-screen loading flash on every folder hop.
@@ -1411,7 +1406,7 @@ fun PasswordListContent(
     }
     // 首次进入页面后保持稳定态，避免目录切换/返回父级时重复触发首帧门控
     var hasCompletedInitialPasswordListStabilization by rememberSaveable {
-        mutableStateOf(false)
+        mutableStateOf(initialRetainedGroupingSeed.hasSnapshot)
     }
     val initialRenderState = remember(
         hasCompletedInitialPasswordListStabilization,
