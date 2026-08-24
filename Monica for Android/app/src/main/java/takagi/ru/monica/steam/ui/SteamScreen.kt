@@ -2653,7 +2653,7 @@ private fun SteamAccountDetailContent(
                     copySteamText(
                         context = context,
                         clipboard = clipboard,
-                        label = context.getString(R.string.steam_code_label),
+                        label = context.getString(R.string.steam_code_copied),
                         value = code
                     )
                 }

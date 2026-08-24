@@ -1077,6 +1077,7 @@
     <string name="steam_activation_email_message">Steam sent an activation code by email. Enter it to finish binding Steam Guard.</string>
     <string name="steam_activation_sms_message">Steam sent an SMS activation code. Enter it to finish binding Steam Guard.</string>
     <string name="steam_code_label">Code</string>
+    <string name="steam_code_copied">Code copied</string>
     <string name="steam_use_monica_code">Use Monica code</string>
     <string name="steam_authenticator_code_picker_title">Select Steam authenticator</string>
     <string name="steam_authenticator_code_picker_empty">No Steam authenticators in Monica</string>

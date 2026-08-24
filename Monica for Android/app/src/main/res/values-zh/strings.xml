@@ -1084,6 +1084,7 @@
     <string name="steam_activation_email_message">Steam 已发送邮箱激活码，请输入该激活码完成 Steam Guard 绑定。</string>
     <string name="steam_activation_sms_message">Steam 已发送短信激活码，请输入该激活码完成 Steam Guard 绑定。</string>
     <string name="steam_code_label">验证码</string>
+    <string name="steam_code_copied">验证码已复制</string>
     <string name="steam_use_monica_code">使用 Monica 验证码</string>
     <string name="steam_authenticator_code_picker_title">选择 Steam 验证器</string>
     <string name="steam_authenticator_code_picker_empty">Monica 中没有 Steam 验证器</string>
