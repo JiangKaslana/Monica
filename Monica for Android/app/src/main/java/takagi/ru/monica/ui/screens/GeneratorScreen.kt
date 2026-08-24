@@ -46,6 +46,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import androidx.compose.ui.text.AnnotatedString
@@ -81,7 +84,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -453,7 +455,6 @@ fun GeneratorScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
             .imePadding()
     ) {
         var generatorMenuExpanded by remember { mutableStateOf(false) }
@@ -494,71 +495,88 @@ fun GeneratorScreen(
         }
         // SSH_KEY 的结果卡片不参与 sticky compact 模式：指纹文本短，不需要收缩，
         // 且 compact 切换会导致高度跳变影响滚动体验。
-        val isResultCardPinned by remember(listState, shouldShowResultCard, selectedGenerator) {
+        val resultCardCompactProgress by remember(
+            listState,
+            shouldShowResultCard,
+            selectedGenerator
+        ) {
             derivedStateOf {
-                !isSshKeyGenerator &&
-                    shouldShowResultCard &&
-                    (listState.firstVisibleItemIndex > 2 ||
-                        (listState.firstVisibleItemIndex == 2 && listState.firstVisibleItemScrollOffset > 0))
+                if (isSshKeyGenerator || !shouldShowResultCard) {
+                    0f
+                } else {
+                    if (listState.firstVisibleItemIndex > 0) {
+                        1f
+                    } else {
+                        val generatorSelectorSize = listState.layoutInfo.visibleItemsInfo
+                            .firstOrNull { it.index == 0 }
+                            ?.size
+                            ?.coerceAtLeast(1)
+                            ?: 1
+                        (listState.firstVisibleItemScrollOffset.toFloat() /
+                            generatorSelectorSize.toFloat()).coerceIn(0f, 1f)
+                    }
+                }
             }
         }
 
-        val topAppBarState = rememberTopAppBarState()
-        val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
-
         Scaffold(
             modifier = Modifier
-                .fillMaxSize()
-                .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
+                .fillMaxSize(),
             topBar = {
-                LargeTopAppBar(
-                    title = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .height(48.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                         Text(
                             text = stringResource(R.string.generator_title),
-                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
-                    },
-                    actions = {
-                        IconButton(onClick = { showHistorySheet = true }) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = stringResource(R.string.history),
-                            )
-                        }
-                        if (showStandaloneSettingsEntry) {
-                            Box {
-                                IconButton(onClick = { showTopActionsMenu = true }) {
-                                    Icon(
-                                        imageVector = Icons.Default.MoreVert,
-                                        contentDescription = stringResource(R.string.more_options),
-                                    )
-                                }
-                                DropdownMenu(
-                                    expanded = showTopActionsMenu,
-                                    onDismissRequest = { showTopActionsMenu = false },
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.nav_settings)) },
-                                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                        onClick = {
-                                            showTopActionsMenu = false
-                                            onOpenStandaloneSettings()
-                                        },
-                                    )
+                        Row {
+                            IconButton(onClick = { showHistorySheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.History,
+                                    contentDescription = stringResource(R.string.history),
+                                )
+                            }
+                            if (showStandaloneSettingsEntry) {
+                                Box {
+                                    IconButton(onClick = { showTopActionsMenu = true }) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = stringResource(R.string.more_options),
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = showTopActionsMenu,
+                                        onDismissRequest = { showTopActionsMenu = false },
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.nav_settings)) },
+                                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                            onClick = {
+                                                showTopActionsMenu = false
+                                                onOpenStandaloneSettings()
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
-                    },
-                    scrollBehavior = topAppBarScrollBehavior,
-                )
+                }
             },
         ) { innerPadding ->
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding),
+                    .padding(innerPadding)
+                    .padding(horizontal = 16.dp),
                 state = listState,
                 contentPadding = PaddingValues(bottom = 96.dp),
             ) {
@@ -605,7 +623,7 @@ fun GeneratorScreen(
                             title = resultCardTitle,
                             showStrengthSection = false,
                             supportingInfo = resultCardSupportingInfo,
-                            compactMode = false,
+                            compactProgress = 0f,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 20.dp),
@@ -615,18 +633,16 @@ fun GeneratorScreen(
                 }
             } else if (shouldShowResultCard) {
                 stickyHeader {
-                    Surface(
-                        color = MaterialTheme.colorScheme.background.copy(alpha = 0.98f)
-                    ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
                         ResultCard(
                             result = currentResult,
                             title = resultCardTitle,
                             showStrengthSection = resultCardShowStrength,
                             supportingInfo = resultCardSupportingInfo,
-                            compactMode = isResultCardPinned,
+                            compactProgress = resultCardCompactProgress,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = if (isResultCardPinned) 8.dp else 20.dp),
+                                .padding(bottom = 20.dp - 12.dp * resultCardCompactProgress),
                             onCopy = copyGeneratedResult
                         )
                     }
@@ -1714,11 +1730,15 @@ private fun ResultCard(
     showStrengthSection: Boolean = true,
     supportingInfo: String? = null,
     modifier: Modifier = Modifier,
-    compactMode: Boolean = false,
+    compactProgress: Float = 0f,
     onCopy: (String) -> Unit
 ) {
     var showCopied by remember { mutableStateOf(false) }
     val colorScheme = MaterialTheme.colorScheme
+    val progress = compactProgress.coerceIn(0f, 1f)
+    // Keep discrete text/layout changes until the continuous size transition is
+    // effectively complete, preventing a visible jump at the end of the drag.
+    val compactMode = progress >= 0.999f
     val context = LocalContext.current
     val strengthResult = remember(result, context) {
         PasswordGenerator.analyzePasswordStrength(result, context)
@@ -1762,6 +1782,18 @@ private fun ResultCard(
         },
         animationSpec = tween(durationMillis = 300),
         label = "button_content_color"
+    )
+    val cardPadding = 20.dp - 10.dp * progress
+    val headerIconSize = 24.dp - 6.dp * progress
+    val headerSpacing = 16.dp - 8.dp * progress
+    val resultMaxHeight = 120.dp - 92.dp * progress
+    val infoSpacing = 12.dp - 6.dp * progress
+    val infoIconSize = 16.dp - 2.dp * progress
+    val cardElevation = 4.dp * (1f - progress)
+    val cardContainerColor = androidx.compose.ui.graphics.lerp(
+        colorScheme.primaryContainer,
+        MaterialTheme.colorScheme.surfaceContainerHigh,
+        progress
     )
     val resultTextStyle = when {
         compactMode && result.length > 72 -> MaterialTheme.typography.bodySmall.copy(
@@ -1809,26 +1841,19 @@ private fun ResultCard(
     ElevatedCard(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(
-                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-            )
             .graphicsLayer { alpha = cardAlpha },
         elevation = CardDefaults.elevatedCardElevation(
-            defaultElevation = if (compactMode) 0.dp else 4.dp
+            defaultElevation = cardElevation
         ),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = if (compactMode) {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            } else {
-                colorScheme.primaryContainer
-            }
+            containerColor = cardContainerColor
         )
     ) {
         val isCompact = compactMode
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(if (isCompact) 10.dp else 20.dp)
+                .padding(cardPadding)
         ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1844,7 +1869,7 @@ private fun ResultCard(
                             imageVector = Icons.Default.Key,
                             contentDescription = null,
                             tint = colorScheme.primary,
-                            modifier = Modifier.size(if (isCompact) 18.dp else 24.dp)
+                            modifier = Modifier.size(headerIconSize)
                         )
                         Text(
                             text = title ?: stringResource(R.string.generated_password),
@@ -1900,19 +1925,13 @@ private fun ResultCard(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(if (isCompact) 8.dp else 16.dp))
+                Spacer(modifier = Modifier.height(headerSpacing))
 
                 if (result.isNotEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .then(
-                                if (isCompact) {
-                                    Modifier.heightIn(max = 28.dp)
-                                } else {
-                                    Modifier.heightIn(max = 120.dp)
-                                }
-                            )
+                            .heightIn(max = resultMaxHeight)
                             .then(
                                 if (isCompact) {
                                     Modifier
@@ -1935,7 +1954,7 @@ private fun ResultCard(
 
                 val infoText = supportingInfo ?: stringResource(R.string.length_chars, result.length)
                 if (showStrengthSection || infoText.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(if (isCompact) 6.dp else 12.dp))
+                    Spacer(modifier = Modifier.height(infoSpacing))
                 }
 
                 if (showStrengthSection) {
@@ -1981,7 +2000,7 @@ private fun ResultCard(
                             } else {
                                 MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                             },
-                            modifier = Modifier.size(if (isCompact) 14.dp else 16.dp)
+                            modifier = Modifier.size(infoIconSize)
                         )
                         Text(
                             text = infoText,

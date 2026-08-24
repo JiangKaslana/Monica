@@ -840,7 +840,9 @@ class NoteViewModel(
                     }
                 }
 
-            repository.getAllItems().first()
+            if (existingItem != null && distinctTargets.size == 1 &&
+                currentTarget.stableKey != existingItem.toStorageTarget().stableKey) {
+                repository.getAllItems().first()
                 .filter {
                     it.itemType == ItemType.NOTE &&
                         it.replicaGroupId == replicaGroupId &&
@@ -849,6 +851,7 @@ class NoteViewModel(
                         it.toStorageTarget().stableKey !in selectedTargetKeys
                 }
                 .forEach { repository.deleteItemById(it.id) }
+            }
         }
     }
 

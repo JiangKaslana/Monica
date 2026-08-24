@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -249,31 +250,38 @@ fun QuickSetupScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = if (step == QuickSetupStep.WELCOME) 12.dp else 20.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(step.titleRes),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = stringResource(step.subtitleRes),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp)
-                    )
+            if (step != QuickSetupStep.WELCOME) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = stringResource(step.titleRes),
+                            style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = stringResource(step.subtitleRes),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                    TextButton(
+                        onClick = ::completeWithoutDialog,
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    ) {
+                        Text(stringResource(R.string.qs_skip))
+                    }
                 }
-                TextButton(onClick = ::completeWithoutDialog) {
-                    Text(stringResource(R.string.qs_skip))
-                }
+                Spacer(modifier = Modifier.height(18.dp))
             }
-            Spacer(modifier = Modifier.height(18.dp))
 
             AnimatedContent(
                 targetState = stepIndex,
@@ -298,11 +306,16 @@ fun QuickSetupScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = if (steps[targetStep] == QuickSetupStep.WELCOME) {
+                        Arrangement.Center
+                    } else {
+                        Arrangement.spacedBy(14.dp)
+                    }
                 ) {
                     when (steps[targetStep]) {
                         QuickSetupStep.WELCOME -> WelcomeStep(
                             selectedLanguage = settings.language,
+                            onSkip = ::completeWithoutDialog,
                             onLanguageSelected = { language ->
                                 coroutineScope.launch {
                                     settingsViewModel.updateLanguage(language)
@@ -415,18 +428,41 @@ fun QuickSetupScreen(
 @Composable
 private fun WelcomeStep(
     selectedLanguage: Language,
+    onSkip: () -> Unit,
     onLanguageSelected: (Language) -> Unit
 ) {
     var languageExpanded by rememberSaveable { mutableStateOf(false) }
     Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(22.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.qs_step_welcome_title),
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onSkip) {
+                Text(stringResource(R.string.qs_skip))
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = stringResource(R.string.app_name),
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
             Text(
                 text = stringResource(R.string.qs_welcome_heading),
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
@@ -434,6 +470,72 @@ private fun WelcomeStep(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(150.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 34.dp, y = (-36).dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.25f))
+            )
+            Box(
+                modifier = Modifier
+                    .size(110.dp)
+                    .align(Alignment.BottomStart)
+                    .offset(x = (-22).dp, y = 28.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.22f))
+            )
+            Surface(
+                modifier = Modifier.align(Alignment.Center),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 2.dp
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Shield,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(30.dp).size(76.dp)
+                )
+            }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = 34.dp, y = (-22).dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                tonalElevation = 1.dp
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(14.dp).size(28.dp)
+                )
+            }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .offset(x = (-34).dp, y = 26.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                tonalElevation = 1.dp
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Key,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(14.dp).size(28.dp)
+                )
+            }
         }
 
         Card(
@@ -1130,29 +1232,40 @@ private fun QuickSetupBottomBar(
     Surface(
         tonalElevation = 3.dp,
         shadowElevation = 0.dp,
-        color = MaterialTheme.colorScheme.surface
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        Column(
+            modifier = Modifier.fillMaxWidth()
         ) {
-            if (onBack != null) {
-                OutlinedButton(onClick = onBack) {
-                    Text(stringResource(R.string.qs_previous))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (onBack != null) {
+                    OutlinedButton(onClick = onBack) {
+                        Text(stringResource(R.string.qs_previous))
+                    }
+                } else {
+                    Text(
+                        text = stringResource(R.string.qs_step_counter, currentIndex + 1, total),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            }
-            Spacer(modifier = Modifier.weight(1f))
-            Button(onClick = onNext) {
-                Text(primaryText)
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
+                Spacer(modifier = Modifier.weight(1f))
+                Button(onClick = onNext) {
+                    Text(primaryText)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

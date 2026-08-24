@@ -1288,7 +1288,9 @@ class TotpViewModel(
                                 }
                             }
 
-                        repository.getAllItems().first()
+                        if (existingItem != null && distinctTargets.size == 1 &&
+                            currentTarget.stableKey != existingItem.toStorageTarget().stableKey) {
+                            repository.getAllItems().first()
                             .filter {
                                 it.itemType == ItemType.TOTP &&
                                     it.replicaGroupId == replicaGroupId &&
@@ -1297,6 +1299,7 @@ class TotpViewModel(
                                     it.toStorageTarget().stableKey !in selectedTargetKeys
                             }
                             .forEach { repository.deleteItemById(it.id) }
+                        }
                         allTargetsSaved
                     }
                 }

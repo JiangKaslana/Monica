@@ -35,6 +35,8 @@ import takagi.ru.monica.bitwarden.api.BitwardenTlsConfig
 import takagi.ru.monica.bitwarden.service.BitwardenAuthService
 import takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel
 import takagi.ru.monica.ui.components.OutlinedTextField
+import takagi.ru.monica.viewmodel.ParsedTotpItem
+import takagi.ru.monica.util.TotpGenerator
 
 private enum class BitwardenServerPreset(val label: String) {
     US("美国官方"),
@@ -55,7 +57,8 @@ private enum class BitwardenServerPreset(val label: String) {
 fun BitwardenLoginScreen(
     viewModel: BitwardenViewModel,
     onNavigateBack: () -> Unit,
-    onLoginSuccess: () -> Unit
+    onLoginSuccess: () -> Unit,
+    totpSuggestions: List<ParsedTotpItem> = emptyList()
 ) {
     val loginState by viewModel.loginState.collectAsState()
     val focusManager = LocalFocusManager.current
@@ -80,6 +83,7 @@ fun BitwardenLoginScreen(
     
     // 两步验证状态
     var showTwoFactorDialog by remember { mutableStateOf(false) }
+    var showTotpPicker by remember { mutableStateOf(false) }
     var twoFactorCode by remember { mutableStateOf("") }
     var selectedTwoFactorMethod by remember { mutableStateOf(0) }
     var availableTwoFactorMethods by remember { mutableStateOf<List<Int>>(emptyList()) }
@@ -572,6 +576,9 @@ fun BitwardenLoginScreen(
             },
             code = twoFactorCode,
             onCodeChange = { twoFactorCode = it },
+            onPickFromMonica = if (selectedTwoFactorMethod == BitwardenAuthService.TWO_FACTOR_AUTHENTICATOR) {
+                { showTotpPicker = true }
+            } else null,
             statusMessage = twoFactorStatusMessage,
             onSendEmailCode = {
                 twoFactorStatusMessage = "正在请求发送邮箱验证码..."
@@ -696,6 +703,47 @@ fun BitwardenLoginScreen(
             onDismiss = { showCaptchaWebView = false }
         )
     }
+
+    if (showTotpPicker) {
+        AlertDialog(
+            onDismissRequest = { showTotpPicker = false },
+            title = { Text("从 Monica 选择验证码") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    if (totpSuggestions.isEmpty()) {
+                        Text("Monica 中没有可用的验证器项目。")
+                    } else {
+                        totpSuggestions.forEach { parsed ->
+                            val code = remember(parsed.item.id) {
+                                runCatching { TotpGenerator.generateOtp(parsed.totpData) }.getOrNull()
+                            }
+                            if (!code.isNullOrBlank()) {
+                                TextButton(
+                                    onClick = {
+                                        twoFactorCode = code
+                                        showTotpPicker = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Text(parsed.item.title, maxLines = 1)
+                                        Text(
+                                            code,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTotpPicker = false }) { Text("取消") }
+            }
+        )
+    }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -798,6 +846,7 @@ fun TwoFactorDialog(
     onMethodSelected: (Int) -> Unit,
     code: String,
     onCodeChange: (String) -> Unit,
+    onPickFromMonica: (() -> Unit)? = null,
     statusMessage: String?,
     onSendEmailCode: () -> Unit,
     onConfirm: () -> Unit,
@@ -895,6 +944,17 @@ fun TwoFactorDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (onPickFromMonica != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onPickFromMonica,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Outlined.Key, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("从 Monica 选择验证码")
+                    }
+                }
             }
         },
         confirmButton = {

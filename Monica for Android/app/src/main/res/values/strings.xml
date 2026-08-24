@@ -2905,7 +2905,8 @@
     <string name="menu">Menu</string>
     <string name="single_select">Single-select</string>
     <string name="multi_select">Multi-select</string>
-    <string name="storage_picker_edit_multi_append_hint">When editing, multi-select only adds targets. Existing targets stay kept.</string>
+    <string name="storage_picker_edit_single_move_hint">Single-select moves this item to the selected location.</string>
+    <string name="storage_picker_edit_multi_copy_hint">Multi-select copies this item to the selected locations. Existing copies stay kept.</string>
     
     <!-- Autofill hardcoded text cleanup -->
     <string name="autofill_view_all_passwords">View all passwords</string>
@@ -4083,6 +4084,7 @@
     <string name="qs_next">Next</string>
     <string name="qs_skip">Skip</string>
     <string name="qs_previous">Previous</string>
+    <string name="qs_step_counter">Step %1$d of %2$d</string>
     <string name="qs_welcome_heading">Monica has a lot of settings. Want a quick setup walkthrough?</string>
     <string name="qs_welcome_description">We\'ll cover only the settings that matter most at first. You can skip or reopen this later.</string>
     <string name="qs_language_selection">Language</string>

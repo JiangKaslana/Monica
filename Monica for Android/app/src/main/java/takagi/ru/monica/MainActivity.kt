@@ -3990,8 +3990,10 @@ fun MonicaContent(
         ) {
             val bitwardenViewModel: takagi.ru.monica.bitwarden.viewmodel.BitwardenViewModel = 
                 androidx.lifecycle.viewmodel.compose.viewModel()
+            val bitwardenTotpSuggestions by totpViewModel.parsedTotpItems.collectAsState()
             takagi.ru.monica.bitwarden.ui.BitwardenLoginScreen(
                 viewModel = bitwardenViewModel,
+                totpSuggestions = bitwardenTotpSuggestions,
                 onNavigateBack = {
                     navController.popBackStack()
                 },

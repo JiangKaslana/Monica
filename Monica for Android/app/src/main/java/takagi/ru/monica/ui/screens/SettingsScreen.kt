@@ -792,6 +792,11 @@ fun SettingsScreen(
     ).any { it }
     
     Scaffold(
+        contentWindowInsets = if (showTopBar) {
+            WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+        } else {
+            WindowInsets(0, 0, 0, 0)
+        },
         topBar = if (showTopBar) {
             {
                 // 使用自定义顶部栏以减小高度

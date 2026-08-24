@@ -474,9 +474,15 @@ fun MultiStorageTargetPickerBottomSheet(
                 )
             }
 
-            if (!singleModeAllowed) {
+            if (lockedTargetKeys.isNotEmpty()) {
                 Text(
-                    text = stringResource(R.string.storage_picker_edit_multi_append_hint),
+                    text = stringResource(
+                        if (selectionMode == StoragePickerSelectionMode.SINGLE) {
+                            R.string.storage_picker_edit_single_move_hint
+                        } else {
+                            R.string.storage_picker_edit_multi_copy_hint
+                        }
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

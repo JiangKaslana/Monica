@@ -2746,7 +2746,8 @@
     <string name="menu">菜单</string>
     <string name="single_select">单选</string>
     <string name="multi_select">多选</string>
-    <string name="storage_picker_edit_multi_append_hint">编辑已有条目时仅支持多选追加，已有目标会保留。</string>
+    <string name="storage_picker_edit_single_move_hint">单选会将此项目移动到选定位置。</string>
+    <string name="storage_picker_edit_multi_copy_hint">多选会复制到选定位置，已有副本会保留。</string>
     
     <!-- 自动填充硬编码修复 -->
     <string name="autofill_view_all_passwords">查看所有密码</string>
@@ -3924,6 +3925,7 @@
     <string name="qs_next">下一步</string>
     <string name="qs_skip">跳过</string>
     <string name="qs_previous">上一步</string>
+    <string name="qs_step_counter">第 %1$d 步，共 %2$d 步</string>
     <string name="qs_welcome_heading">Monica的设置可能有点复杂，所以我可以带你进行快速初始化，是否要开始？</string>
     <string name="qs_welcome_description">下面只保留第一次使用最容易影响体验的设置。你可以跳过，也可以之后在"功能拓展"里重新打开。</string>
     <string name="qs_language_selection">语言选择</string>
