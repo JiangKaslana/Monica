@@ -66,42 +66,92 @@ internal class ZxingBarcodeDecoder(formats: Collection<BarcodeFormat>) : AutoClo
     }
 
     private fun decodeWithRotations(source: LuminanceSource, rotationDegrees: Int): List<String> {
+        // 关键：不能使用 BinaryBitmap.rotateCounterClockwise()——PlanarYUVLuminanceSource
+        // 不支持旋转（isRotateSupported=false），会抛 UnsupportedOperationException 导致
+        // 相机竖屏（rotation=90/270）时每一帧都静默失败。
+        // 改为手动旋转亮度矩阵后重建 source（已由 JVM 测试台验证全部场景通过）。
+        var data = source.matrix
+        var width = source.width
+        var height = source.height
         val initialRotations = ((360 - (rotationDegrees % 360)) % 360) / 90
-        var bitmap = BinaryBitmap(HybridBinarizer(source))
-        repeat(initialRotations) { bitmap = bitmap.rotateCounterClockwise() }
+        repeat(initialRotations) {
+            data = rotateLumaCounterClockwise(data, width, height)
+            val swap = width
+            width = height
+            height = swap
+        }
         repeat(ROTATION_ATTEMPTS) {
-            val result = runCatching { reader.decodeWithState(bitmap) }.getOrNull()
+            val bitmap = BinaryBitmap(
+                HybridBinarizer(
+                    PlanarYUVLuminanceSource(data, width, height, 0, 0, width, height, false)
+                )
+            )
+            val result = runCatching { reader.decode(bitmap) }.getOrNull()
             if (result != null) {
                 val text = result.text?.trim()?.takeIf(String::isNotBlank)
                 reader.reset()
                 return listOfNotNull(text)
             }
-            bitmap = bitmap.rotateCounterClockwise()
+            runCatching { reader.reset() }
+            data = rotateLumaCounterClockwise(data, width, height)
+            val swap = width
+            width = height
+            height = swap
         }
-        reader.reset()
+        runCatching { reader.reset() }
         return emptyList()
     }
 
+    /** 逆时针旋转 90°：new[x, h-1-y] = old[y, x]，返回新数据（调用方需交换宽高）。 */
+    private fun rotateLumaCounterClockwise(src: ByteArray, width: Int, height: Int): ByteArray {
+        val out = ByteArray(src.size)
+        for (y in 0 until height) {
+            val rowOffset = y * width
+            for (x in 0 until width) {
+                out[x * height + (height - 1 - y)] = src[rowOffset + x]
+            }
+        }
+        return out
+    }
+
     private fun readLuminancePlane(imageProxy: ImageProxy): ByteArray? {
-        val mediaImage = imageProxy.image ?: return null
-        if (mediaImage.format != android.graphics.ImageFormat.YUV_420_888) return null
-        val plane = mediaImage.planes.firstOrNull() ?: return null
-        val buffer = plane.buffer
         val width = imageProxy.width
         val height = imageProxy.height
-
-        return if (plane.pixelStride == 1 && plane.rowStride == width) {
-            val data = ByteArray(buffer.remaining())
-            buffer.get(data)
+        // 优先用 mediaImage 的 Y 平面，失败则回退到 ImageProxy 自身的 plane（兼容部分设备 image 为空的情况）
+        val yPlaneBuffer: java.nio.ByteBuffer
+        val yPixelStride: Int
+        val yRowStride: Int
+        val mediaImage = imageProxy.image
+        if (mediaImage != null && mediaImage.format == android.graphics.ImageFormat.YUV_420_888) {
+            val plane = mediaImage.planes.firstOrNull() ?: return null
+            yPlaneBuffer = plane.buffer
+            yPixelStride = plane.pixelStride
+            yRowStride = plane.rowStride
+        } else {
+            // 回退：ImageProxy 暴露的 plane（YUV_420_888 时 planes[0] 为 Y）
+            if (imageProxy.planes.isEmpty()) return null
+            val plane = imageProxy.planes[0]
+            yPlaneBuffer = plane.buffer
+            yPixelStride = plane.pixelStride
+            yRowStride = plane.rowStride
+        }
+        // 确保从头读取
+        yPlaneBuffer.rewind()
+        return if (yPixelStride == 1 && yRowStride == width) {
+            val data = ByteArray(width * height)
+            // 此时 buffer.remaining() 可能 >= width*height（含末尾 padding），只取有效像素
+            val toRead = minOf(data.size, yPlaneBuffer.remaining())
+            yPlaneBuffer.get(data, 0, toRead)
+            // 若 toRead < data.size（极少数设备），剩余保持 0
             data
         } else {
             val data = ByteArray(width * height)
             var offset = 0
             for (row in 0 until height) {
-                buffer.position(row * plane.rowStride)
-                val copyLength = minOf(width, buffer.remaining())
+                yPlaneBuffer.position(row * yRowStride)
+                val copyLength = minOf(width, yPlaneBuffer.remaining())
                 if (copyLength <= 0) break
-                buffer.get(data, offset, copyLength)
+                yPlaneBuffer.get(data, offset, copyLength)
                 offset += width
             }
             data
