@@ -33,10 +33,10 @@ android {
 // ==== F-Droid: build libmdbx_ffi.so from Rust source ====
 // Source: https://github.com/Monica-Pass/Mdbx (MIT)
 // Pinned commit: 974c517465e7b6cac0947d2d59875aa4211fa16b ("build: standardize MDBX2 Android release assets")
-// Resolve order: -PmdbxRustSrc=<path> > MDBX_RUST_SRC env > <repoRoot>/../Mdbx-ffi
+// Resolve order: -PmdbxRustSrc=<path> > MDBX_RUST_SRC env > <rootDir>/Mdbx-ffi
 def mdbxRustSourceDir = (project.findProperty('mdbxRustSrc')
         ?: System.getenv('MDBX_RUST_SRC')
-        ?: new File(rootDir, '../Mdbx-ffi').absolutePath) as String
+        ?: new File(rootDir, 'Mdbx-ffi').absolutePath) as String
 def mdbxRustCommit = '974c517465e7b6cac0947d2d59875aa4211fa16b'
 
 tasks.register('buildMdbxFfiFromSource') {
