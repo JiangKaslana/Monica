@@ -7,6 +7,10 @@ plugins {
     id 'kotlin-parcelize'
 }
 
+// Optional formal signing: drop keystore.properties (gitignored) next to this module.
+// Without it, release APKs fall back to the debug key so they stay installable for testing.
+def keystorePropsFile = rootProject.file('keystore.properties')
+
 android {
     // namespace 与主仓保持一致，仅 applicationId 区分 F-Droid 身份，
     // 避免 R/BuildConfig 包名漂移导致全量源码改动。
@@ -89,11 +93,25 @@ android {
         }
     }
 
+    signingConfigs {
+        def keystoreProps = new Properties()
+        if (keystorePropsFile.isFile()) {
+            keystorePropsFile.withInputStream { keystoreProps.load(it) }
+            release {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig keystorePropsFile.isFile() ? signingConfigs.release : signingConfigs.debug
         }
         debug {
             minifyEnabled false
