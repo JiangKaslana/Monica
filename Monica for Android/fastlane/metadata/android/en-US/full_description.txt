@@ -1,0 +1,28 @@
+Monica is a local-first password manager built with modern Android technologies (Jetpack Compose, Material 3).
+
+<b>Credential management</b>
+* Zero-knowledge vault: AES-256-GCM encryption keyed by your master password (PBKDF2), wrapped by the Android Keystore (TEE/SE)
+* Store passwords, secure notes, bank cards, ID documents, billing addresses, Wi-Fi and SSH keys
+* Password generator, strength analysis (zxcvbn), breach-style security analysis
+* Recycle bin, entry history, snapshots
+
+<b>Two-factor authentication</b>
+* Built-in TOTP/HOTP authenticator with 2-column code grid
+* Steam Guard support (optional integration)
+* Post-fill one-tap code popup after autofill
+
+<b>Autofill &amp; Passkeys</b>
+* System autofill service with overlay picker and inline suggestions
+* Dedicated input-method (keyboard) autofill with biometric unlock
+* Passkey provider for Android 14+ (create and use passkeys from other apps)
+* SMS OTP auto-read via Google Play Services (optional)
+
+<b>Sync &amp; backup — your cloud, your rules</b>
+* WebDAV sync and encrypted backups (Nextcloud, Synology, self-hosted)
+* OneDrive backup and KeePass-over-OneDrive
+* KeePass (.kdbx) read/write compatibility
+* Bitwarden account sync (works with self-hosted Vaultwarden)
+* Encrypted local backups with optional auto-backup
+
+<b>Permissions</b>
+Camera is used only for QR code scanning. Biometrics are used only for local vault unlock. No analytics, no tracking, no ads.

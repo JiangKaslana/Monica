@@ -1,0 +1,3 @@
+* IME: Chinese entries indexed and sorted by pinyin initial letter
+* Export: backup password dialog when exporting ZIP with passkeys
+* Version 1.0.307
