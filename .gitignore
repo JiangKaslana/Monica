@@ -117,3 +117,5 @@ CLI-WeChat-Bridge-main/
 **/certs/
 **/release-signing/
 
+# F-Droid variant lives in the standalone Monica-Fdroid repo
+fdroid/
