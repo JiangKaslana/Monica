@@ -52,12 +52,13 @@ jobs:
           set -euo pipefail
           rm -rf app/src/main/jniLibs/arm64-v8a
           mkdir -p app/src/main/jniLibs
+          pushd rust-jni
           cargo ndk \
             -t arm64-v8a \
-            -o app/src/main/jniLibs \
+            -o ../app/src/main/jniLibs \
             build \
-            --manifest-path rust-jni/Cargo.toml \
             --release
+          popd
           test -f app/src/main/jniLibs/arm64-v8a/libmonica_rust_jni.so
           file app/src/main/jniLibs/arm64-v8a/libmonica_rust_jni.so
           sha256sum app/src/main/jniLibs/arm64-v8a/libmonica_rust_jni.so
