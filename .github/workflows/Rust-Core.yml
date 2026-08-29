@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "Monica for Android/rust-core/**"
+      - "Monica for Android/rust-jni/**"
       - ".github/workflows/Rust-Core.yml"
   push:
     branches:
       - main
     paths:
       - "Monica for Android/rust-core/**"
+      - "Monica for Android/rust-jni/**"
       - ".github/workflows/Rust-Core.yml"
 
 permissions:
@@ -20,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: "Monica for Android/rust-core"
+        working-directory: "Monica for Android"
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -30,11 +32,17 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Check core formatting
+        run: cargo fmt --manifest-path rust-core/Cargo.toml --all -- --check
 
-      - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run core Clippy
+        run: cargo clippy --manifest-path rust-core/Cargo.toml --all-targets --all-features -- -D warnings
 
-      - name: Run tests
-        run: cargo test --all-targets --all-features
+      - name: Run core tests
+        run: cargo test --manifest-path rust-core/Cargo.toml --all-targets --all-features
+
+      - name: Check JNI formatting
+        run: cargo fmt --manifest-path rust-jni/Cargo.toml --all -- --check
+
+      - name: Run JNI Clippy
+        run: cargo clippy --manifest-path rust-jni/Cargo.toml --all-targets --all-features -- -D warnings
