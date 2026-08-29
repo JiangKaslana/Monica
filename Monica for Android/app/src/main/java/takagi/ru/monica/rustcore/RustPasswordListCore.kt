@@ -48,7 +48,10 @@ object RustPasswordListCore {
         }.getOrNull() ?: return null
 
         val entriesById = entries.associateBy { it.id }
-        return selectedIds.mapNotNull(entriesById::get)
+        return selectedIds
+            .asSequence()
+            .mapNotNull { id -> entriesById[id] }
+            .toList()
     }
 
     fun diagnosticLabel(): String = if (!ensureLoaded()) {
