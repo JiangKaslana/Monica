@@ -1,181 +1,109 @@
-# Monica Android 性能与 Rust 重构方案
+# Monica Android 性能与 Rust 重构
 
-状态：第一阶段 Rust 核心与落地路线。此阶段**不直接替换生产列表**，避免在缺少基准、回归测试和 FFI 对齐时破坏密码数据语义。
+状态：**Phase 1 运行时接入中**。Rust 已不再只是隔离实验：Android 通过批量 JNI 调用使用无明文列表核心；同时优先删除 Kotlin 列表热路径中的无用全量解密。当前分支仍需真实设备 A/B 数据后才能声称具体性能提升。
 
-## 结论
+## 架构结论
 
-不要把 Compose、导航、生命周期、Room、Android Keystore、生物识别或系统服务整体重写成 Rust。那会把帧关键路径变成跨语言状态同步，增加 FFI 拷贝、崩溃面和维护成本。
+不把 Compose、导航、生命周期、Room、Android Keystore、生物识别和系统服务整体改写成 Rust。这些边界继续由 Kotlin/Android 管理。Rust 负责适合批量处理、确定性、平台无关的算法，例如列表元数据搜索/投影、来源感知去重、解析与合并逻辑。
 
-Rust 应只承担可批处理、确定性、平台无关的核心：列表投影/排序/去重、导入导出解析、合并冲突算法、大批量校验与哈希。Android 平台边界继续留在 Kotlin。
+## 本轮已经落地的关键改动
 
-## 已定位的主要卡顿来源
+### 1. 普通密码列表取消全量登录密码解密
 
-### P0：密码列表为“不显示的密码”做全量解密
+旧路径在筛选/去重后，对每个可见 `PasswordEntry` 调用 `inspectSecretState(...).plainValueOrEmpty()`。卡片并不显示登录密码，因此这会把数据库失效、筛选切换和进入密码页都放大成 O(n) secret 解析。
 
-`PasswordViewModel.passwordEntriesSource` 在筛选和去重后，对每条记录调用 `inspectSecretState(...).plainValueOrEmpty()`；`allPasswordsSource` 还会再解密一次整表。密码卡片绘制主要使用标题、用户名、网站、备注预览、更新时间、来源、图标和可选的验证器数据，并不需要登录密码明文。
+新路径：
 
-后果：进入密码页、切换筛选、Room 失效通知或同步更新，都可能触发 O(n) 解密和 O(n) 对象复制。
+- 列表保留 Room 返回的原始密文，保证复制、移动、同步等显式命令仍有完整数据；
+- 普通渲染不再把整表变成密码明文；
+- 幽灵行过滤只对共享候选组解析 secret；单例条目零 secret 读取；
+- 智能去重继续只解析候选重复组；
+- 密码卡片、卡片展示字段和分组键均不读取登录密码。
 
-第一优先修复：
+这里特意**不把 `password` 简单清空**：批量复制/移动会使用选中条目的存储密文做按需解密，清空会破坏跨存储复制语义。
 
-1. 增加真正的 `PasswordListEntryUi`，结构中不允许出现 password；
-2. 在解密 map 之前建立元数据列表流；
-3. `PasswordListContent` 只订阅元数据流；
-4. 详情、复制、编辑按 ID 加载一条记录并解密；
-5. 内联 TOTP 只按可见条目解析验证器密钥，不能因此解密登录密码；
-6. 现有需要明文的批处理命令保留独立命令链路，不能复用 UI 列表对象。
+### 2. Rust 批量元数据搜索接入真实 Android 运行时
 
-这一步通常比“把同样的全量解密改写成 Rust”收益更大，因为它直接删除了无用工作。
+新增 `rust-jni` cdylib 和 Kotlin `RustPasswordListCore` facade。一次查询只跨 JNI 一次，传入：
 
-### P0：一个 Composable 订阅过多状态
+- ID；
+- 标题；
+- 用户名；
+- 网站；
+- 应用名；
+- 包名；
+- 查询词。
 
-`PasswordListContent` 同时收集密码列表、加载状态、全量元数据、搜索、分类、认证、完整设置对象、MDBX 操作、同步计数、KeePass 分组与远端同步、Bitwarden 状态、文件夹、附件父项和全局传输进度；它还在组合内部取得数据库与仓库。
+不会传入：登录密码、TOTP secret、银行卡敏感字段或其他 credential secret。Rust 返回匹配 ID；native 不可用时 Kotlin 自动回退。
 
-后果：任何不相关状态变化都可能让巨大组合范围失效，切换标签和同步状态变化时容易出现明显顿挫。
+### 3. 首屏与维护任务分阶段
 
-修复：
+原 `PasswordViewModel.init` 会在进入页面时并发启动：
 
-- 新建 `PasswordListUiState` 与专用协调 ViewModel；
-- 对小而稳定的状态切片使用 `distinctUntilChanged`；
-- 屏幕级 Flow 改用 `collectAsStateWithLifecycle`；
-- DAO/Repository 获取移出 Composable；
-- 顶栏、同步状态、选择状态、列表行、对话框拆成独立稳定边界；
-- UI model 标记不可变，所有 LazyList 条目使用稳定 key/contentType。
+- KeePass 遗留绑定修复扫描；
+- ownership conflict 修复；
+- Bitwarden 离线 secret cache 全量预热。
 
-### P0：巨型编排类造成状态扇出
+Bitwarden 预热会遍历绑定条目并解析密码，这与首屏数据库/Compose 同时抢 CPU。新方案先让密码列表元数据、全量 UI lookup 和分类首次就绪，再给 UI 一个短暂 settling window，之后才启动维护和缓存预热。功能保留，但不再作为首内容的前置竞争者。
 
-当前存在多份超大文件：`MainActivity`、`PasswordViewModel`、`MdbxViewModel`、`LocalKeePassViewModel`、`SimpleMainScreen`、`PasswordListContent`。文件大小本身不是性能指标，但这里对应的是导航、数据库、同步、导入、选择和展示职责交叉，任何小更新都可能扩散到不相关系统。
+### 4. 发布链正式编译 Rust JNI
 
-建议边界：
+- `Android.yml`：Release 构建前为 `arm64-v8a` 和 `armeabi-v7a` 构建 `libmonica_rust_jni.so`；
+- `Android-Preview.yml`：Preview/PR 构建同样带 Rust JNI，并监听 Rust 源码路径；
+- `Rust-Core.yml`：同时执行 `rust-core` 与 `rust-jni` 的 rustfmt/Clippy，core 单测继续执行；
+- R8 保留 JNI facade 的类名，避免静态 `Java_*` 导出在混淆后失联。
 
-- `MainActivity`：只做 Android 入口；
-- `AppGraph`：应用级依赖；
-- `RootNavHost`：只注册路由与转场；
-- `VaultSessionCoordinator`：锁定、解锁、会话恢复；
-- `PasswordListViewModel`：只管理列表状态与列表命令；
-- `PasswordDetailViewModel`：单条密文按需加载、编辑；
-- Monica/KeePass/MDBX/Bitwarden 通过来源适配器实现统一接口。
+## 安全边界
 
-### P1：首帧前构造过多依赖
+- Keystore、主密码、biometric/session 逻辑不迁入 Rust；
+- JNI DTO 不含 credential secret；
+- 随机化密文不能充当 secret 相等指纹；
+- 如果未来引入 `secret_fingerprint`，只能使用写入/导入时产生的不可逆带密钥摘要；
+- IME 独立进程依赖 Room multi-instance invalidation，该能力不能为了性能移除。
 
-`MainActivity.onCreate` 在 `setContent` 前同步构造 Room、SecurityManager、MDBX/密码/安全项仓库、设置与日志；Application 启动还初始化多个全局系统，并使用 `GlobalScope` 启动维护任务。
+## 仍然值得继续的方向
 
-修复：
+### UI 状态扇出
 
-- 先用轻量会话元数据显示锁屏/外壳；
-- 首帧后、认证后再按来源懒加载仓库；
-- Room 单例由应用级容器持有；
-- 附件清理、缓存预热、同步发现等放到结构化后台任务；
-- 替换 `GlobalScope`，使用 Application 生命周期拥有的 CoroutineScope/WorkManager。
+`PasswordListContent` 仍然非常大，并同时订阅密码列表、全量 lookup、分类、搜索、认证、设置、KeePass/MDBX/Bitwarden、附件和传输状态。后续适合：
 
-### P1：每张密码卡片可能启动多条图标解析链
+- 收敛成稳定的屏幕级 `PasswordListUiState`；
+- 使用 lifecycle-aware Flow 收集；
+- 将同步/对话框/选择状态拆到独立组合边界；
+- 将仓库查询移出 Composable。
 
-卡片会准备自定义 Simple Icon、上传图标、应用图标、自动匹配图标和 favicon，再决定最终显示哪一个。滚动时可能产生多余的包管理器查询、图片解码与缓存/网络任务。
+### Room 元数据 projection
 
-修复：
+`allPasswordsForUi` 目前仍由完整 `PasswordEntry` 映射并清空登录密码。长期应引入列表专用 projection/DTO，让 SQL 根本不读取不需要的敏感大字段，并减少对象复制和内存占用。
 
-- 统一为单个 `PasswordLeadingIcon` 状态机；
-- 先判断自定义来源，再决定 app/web 分支；
-- 上级来源明确失败后才启动低优先级 fallback；
-- 位图按目标尺寸预解码并缓存，禁止滚动期间重复解码。
+### 图标链
 
-### P1：数据库失效通知触发的工作过重
+每张卡片仍可能涉及上传图标、Simple Icon、app icon、自动匹配与 favicon。应进一步形成单一来源状态机和稳定缓存，避免滚动时重复解析。
 
-Room 已到 schema 78，并因 IME 独立进程启用了 multi-instance invalidation。该能力可能是必须的，不应为了跑分快速关闭；正确做法是降低每次失效后的列表工作量。
+## Rust FFI 规则
 
-修复：
+- 每个快照/查询一次批量调用，禁止逐条 JNI；
+- Compose State 与回调不跨 FFI；
+- DTO 有明确边界，不包含密码；
+- native 失败必须有 Kotlin 回退；
+- Rust 结果必须保持输入顺序和现有搜索语义；
+- 只有真实 profiling 证明有 CPU 热点时才继续把算法迁入 Rust。
 
-- DAO 返回列表专用元数据 projection；
-- 来源、分类、收藏等筛选尽量下推 SQL；
-- 用真实大库执行 `EXPLAIN QUERY PLAN` 检查索引；
-- 大库搜索考虑 FTS，而不是反复整表内存过滤；
-- Paging 需测量后再引入，它不能替代“取消全量解密”。
+## 验收门槛
 
-## Rust 边界
+代码层：
 
-### 留在 Kotlin
+- Rust core 单测全绿；
+- rustfmt/Clippy 全绿；
+- Android JVM 单测全绿；
+- Kotlin 编译和完整 APK 构建通过；
+- APK 内实际包含对应 ABI 的 `libmonica_rust_jni.so`；
+- 批量复制/移动、详情、搜索、分类、混合 KeePass/MDBX/Bitwarden 视图语义不回退。
 
-- Compose 与动画；
-- 导航、生命周期和 Android 进程集成；
-- Room 所有权；
-- Android Keystore、生物识别、权限、Intent、Service、WorkManager。
+设备层：
 
-当前安全模型依赖 Keystore alias、受认证密钥访问、EncryptedSharedPreferences 和会话语义。性能重构不能偷偷替换成另一套 Rust 密钥库。
+- 同一设备、同一数据库、同一配置做冷进程 A/B；
+- 记录解锁到首内容、p50/p95/p99 帧时间、jank、Java/native heap 和 APK 体积；
+- 在没有设备测量前不写“提升 X 倍”之类结论。
 
-### 批量迁入 Rust
-
-- 无密文列表投影、规范化搜索、排序与来源感知去重；
-- 导入导出解析器，并配 fuzz 测试；
-- 确定性合并/冲突算法；
-- 与 Android 无关的 KDBX/MDBX 数据变换；
-- 只有在 profiling 证明 CPU 瓶颈后，才迁移大批量哈希/校验。
-
-### FFI 约束
-
-- 每个快照或命令一次调用，禁止逐条调用；
-- Compose State 和回调不能跨 FFI；
-- DTO 有明确 schema version 和输入上限；
-- 列表 DTO 永远没有密码；
-- 迁移全部放在 feature flag 后；
-- 先 shadow mode 对比 Kotlin/Rust 的有序 ID 与错误行为；
-- 若并入现有 MDBX 动态库，可避免每个 ABI 再增加一份 Rust runtime 与 `.so` 体积。
-
-## 分阶段交付
-
-### Phase 0：测量与隔离核心（本 PR）
-
-- 纯 Rust 无密文列表模型；
-- 批量搜索/投影；
-- 不会吞掉本地重复项和多密码兄弟项的保守去重；
-- 顺序、搜索、Unicode、来源身份和副本语义测试；
-- rustfmt、Clippy、test CI。
-
-同时补齐 Macrobenchmark 场景：
-
-1. 冷启动到锁屏；
-2. 解锁到密码列表首屏；
-3. 密码/验证器/笔记标签连续切换；
-4. 100、1,000、10,000 条合成库滚动；
-5. 连续打开/关闭密码详情。
-
-记录：time-to-first-content、帧时长 p50/p95/p99、jank 百分比、主线程阻塞、分配次数、Java/native heap、APK/AAB 体积。
-
-### Phase 1：先删除 Kotlin 无用工作
-
-- 元数据专用列表流；
-- 单条按需解密；
-- 列表 UiState 协调器；
-- lifecycle-aware 收集；
-- 图标解析门控；
-- 首帧依赖延迟；
-- 拆开首批巨型编排边界。
-
-生产启用 Rust 前必须先完成这一阶段。
-
-### Phase 2：Rust shadow adapter
-
-- 建立 UniFFI 批量桥接；
-- 每个 distinct 快照/查询只调用一次；
-- Debug/Preview 同时跑 Kotlin 和 Rust，对比有序 ID；
-- 诊断日志只记录数量、耗时和哈希，禁止记录条目内容；
-- Kotlin 结果仍为权威结果。
-
-### Phase 3：受控切换
-
-- 本地 feature flag 启用 Rust；
-- 保留即时回退 Kotlin；
-- 覆盖旧数据库升级、进程死亡、自动锁定、生物认证过期、IME 多进程失效、KeePass/MDBX/Bitwarden 混合视图和大量附件；
-- parity 与基准达标后再删除重复 Kotlin 实现。
-
-## 合并门槛
-
-- shadow corpus 中有序 ID、筛选结果零差异；
-- 日志、列表 DTO、SavedState、崩溃报告和 FFI DTO 中没有新明文；
-- 1,000 条库密码页首内容中位时间至少改善 40%；
-- 100 条库 p95 不回退；
-- 标签切换 jank 明显下降，native heap 不持续增长；
-- 解锁耗时不回退；
-- 每 ABI 的包体增量已测量并接受；
-- 进程死亡、自动锁、IME 多进程失效和数据库迁移测试全部通过。
-
-绝对毫秒阈值应由 Phase 0 基线确定，不能在没有设备数据时拍脑袋填写。
+推荐控制组：同一 commit/buildType 做一份禁用 Rust runtime 的 APK，与启用 Rust 的 APK 放在等价新实例/克隆环境中比较；这样才能把 Rust 收益、启动维护调度收益和历史应用状态差异拆开。
