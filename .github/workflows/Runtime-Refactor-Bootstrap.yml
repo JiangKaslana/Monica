@@ -1,0 +1,189 @@
+name: Runtime Refactor Bootstrap
+
+on:
+  push:
+    branches:
+      - perf/full-runtime-refactor
+    paths:
+      - .github/workflows/Runtime-Refactor-Bootstrap.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  refactor-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out refactor branch
+        uses: actions/checkout@v6
+        with:
+          ref: perf/full-runtime-refactor
+          fetch-depth: 0
+
+      - name: Apply password-list runtime refactor
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("Monica for Android/app/src/main/java/takagi/ru/monica/viewmodel/PasswordViewModel.kt")
+          text = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, got {count}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "import takagi.ru.monica.security.SessionManager\n",
+              "import takagi.ru.monica.security.SessionManager\nimport takagi.ru.monica.rustcore.RustPasswordListCore\n",
+              "rust import",
+          )
+
+          replace_once(
+              "                val searchFlow = repository.searchPasswordEntries(query).map { baseResults ->\n",
+              "                val searchFlow = rawAllPasswordsSource.map { allEntries ->\n"
+              "                    val baseResults = RustPasswordListCore.filterEntries(allEntries, query)\n"
+              "                        ?: allEntries.filter { matchesSearchQuery(it, query) }\n",
+              "rust metadata search",
+          )
+
+          replace_once(
+              "                val decrypted = exactDeduped.map { entry ->\n"
+              "                    entry.copy(password = inspectSecretState(entry).plainValueOrEmpty())\n"
+              "                }\n"
+              "                if (shouldKeepRawDisplay) {\n"
+              "                    decrypted\n"
+              "                } else {\n"
+              "                    filterGhostEntriesForDisplay(decrypted)\n"
+              "                }\n",
+              "                val ghostFiltered = if (shouldKeepRawDisplay) {\n"
+              "                    exactDeduped\n"
+              "                } else {\n"
+              "                    filterGhostEntriesForDisplay(exactDeduped)\n"
+              "                }\n"
+              "                // List cards never need the login secret. Keep ciphertext and plaintext\n"
+              "                // out of Compose state; detail/copy/edit resolve one record by ID on demand.\n"
+              "                ghostFiltered.map { entry ->\n"
+              "                    if (entry.password.isEmpty()) entry else entry.copy(password = \"\")\n"
+              "                }\n",
+              "remove bulk list decrypt",
+          )
+
+          replace_once(
+              "    private fun filterGhostEntriesForDisplay(entries: List<PasswordEntry>): List<PasswordEntry> {\n"
+              "        if (entries.size <= 1) return entries\n"
+              "\n"
+              "        val groups = entries.groupBy { buildGhostGroupKey(it) }\n"
+              "        val ghostIds = mutableSetOf<Long>()\n"
+              "\n"
+              "        groups.values.forEach { group ->\n"
+              "            if (group.size <= 1) return@forEach\n"
+              "            if (!group.any { it.password.isNotBlank() }) return@forEach\n"
+              "\n"
+              "            group.forEach { entry ->\n"
+              "                val isPasswordMode = entry.loginType.equals(\"PASSWORD\", ignoreCase = true)\n"
+              "                val shouldFilterGhost = !entry.isLocalOnlyEntry() || entry.hasOwnershipConflict()\n"
+              "                if (isPasswordMode && entry.password.isBlank() && shouldFilterGhost) {\n"
+              "                    ghostIds += entry.id\n"
+              "                }\n"
+              "            }\n"
+              "        }\n"
+              "\n"
+              "        if (ghostIds.isEmpty()) return entries\n"
+              "        return entries.filterNot { it.id in ghostIds }\n"
+              "    }\n",
+              "    private fun filterGhostEntriesForDisplay(entries: List<PasswordEntry>): List<PasswordEntry> {\n"
+              "        val ghostIds = findGhostDisplayIds(\n"
+              "            entries = entries,\n"
+              "            idOf = PasswordEntry::id,\n"
+              "            groupKeyOf = ::buildGhostGroupKey,\n"
+              "            isPasswordMode = { entry ->\n"
+              "                entry.loginType.equals(\"PASSWORD\", ignoreCase = true)\n"
+              "            },\n"
+              "            shouldFilterGhost = { entry ->\n"
+              "                !entry.isLocalOnlyEntry() || entry.hasOwnershipConflict()\n"
+              "            },\n"
+              "            resolveSecret = { entry -> inspectSecretState(entry).plainValueOrEmpty() },\n"
+              "        )\n"
+              "        if (ghostIds.isEmpty()) return entries\n"
+              "        return entries.filterNot { it.id in ghostIds }\n"
+              "    }\n",
+              "candidate-only ghost filtering",
+          )
+
+          path.write_text(text, encoding="utf-8")
+          PY
+          git diff --check
+          git diff -- "Monica for Android/app/src/main/java/takagi/ru/monica/viewmodel/PasswordViewModel.kt"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --locked
+
+      - name: Check Rust core and JNI
+        shell: bash
+        run: |
+          cargo fmt --manifest-path "Monica for Android/rust-core/Cargo.toml" --all -- --check
+          cargo clippy --manifest-path "Monica for Android/rust-core/Cargo.toml" --all-targets --all-features -- -D warnings
+          cargo test --manifest-path "Monica for Android/rust-core/Cargo.toml" --all-targets --all-features
+          cargo fmt --manifest-path "Monica for Android/rust-jni/Cargo.toml" --all -- --check
+          cargo clippy --manifest-path "Monica for Android/rust-jni/Cargo.toml" --all-targets --all-features -- -D warnings
+
+      - name: Build arm64 Rust JNI
+        shell: bash
+        working-directory: Monica for Android/rust-jni
+        run: cargo ndk -t arm64-v8a -o ../app/src/main/jniLibs build --release
+
+      - name: Test and build Android debug APK
+        shell: bash
+        working-directory: Monica for Android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace -PpreviewVersionSuffix=rust-runtime
+
+      - name: Verify Rust library in arm64 APK
+        id: apk
+        shell: bash
+        run: |
+          apk="$(find 'Monica for Android/app/build/outputs/apk/debug' -type f -iname '*arm64-v8a*.apk' | head -n 1)"
+          if [ -z "$apk" ]; then
+            echo "No arm64 debug APK found"
+            find 'Monica for Android/app/build/outputs/apk/debug' -type f -maxdepth 2 -print || true
+            exit 1
+          fi
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libmonica_rust_jni.so'
+          sha256sum "$apk"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      - name: Commit validated hot-path refactor
+        shell: bash
+        run: |
+          rm -f "Monica for Android/app/src/main/jniLibs/arm64-v8a/libmonica_rust_jni.so"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Monica for Android/app/src/main/java/takagi/ru/monica/viewmodel/PasswordViewModel.kt"
+          git diff --cached --check
+          git commit -m "perf(android): remove bulk secret decrypt from password list"
+          git push origin HEAD:perf/full-runtime-refactor
+
+      - name: Upload arm64 runtime-refactor APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: Monica-runtime-refactor-arm64
+          path: ${{ steps.apk.outputs.apk }}
+          retention-days: 14
+          if-no-files-found: error
