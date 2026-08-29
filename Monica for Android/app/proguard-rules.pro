@@ -67,6 +67,9 @@
     public static final ** CREATOR;
 }
 
+# Rust JNI uses statically exported Java_* symbols, so R8 must not rename this facade.
+-keep class takagi.ru.monica.rustcore.RustPasswordListCore { *; }
+
 # 移除日志 (Release构建)
 -assumenosideeffects class android.util.Log {
     public static *** d(...);
