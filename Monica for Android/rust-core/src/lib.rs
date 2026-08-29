@@ -231,7 +231,7 @@ fn collapse_by_known_fingerprint<'a>(group: Vec<Candidate<'a>>) -> Vec<Candidate
             .record
             .secret_fingerprint
             .as_deref()
-            .map(normalize_key)
+            .map(normalize_fingerprint)
             .filter(|value| !value.is_empty());
 
         let Some(fingerprint) = fingerprint else {
@@ -303,6 +303,10 @@ fn contains_case_insensitive(value: &str, normalized_query: &str) -> bool {
 
 fn normalize_key(value: &str) -> String {
     value.trim().to_lowercase()
+}
+
+fn normalize_fingerprint(value: &str) -> String {
+    value.trim().to_owned()
 }
 
 fn record_quality_cmp(left: &PasswordListRecord, right: &PasswordListRecord) -> Ordering {
@@ -437,7 +441,7 @@ mod tests {
         let mut richer = record(2, "GitHub");
         richer.collapse_identity =
             Some(identity(IdentityKind::ExternalObject, " BW:VAULT:CIPHER "));
-        richer.secret_fingerprint = Some("HMAC:ABC".to_owned());
+        richer.secret_fingerprint = Some(" hmac:abc ".to_owned());
         richer.username = "octocat".to_owned();
         richer.is_favorite = true;
         richer.updated_at_millis = 200;
