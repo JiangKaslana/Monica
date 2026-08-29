@@ -15,6 +15,7 @@ import takagi.ru.monica.data.AppLauncherLabel
 import takagi.ru.monica.data.PasswordDatabase
 import takagi.ru.monica.mdbx.MdbxDiagLogger
 import takagi.ru.monica.perf.MainThreadStallMonitor
+import takagi.ru.monica.rustcore.RustPasswordListCore
 import takagi.ru.monica.security.AppUpdateSecurityGuard
 import takagi.ru.monica.sync.AndroidSyncNetworkGate
 import takagi.ru.monica.sync.SyncTaskRunner
@@ -43,6 +44,11 @@ class MonicaApplication : Application() {
     
     override fun onCreate() {
         super.onCreate()
+
+        // Experimental APK probe: load the arm64 Rust JNI library and execute
+        // a real password-list projection self-test. Failure is non-fatal so
+        // the APK remains recoverable on unsupported ABIs.
+        Log.i(TAG, RustPasswordListCore.diagnosticLabel())
 
         SessionManager.attachAppContext(this)
 
