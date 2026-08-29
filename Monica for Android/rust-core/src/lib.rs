@@ -435,7 +435,8 @@ mod tests {
         older.updated_at_millis = 100;
 
         let mut richer = record(2, "GitHub");
-        richer.collapse_identity = Some(identity(IdentityKind::ExternalObject, " BW:VAULT:CIPHER "));
+        richer.collapse_identity =
+            Some(identity(IdentityKind::ExternalObject, " BW:VAULT:CIPHER "));
         richer.secret_fingerprint = Some("HMAC:ABC".to_owned());
         richer.username = "octocat".to_owned();
         richer.is_favorite = true;
