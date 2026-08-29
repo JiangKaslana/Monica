@@ -1,4 +1,5 @@
 name: Runtime Refactor Bootstrap
+# bootstrap revision 2: rerun after rustfmt-normalizing the JNI bridge
 
 on:
   push:
