@@ -64,7 +64,7 @@ pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativ
         },
     );
 
-    if projected.len() == 1 && projected[0].id == 101 {
+    if projected.items.len() == 1 && projected.items[0].id == 101 {
         JNI_TRUE
     } else {
         JNI_FALSE
