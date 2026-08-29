@@ -40,9 +40,15 @@ pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativ
     let projected = project_password_list(
         &rows,
         "github",
-        ProjectionOptions { collapse_known_replicas: false },
+        ProjectionOptions {
+            collapse_known_replicas: false,
+        },
     );
-    if projected.items.len() == 1 && projected.items[0].id == 101 { JNI_TRUE } else { JNI_FALSE }
+    if projected.items.len() == 1 && projected.items[0].id == 101 {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
 }
 
 #[no_mangle]
@@ -116,19 +122,21 @@ fn filter_ids(
     let projected = project_password_list(
         &records,
         &query,
-        ProjectionOptions { collapse_known_replicas: false },
+        ProjectionOptions {
+            collapse_known_replicas: false,
+        },
     );
-    let selected_ids = projected.items.iter().map(|item| item.id).collect::<Vec<_>>();
+    let selected_ids = projected
+        .items
+        .iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
     let output = env.new_long_array(selected_ids.len() as i32).ok()?;
     env.set_long_array_region(&output, 0, &selected_ids).ok()?;
     Some(output.into_raw())
 }
 
-fn read_string_array(
-    env: &mut JNIEnv,
-    array: &JObjectArray,
-    len: usize,
-) -> Option<Vec<String>> {
+fn read_string_array(env: &mut JNIEnv, array: &JObjectArray, len: usize) -> Option<Vec<String>> {
     let mut values = Vec::with_capacity(len);
     for index in 0..len {
         let object = env.get_object_array_element(array, index as i32).ok()?;
