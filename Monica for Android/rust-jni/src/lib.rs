@@ -7,6 +7,15 @@ use monica_password_list_core::{project_password_list, PasswordListRecord, Proje
 
 const RUST_CORE_VERSION: &str = "monica-password-list-core/0.2.0-runtime";
 
+struct MetadataArrays<'local, 'borrow> {
+    ids: &'borrow JLongArray<'local>,
+    titles: &'borrow JObjectArray<'local>,
+    usernames: &'borrow JObjectArray<'local>,
+    websites: &'borrow JObjectArray<'local>,
+    app_names: &'borrow JObjectArray<'local>,
+    app_package_names: &'borrow JObjectArray<'local>,
+}
+
 #[no_mangle]
 pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativeVersion(
     env: JNIEnv,
@@ -63,43 +72,43 @@ pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativ
     app_package_names: JObjectArray,
     query: JString,
 ) -> jlongArray {
-    filter_ids(
-        &mut env,
-        &ids,
-        &titles,
-        &usernames,
-        &websites,
-        &app_names,
-        &app_package_names,
-        &query,
-    )
-    .unwrap_or(std::ptr::null_mut())
+    let arrays = MetadataArrays {
+        ids: &ids,
+        titles: &titles,
+        usernames: &usernames,
+        websites: &websites,
+        app_names: &app_names,
+        app_package_names: &app_package_names,
+    };
+    filter_ids(&mut env, arrays, &query).unwrap_or(std::ptr::null_mut())
 }
 
 fn filter_ids(
     env: &mut JNIEnv,
-    ids: &JLongArray,
-    titles: &JObjectArray,
-    usernames: &JObjectArray,
-    websites: &JObjectArray,
-    app_names: &JObjectArray,
-    app_package_names: &JObjectArray,
+    arrays: MetadataArrays<'_, '_>,
     query: &JString,
 ) -> Option<jlongArray> {
-    let len = env.get_array_length(ids).ok()? as usize;
-    for array in [titles, usernames, websites, app_names, app_package_names] {
+    let len = env.get_array_length(arrays.ids).ok()? as usize;
+    for array in [
+        arrays.titles,
+        arrays.usernames,
+        arrays.websites,
+        arrays.app_names,
+        arrays.app_package_names,
+    ] {
         if env.get_array_length(array).ok()? as usize != len {
             return None;
         }
     }
 
     let mut id_values = vec![0_i64; len];
-    env.get_long_array_region(ids, 0, &mut id_values).ok()?;
-    let titles = read_string_array(env, titles, len)?;
-    let usernames = read_string_array(env, usernames, len)?;
-    let websites = read_string_array(env, websites, len)?;
-    let app_names = read_string_array(env, app_names, len)?;
-    let app_package_names = read_string_array(env, app_package_names, len)?;
+    env.get_long_array_region(arrays.ids, 0, &mut id_values)
+        .ok()?;
+    let titles = read_string_array(env, arrays.titles, len)?;
+    let usernames = read_string_array(env, arrays.usernames, len)?;
+    let websites = read_string_array(env, arrays.websites, len)?;
+    let app_names = read_string_array(env, arrays.app_names, len)?;
+    let app_package_names = read_string_array(env, arrays.app_package_names, len)?;
     let query: String = env.get_string(query).ok()?.into();
 
     let records = (0..len)
