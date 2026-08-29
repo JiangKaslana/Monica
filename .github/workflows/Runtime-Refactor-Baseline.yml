@@ -1,0 +1,52 @@
+name: Runtime Refactor Baseline
+
+on:
+  push:
+    branches:
+      - perf/full-runtime-refactor
+    paths:
+      - .github/workflows/Runtime-Refactor-Baseline.yml
+
+permissions:
+  contents: read
+
+jobs:
+  baseline-failures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main baseline
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: false
+
+      - name: Run current red guard tests on main
+        working-directory: Monica for Android
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest --stacktrace \
+            --tests '*VersionMetadataRegressionGuardTest' \
+            --tests '*AttachmentOwnerMigrationGuardTest' \
+            --tests '*KeePassAttachmentExecutorRegressionGuardTest' \
+            --tests '*KeePassOperationAvailabilityTest' \
+            --tests '*TimelineSnapshotIntegrationGuardTest' \
+            --tests '*LocaleResourceCoverageTest' \
+            --tests '*AppCompilationPerformanceGuardTest' \
+            --tests '*MdbxAndroidIntegrationGuardTest' \
+            --tests '*BiometricUnlockRegressionGuardTest' \
+            --tests '*SteamBoundaryGuardTest' \
+            --tests '*VaultV2ArchiveRoutingGuardTest' \
+            --tests '*CardBrandIconTest' \
+            --tests '*WebDavBillingAddressBackupGuardTest' \
+            --tests '*MultiPasswordSaveRegressionGuardTest'
