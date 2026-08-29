@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
-use jni::objects::JClass;
-use jni::sys::{jboolean, jstring, JNI_FALSE, JNI_TRUE};
+use jni::objects::{JClass, JLongArray, JObjectArray, JString};
+use jni::sys::{jboolean, jlongArray, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use monica_password_list_core::{project_password_list, PasswordListRecord, ProjectionOptions};
 
@@ -43,4 +43,102 @@ pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativ
         ProjectionOptions { collapse_known_replicas: false },
     );
     if projected.items.len() == 1 && projected.items[0].id == 101 { JNI_TRUE } else { JNI_FALSE }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativeFilterIds(
+    mut env: JNIEnv,
+    _class: JClass,
+    ids: JLongArray,
+    titles: JObjectArray,
+    usernames: JObjectArray,
+    websites: JObjectArray,
+    app_names: JObjectArray,
+    app_package_names: JObjectArray,
+    query: JString,
+) -> jlongArray {
+    filter_ids(
+        &mut env,
+        &ids,
+        &titles,
+        &usernames,
+        &websites,
+        &app_names,
+        &app_package_names,
+        &query,
+    )
+    .unwrap_or(std::ptr::null_mut())
+}
+
+fn filter_ids(
+    env: &mut JNIEnv,
+    ids: &JLongArray,
+    titles: &JObjectArray,
+    usernames: &JObjectArray,
+    websites: &JObjectArray,
+    app_names: &JObjectArray,
+    app_package_names: &JObjectArray,
+    query: &JString,
+) -> Option<jlongArray> {
+    let len = env.get_array_length(ids).ok()? as usize;
+    for array in [titles, usernames, websites, app_names, app_package_names] {
+        if env.get_array_length(array).ok()? as usize != len {
+            return None;
+        }
+    }
+
+    let mut id_values = vec![0_i64; len];
+    env.get_long_array_region(ids, 0, &mut id_values).ok()?;
+    let titles = read_string_array(env, titles, len)?;
+    let usernames = read_string_array(env, usernames, len)?;
+    let websites = read_string_array(env, websites, len)?;
+    let app_names = read_string_array(env, app_names, len)?;
+    let app_package_names = read_string_array(env, app_package_names, len)?;
+    let query: String = env.get_string(query).ok()?.into();
+
+    let records = (0..len)
+        .map(|index| PasswordListRecord {
+            id: id_values[index],
+            title: titles[index].clone(),
+            username: usernames[index].clone(),
+            website: websites[index].clone(),
+            app_name: app_names[index].clone(),
+            app_package_name: app_package_names[index].clone(),
+            notes_preview: String::new(),
+            collapse_identity: None,
+            storage_target_key: None,
+            secret_fingerprint: None,
+            is_favorite: false,
+            updated_at_millis: 0,
+        })
+        .collect::<Vec<_>>();
+
+    let projected = project_password_list(
+        &records,
+        &query,
+        ProjectionOptions { collapse_known_replicas: false },
+    );
+    let selected_ids = projected.items.iter().map(|item| item.id).collect::<Vec<_>>();
+    let output = env.new_long_array(selected_ids.len() as i32).ok()?;
+    env.set_long_array_region(&output, 0, &selected_ids).ok()?;
+    Some(output.into_raw())
+}
+
+fn read_string_array(
+    env: &mut JNIEnv,
+    array: &JObjectArray,
+    len: usize,
+) -> Option<Vec<String>> {
+    let mut values = Vec::with_capacity(len);
+    for index in 0..len {
+        let object = env.get_object_array_element(array, index as i32).ok()?;
+        if object.is_null() {
+            values.push(String::new());
+            continue;
+        }
+        let string = JString::from(object);
+        let value: String = env.get_string(&string).ok()?.into();
+        values.push(value);
+    }
+    Some(values)
 }
