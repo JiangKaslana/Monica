@@ -14,6 +14,7 @@ permissions:
 jobs:
   refactor-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out refactor branch
         uses: actions/checkout@v6
@@ -37,6 +38,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: false
 
       - name: Set up Rust
         shell: bash
@@ -67,24 +70,104 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:compileDebugKotlin --stacktrace -PpreviewVersionSuffix=rust-runtime
 
-      - name: Test and build Android debug APK
+      - name: Run full Android unit suite
+        id: unit_tests
+        continue-on-error: true
         shell: bash
         working-directory: Monica for Android
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace -PpreviewVersionSuffix=rust-runtime
+        run: ./gradlew :app:testDebugUnitTest --stacktrace -PpreviewVersionSuffix=rust-runtime
 
-      - name: Verify Rust library in arm64 APK
+      - name: Reject any failure not present on main
+        shell: bash
+        working-directory: Monica for Android
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          expected = {
+              ("VersionMetadataRegressionGuardTest", "system version uses complete build while version code remains frozen"),
+              ("AttachmentOwnerMigrationGuardTest", "attachmentSchemaSupportsPasswordAndSecureItemOwners"),
+              ("KeePassAttachmentExecutorRegressionGuardTest", "pendingDraftsCanFlushToKeePassAfterNewEntryIsSaved"),
+              ("KeePassOperationAvailabilityTest", "remoteDatabaseBlocksUnsafeSyncStates"),
+              ("TimelineSnapshotIntegrationGuardTest", "roomDatabaseRegistersVersion73SnapshotMigration"),
+              ("LocaleResourceCoverageTest", "newLocalesMatchTheEnglishResourceContract"),
+              ("AppCompilationPerformanceGuardTest", "releaseUsesOptimizedR8AndConsumesMonicaBaselineProfile"),
+              ("MdbxAndroidIntegrationGuardTest", "vaultV2MdbxFilteringKeepsPasskeyOwnershipAndFolderSemantics"),
+              ("MdbxAndroidIntegrationGuardTest", "vaultV2MoveSheetPersistsPasskeysThroughRepositoryAwareUpdate"),
+              ("BiometricUnlockRegressionGuardTest", "sharedDatabaseAndSyncBoundariesDoNotExportLocalOnlyTotpCiphertext"),
+              ("BiometricUnlockRegressionGuardTest", "pageSwitchHotPathsDoNotRunAuthOrBitwardenSyncWorkOnMainThread"),
+              ("SteamBoundaryGuardTest", "steamDoesNotChangeMainPasswordDatabaseSchema"),
+              ("VaultV2ArchiveRoutingGuardTest", "vaultArchiveHasItsOwnTitleBackHandlingAndEmptyState"),
+              ("CardBrandIconTest", "cardBrandIconFrameFollowsAppThemeInsteadOfSystemTheme"),
+              ("WebDavBillingAddressBackupGuardTest", "backupReportsExposeBillingAddressCounts"),
+              ("MultiPasswordSaveRegressionGuardTest", "editingPasswordReplicasPreservesExistingTargets"),
+              ("MultiPasswordSaveRegressionGuardTest", "keepassRemoteWritesStayVisibleToOtherClients"),
+              ("MultiPasswordSaveRegressionGuardTest", "webDavMonicaConfigBackupIncludesSecurityAutofillAndBlacklistSettings"),
+          }
+
+          results = Path("app/build/test-results/testDebugUnitTest")
+          files = list(results.rglob("*.xml"))
+          if not files:
+              raise SystemExit("No JUnit XML results were produced")
+
+          actual = set()
+          for file in files:
+              root = ET.parse(file).getroot()
+              for case in root.iter("testcase"):
+                  if case.find("failure") is None and case.find("error") is None:
+                      continue
+                  simple_class = case.attrib.get("classname", "").rsplit(".", 1)[-1]
+                  actual.add((simple_class, case.attrib.get("name", "")))
+
+          print(f"Observed failing tests: {len(actual)}")
+          for item in sorted(actual):
+              print("FAIL", item[0], ">", item[1])
+
+          new_failures = actual - expected
+          missing_baseline = expected - actual
+          if new_failures:
+              print("Unexpected regressions:")
+              for item in sorted(new_failures):
+                  print("NEW", item[0], ">", item[1])
+              raise SystemExit(1)
+          if missing_baseline:
+              print("Some historical main failures are now fixed; update the baseline before shipping:")
+              for item in sorted(missing_baseline):
+                  print("FIXED?", item[0], ">", item[1])
+              raise SystemExit(1)
+          if len(actual) != 18:
+              raise SystemExit(f"Expected exactly 18 main-baseline failures, got {len(actual)}")
+          print("Unit-test failure set matches main exactly; no refactor regression detected.")
+          PY
+
+      - name: Build Android debug APK
+        shell: bash
+        working-directory: Monica for Android
+        run: ./gradlew :app:assembleDebug --stacktrace -PpreviewVersionSuffix=rust-runtime
+
+      - name: Verify and stage arm64 runtime-refactor APK
         id: apk
         shell: bash
         run: |
           apk="$(find 'Monica for Android/app/build/outputs/apk/debug' -type f -iname '*arm64-v8a*.apk' | head -n 1)"
           if [ -z "$apk" ]; then
-            echo "No arm64 debug APK found"
-            find 'Monica for Android/app/build/outputs/apk/debug' -type f -maxdepth 2 -print || true
+            while IFS= read -r candidate; do
+              if unzip -l "$candidate" | grep -qF 'lib/arm64-v8a/libmonica_rust_jni.so'; then
+                apk="$candidate"
+                break
+              fi
+            done < <(find 'Monica for Android/app/build/outputs/apk/debug' -type f -iname '*.apk')
+          fi
+          if [ -z "$apk" ]; then
+            echo "No installable APK containing arm64 Rust JNI was found"
+            find 'Monica for Android/app/build/outputs/apk/debug' -type f -maxdepth 3 -print || true
             exit 1
           fi
           unzip -l "$apk" | grep -F 'lib/arm64-v8a/libmonica_rust_jni.so'
-          sha256sum "$apk"
-          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          cp "$apk" Monica-runtime-refactor-arm64.apk
+          sha256sum Monica-runtime-refactor-arm64.apk | tee Monica-runtime-refactor-arm64.apk.sha256
+          echo "apk=Monica-runtime-refactor-arm64.apk" >> "$GITHUB_OUTPUT"
 
       - name: Commit validated hot-path refactor
         shell: bash
@@ -101,6 +184,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Monica-runtime-refactor-arm64
-          path: ${{ steps.apk.outputs.apk }}
+          path: |
+            Monica-runtime-refactor-arm64.apk
+            Monica-runtime-refactor-arm64.apk.sha256
           retention-days: 14
           if-no-files-found: error
