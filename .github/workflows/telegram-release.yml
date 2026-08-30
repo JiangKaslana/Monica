@@ -15,7 +15,9 @@ on:
 
   # 兼容直接发布和草稿转正式发布；预览版由 job 条件排除。
   release:
-    types: [published, released]
+    # A published release covers both direct publication and draft-to-release.
+    # Do not also listen for `released`, or one release can be sent twice.
+    types: [published]
 
 permissions:
   contents: read
