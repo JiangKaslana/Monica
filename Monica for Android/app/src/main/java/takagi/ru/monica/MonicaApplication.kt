@@ -1,6 +1,8 @@
 package takagi.ru.monica
 
 import android.app.Application
+import android.content.Context
+import android.os.PowerManager
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -92,6 +94,11 @@ class MonicaApplication : Application() {
     @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
     private fun scheduleAttachmentHousekeeping() {
         kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (powerManager.isPowerSaveMode) {
+                Log.d(TAG, "Attachment housekeeping deferred while battery saver is active")
+                return@launch
+            }
             runCatching {
                 val facade = AttachmentContainer.facade(this@MonicaApplication)
                 facade.purgeOrphanedLocalBlobs()

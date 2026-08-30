@@ -11,6 +11,10 @@ interface PasswordEntryDao {
     
     @Query("SELECT * FROM password_entries WHERE isDeleted = 0 AND isArchived = 0 ORDER BY isFavorite DESC, sortOrder ASC, updatedAt DESC")
     fun getAllPasswordEntries(): Flow<List<PasswordEntry>>
+
+    /** Lightweight invalidation key for consumers that cache the active entry projection. */
+    @Query("SELECT COUNT(*) || ':' || COALESCE(MAX(updatedAt), '') FROM password_entries WHERE isDeleted = 0 AND isArchived = 0")
+    fun observeActivePasswordRevision(): Flow<String>
     
     @Query("SELECT * FROM password_entries WHERE isDeleted = 0 AND isArchived = 0 AND categoryId = :categoryId ORDER BY isFavorite DESC, sortOrder ASC, updatedAt DESC")
     fun getPasswordEntriesByCategory(categoryId: Long): Flow<List<PasswordEntry>>

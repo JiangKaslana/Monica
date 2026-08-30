@@ -1507,7 +1507,9 @@ fun CardWalletScreen(
     }
 
     if (showVerifyDialog) {
+        val skipIdentityVerification = appSettings.disablePasswordVerification
         val biometricAction = if (
+            !skipIdentityVerification &&
             activity != null &&
             appSettings.biometricEnabled &&
             biometricHelper.isBiometricAvailable()
@@ -1554,7 +1556,7 @@ fun CardWalletScreen(
             },
             onConfirm = {
                 scope.launch {
-                    if (securityManager.verifyMasterPassword(verifyPassword)) {
+                    if (skipIdentityVerification || securityManager.verifyMasterPassword(verifyPassword)) {
                         performDelete(verifyDeleteIds)
                         verifyDeleteIds = emptySet()
                         verifyPassword = ""
@@ -1567,6 +1569,7 @@ fun CardWalletScreen(
             },
             confirmText = stringResource(R.string.delete),
             destructiveConfirm = true,
+            requireIdentityVerification = !skipIdentityVerification,
             isPasswordError = verifyPasswordError,
             passwordErrorText = stringResource(R.string.current_password_incorrect),
             onBiometricClick = biometricAction,

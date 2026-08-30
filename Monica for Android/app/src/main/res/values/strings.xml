@@ -2243,7 +2243,8 @@
     <string name="developer_share_logs_desc">Export and share recent logs</string>
     <string name="developer_functions">Developer Functions</string>
     <string name="developer_disable_password_verification">Disable Password Verification</string>
-    <string name="developer_disable_password_verification_desc">Skip password verification on app startup (for development testing only)</string>
+    <string name="developer_disable_password_verification_desc">Skip identity verification across the app, including Autofill, Monica Keyboard, and destructive actions. Confirmation dialogs remain, and export encryption passwords are still required.</string>
+    <string name="developer_disable_password_verification_failed">Could not enable full verification bypass. Unlock Monica normally once, then try again.</string>
     <string name="developer_passkey_hyperos_biometric_bypass">Passkey HyperOS Compatibility</string>
     <string name="developer_passkey_hyperos_biometric_bypass_desc">On HyperOS devices, skip passkey biometric verification and fall back to master password. Keep this off unless biometric prompts fail on that device.</string>
     <string name="developer_launcher_name_use_pass">Use Monica Pass as launcher name</string>

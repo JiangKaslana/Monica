@@ -1326,9 +1326,15 @@ fun TotpListContent(
             itemTitle = item.title,
             itemType = stringResource(R.string.item_type_authenticator),
             biometricEnabled = appSettings.biometricEnabled,
+            skipIdentityVerification = appSettings.disablePasswordVerification,
             onDismiss = {
                 // 取消删除，恢复卡片显示
                 deletedItemIds = deletedItemIds - item.id
+                itemToDelete = null
+            },
+            onConfirmWithoutVerification = {
+                onDeleteTotp(item)
+                Toast.makeText(context, context.getString(R.string.deleted), Toast.LENGTH_SHORT).show()
                 itemToDelete = null
             },
             onConfirmWithPassword = { password ->
@@ -1386,7 +1392,8 @@ fun TotpListContent(
     
     // 批量删除验证对话框（统一 M3 身份验证弹窗）
     if (showBatchDeleteDialog) {
-        val biometricAction = if (canUseBiometric) {
+        val skipIdentityVerification = appSettings.disablePasswordVerification
+        val biometricAction = if (!skipIdentityVerification && canUseBiometric) {
             {
                 biometricHelper.authenticate(
                     activity = activity!!,
@@ -1431,7 +1438,7 @@ fun TotpListContent(
                 passwordError = false
             },
             onConfirm = {
-                if (SecurityManager(context).verifyMasterPassword(passwordInput)) {
+                if (skipIdentityVerification || SecurityManager(context).verifyMasterPassword(passwordInput)) {
                     coroutineScope.launch {
                         val toDelete = totpItems.filter { selectedItems.contains(it.id) }
                         viewModel.deleteTotpItems(toDelete)
@@ -1452,6 +1459,7 @@ fun TotpListContent(
             },
             confirmText = stringResource(R.string.delete),
             destructiveConfirm = true,
+            requireIdentityVerification = !skipIdentityVerification,
             isPasswordError = passwordError,
             passwordErrorText = stringResource(R.string.current_password_incorrect),
             onBiometricClick = biometricAction,

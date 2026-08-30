@@ -1104,7 +1104,8 @@
     <string name="developer_share_logs_desc">最近のログをエクスポートして共有</string>
     <string name="developer_functions">開発者機能</string>
     <string name="developer_disable_password_verification">パスワード検証を無効化</string>
-    <string name="developer_disable_password_verification_desc">アプリ起動時のパスワード検証をスキップ（開発テスト専用）</string>
+    <string name="developer_disable_password_verification_desc">アプリ、自動入力、Monica キーボード、危険な操作で本人確認を省略します。確認画面とエクスポート暗号化パスワードは引き続き必要です。</string>
+    <string name="developer_disable_password_verification_failed">完全な確認省略を有効にできませんでした。一度通常どおり Monica を解除してから再試行してください。</string>
     <string name="developer_launcher_name_use_pass">ランチャー名を Monica Pass にする</string>
     <string name="developer_launcher_name_use_pass_desc">オンで Monica Pass、オフで Monica。メインのランチャー表示名だけを切り替えます。</string>
     <string name="developer_bitwarden_forensics_toggle">Bitwarden 同期フォレンジックを有効化</string>

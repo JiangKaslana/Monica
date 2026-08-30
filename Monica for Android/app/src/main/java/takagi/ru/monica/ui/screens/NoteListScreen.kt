@@ -797,7 +797,8 @@ fun NoteListScreen(
         }
 
         if (showPasswordDialog) {
-            val biometricAction = if (activity != null && canUseBiometric) {
+            val skipIdentityVerification = settings.disablePasswordVerification
+            val biometricAction = if (!skipIdentityVerification && activity != null && canUseBiometric) {
                 {
                     biometricHelper.authenticate(
                         activity = activity,
@@ -831,7 +832,7 @@ fun NoteListScreen(
                     passwordError = false
                 },
                 onConfirm = {
-                    if (securityManager.verifyMasterPassword(masterPassword)) {
+                    if (skipIdentityVerification || securityManager.verifyMasterPassword(masterPassword)) {
                         performDelete()
                     } else {
                         passwordError = true
@@ -839,6 +840,7 @@ fun NoteListScreen(
                 },
                 confirmText = stringResource(R.string.delete),
                 destructiveConfirm = true,
+                requireIdentityVerification = !skipIdentityVerification,
                 isPasswordError = passwordError,
                 passwordErrorText = stringResource(R.string.current_password_incorrect),
                 onBiometricClick = biometricAction,

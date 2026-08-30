@@ -12,7 +12,8 @@
 
 ```bash
 rustup target add aarch64-linux-android armv7-linux-androideabi
-cargo install cargo-ndk --locked
+cargo install cargo-ndk --version 4.1.2 --locked
+cd rust-jni
 cargo ndk \
   -t arm64-v8a \
   -t armeabi-v7a \

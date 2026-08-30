@@ -3182,6 +3182,8 @@ fun SimpleMainScreen(
         } else {
             null
         },
+        vaultV2FastScrollbarInteracting =
+            currentTab == BottomNavItem.VaultV2 && vaultV2PaneState.isFastScrollbarInteracting,
         passwordListShowBackToTop = if (currentTab == BottomNavItem.VaultV2) {
             vaultV2PaneState.showBackToTop
         } else {

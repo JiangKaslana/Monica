@@ -1395,7 +1395,8 @@ fun PasskeyListScreen(
             combinedPasskeys.filter { selectedPasskeys.contains(it.managementKey()) }
         }
 
-        val biometricAction = if (activity != null && canUseBiometric) {
+        val skipIdentityVerification = appSettings.disablePasswordVerification
+        val biometricAction = if (!skipIdentityVerification && activity != null && canUseBiometric) {
             {
                 biometricHelper.authenticate(
                     activity = activity,
@@ -1444,7 +1445,7 @@ fun PasskeyListScreen(
                 deletePasswordError = false
             },
             onConfirm = {
-                if (takagi.ru.monica.security.SecurityManager(context).verifyMasterPassword(deletePasswordInput)) {
+                if (skipIdentityVerification || takagi.ru.monica.security.SecurityManager(context).verifyMasterPassword(deletePasswordInput)) {
                     performDeleteTargets(deleteTargets)
                 } else {
                     deletePasswordError = true
@@ -1452,6 +1453,7 @@ fun PasskeyListScreen(
             },
             confirmText = stringResource(R.string.delete),
             destructiveConfirm = true,
+            requireIdentityVerification = !skipIdentityVerification,
             isPasswordError = deletePasswordError,
             passwordErrorText = stringResource(R.string.current_password_incorrect),
             onBiometricClick = biometricAction,
