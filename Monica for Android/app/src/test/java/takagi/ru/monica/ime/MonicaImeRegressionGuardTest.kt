@@ -207,20 +207,30 @@ class MonicaImeRegressionGuardTest {
                     cardWalletPane.indexOf("ime_empty_card_wallet_title")
         )
         assertTrue(
-            "Every vault content panel should enable loading before its refresh starts.",
-            serviceSource.contains("panel != MonicaImePanel.KEYBOARD && panel != MonicaImePanel.GENERATOR")
-        )
-        assertTrue(
             "Unlocking directly into a secondary vault panel must not render its empty state before data arrives.",
-            serviceSource.contains("isAutofillLoading = targetPanel.isVaultContentPanel()")
+            serviceSource.contains("isAutofillLoading = targetPanel.requiresInitialVaultLoading()")
         )
         assertTrue(
             "Restoring the IME with an authenticator or card panel open must retain the loading state during refresh.",
-            serviceSource.contains("previousState.activePanel.isVaultContentPanel()")
+            serviceSource.contains("previousState.activePanel.requiresInitialVaultLoading()")
         )
         assertTrue(
             "The refresh entry point must protect every content panel, including observer-driven refreshes.",
-            serviceSource.contains("currentState.activePanel.isVaultContentPanel()")
+            serviceSource.contains("currentState.activePanel.requiresInitialVaultLoading()")
+        )
+        assertTrue(
+            "Switching back to an already loaded keyboard panel must retain its content instead of showing a spinner again.",
+            serviceSource.contains("private val loadedVaultPanels = mutableSetOf<MonicaImePanel>()") &&
+                serviceSource.contains("this !in loadedVaultPanels") &&
+                serviceSource.contains("loadedVaultPanels += currentState.activePanel")
+        )
+        assertTrue(
+            "Already loaded authenticator and card panels should not recompute their list merely because the user switches tabs.",
+            serviceSource.contains("if (requiresInitialLoad || needsPasswordPresentationRefresh)")
+        )
+        assertTrue(
+            "A vault data change must clear panel readiness so the next result is never stale.",
+            serviceSource.contains("loadedVaultPanels.clear()")
         )
     }
 

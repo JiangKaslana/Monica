@@ -82,6 +82,7 @@ class MonicaInputMethodService : InputMethodService() {
     private var vaultSourceCache: ImeVaultSourceCache? = null
     private var totpSourceCache: List<SecureItem>? = null
     private var cardWalletSourceCache: List<SecureItem>? = null
+    private val loadedVaultPanels = mutableSetOf<MonicaImePanel>()
     private var pendingUnlockPanel: MonicaImePanel? = null
     private var pendingClearedInputText: String? = null
     private var unlockFlowInProgress = false
@@ -108,7 +109,7 @@ class MonicaInputMethodService : InputMethodService() {
                     unlocked = true,
                     activePanel = targetPanel,
                     isAutofillPanelVisible = targetPanel != MonicaImePanel.KEYBOARD,
-                    isAutofillLoading = targetPanel.isVaultContentPanel(),
+                    isAutofillLoading = targetPanel.requiresInitialVaultLoading(),
                     errorMessage = null
                 )
             }
@@ -245,7 +246,7 @@ class MonicaInputMethodService : InputMethodService() {
                 activePanel = if (preserveAutofillPanel) previousState.activePanel else MonicaImePanel.KEYBOARD,
                 isAutofillPanelVisible = preserveAutofillPanel,
                 isAutofillLoading = preserveAutofillPanel &&
-                    previousState.activePanel.isVaultContentPanel() &&
+                    previousState.activePanel.requiresInitialVaultLoading() &&
                     shouldRefreshForCurrentView,
                 isSearchEditing = false,
                 query = if (preserveAutofillPanel) previousState.query else "",
@@ -364,7 +365,7 @@ class MonicaInputMethodService : InputMethodService() {
         val currentState = uiState.value
         if (
             currentState.unlocked &&
-            currentState.activePanel.isVaultContentPanel() &&
+            currentState.activePanel.requiresInitialVaultLoading() &&
             currentState.isAutofillPanelVisible
         ) {
             uiState.update { it.copy(isAutofillLoading = true) }
@@ -507,14 +508,21 @@ class MonicaInputMethodService : InputMethodService() {
                 return@launch
             }
 
+            val previousState = uiState.value
             val preservePasswordQuery =
-                panel == MonicaImePanel.PASSWORDS && uiState.value.activePanel == MonicaImePanel.PASSWORDS
+                panel == MonicaImePanel.PASSWORDS &&
+                    previousState.activePanel == MonicaImePanel.PASSWORDS
+            val requiresInitialLoad = panel.requiresInitialVaultLoading()
+            val needsPasswordPresentationRefresh =
+                panel == MonicaImePanel.PASSWORDS &&
+                    !preservePasswordQuery &&
+                    (previousState.query.isNotBlank() ||
+                        previousState.passwordSortMode != MonicaImePasswordSortMode.ALPHABETICAL)
             uiState.update {
                 it.copy(
                     activePanel = panel,
                     isAutofillPanelVisible = true,
-                    isAutofillLoading =
-                        panel != MonicaImePanel.KEYBOARD && panel != MonicaImePanel.GENERATOR,
+                    isAutofillLoading = panel.requiresInitialVaultLoading(),
                     isSearchEditing = false,
                     errorMessage = null,
                     query = if (preservePasswordQuery) it.query else "",
@@ -526,7 +534,9 @@ class MonicaInputMethodService : InputMethodService() {
                     selectedDatabaseScope = it.selectedDatabaseScope
                 )
             }
-            requestRefreshVaultEntries()
+            if (requiresInitialLoad || needsPasswordPresentationRefresh) {
+                requestRefreshVaultEntries()
+            }
         }
     }
 
@@ -650,6 +660,7 @@ class MonicaInputMethodService : InputMethodService() {
 
         val entries = snapshot.results.map { it.value }
 
+        loadedVaultPanels += currentState.activePanel
         uiState.update {
             it.copy(
                 unlocked = true,
@@ -1291,6 +1302,11 @@ class MonicaInputMethodService : InputMethodService() {
         vaultSourceCache = null
         totpSourceCache = null
         cardWalletSourceCache = null
+        loadedVaultPanels.clear()
+    }
+
+    private fun MonicaImePanel.requiresInitialVaultLoading(): Boolean {
+        return isVaultContentPanel() && this !in loadedVaultPanels
     }
 
     private fun resolveFillableField(value: String): String? {
