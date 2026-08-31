@@ -10,7 +10,7 @@ import androidx.fragment.app.FragmentActivity
 import takagi.ru.monica.R
 
 /**
- * Fast path for the system identity prompt used by Monica's unlock screen.
+ * Fast path for the system identity prompt used by Monica's unlock surfaces.
  *
  * The prompt itself remains fully owned by Android/Google's biometric stack.
  * This helper only removes application-side work from the tap-to-prompt path:
@@ -27,8 +27,8 @@ class BiometricAuthHelper(
 
     private data class PromptKey(
         val title: String,
-        val subtitle: String,
-        val description: String,
+        val subtitle: String?,
+        val description: String?,
         val negativeButtonText: String
     )
 
@@ -117,7 +117,7 @@ class BiometricAuthHelper(
 
     /**
      * Prepares the reusable AndroidX prompt object without showing UI.
-     * Safe to call from the login screen as soon as its Activity is ready.
+     * Safe to call from an unlock surface as soon as its Activity is ready.
      */
     fun prepare(activity: FragmentActivity) {
         promptFor(activity)
@@ -132,8 +132,8 @@ class BiometricAuthHelper(
     fun authenticate(
         activity: FragmentActivity,
         title: String = appContext.getString(R.string.biometric_login_title),
-        subtitle: String = appContext.getString(R.string.biometric_login_subtitle),
-        description: String = appContext.getString(R.string.biometric_login_description),
+        subtitle: String? = appContext.getString(R.string.biometric_login_subtitle),
+        description: String? = appContext.getString(R.string.biometric_login_description),
         negativeButtonText: String = appContext.getString(R.string.use_password),
         onSuccess: () -> Unit,
         onError: (errorCode: Int, errorMessage: String) -> Unit,
@@ -183,8 +183,8 @@ class BiometricAuthHelper(
 
     private fun promptInfoFor(
         title: String,
-        subtitle: String,
-        description: String,
+        subtitle: String?,
+        description: String?,
         negativeButtonText: String
     ): BiometricPrompt.PromptInfo {
         val key = PromptKey(title, subtitle, description, negativeButtonText)
@@ -194,10 +194,12 @@ class BiometricAuthHelper(
 
         val builder = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
-            .setSubtitle(subtitle)
-            .setDescription(description)
             .setAllowedAuthenticators(allowedAuthenticators())
             .setConfirmationRequired(false)
+            .apply {
+                if (subtitle != null) setSubtitle(subtitle)
+                if (description != null) setDescription(description)
+            }
 
         AppLauncherIconManager.applyBiometricPromptBranding(appContext, builder)
 
