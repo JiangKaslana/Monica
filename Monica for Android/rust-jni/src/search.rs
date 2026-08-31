@@ -20,10 +20,6 @@ impl SearchQuery {
         self.normalized.is_empty()
     }
 
-    pub(crate) fn matches_fields(&self, fields: &[&str]) -> bool {
-        self.is_empty() || fields.iter().any(|value| self.matches_value(value))
-    }
-
     pub(crate) fn matches_value(&self, value: &str) -> bool {
         if self.is_empty() {
             return true;
@@ -48,26 +44,26 @@ mod tests {
     fn blank_query_matches_without_metadata_work() {
         let query = SearchQuery::new("   ");
         assert!(query.is_empty());
-        assert!(query.matches_fields(&[]));
+        assert!(query.matches_value(""));
     }
 
     #[test]
     fn ascii_query_is_case_insensitive() {
         let query = SearchQuery::new("GITHUB");
-        assert!(query.matches_fields(&["GitHub", "octocat"]));
-        assert!(!query.matches_fields(&["example.cn", "bank"]));
+        assert!(query.matches_value("GitHub"));
+        assert!(!query.matches_value("example.cn"));
     }
 
     #[test]
     fn ascii_query_matches_inside_unicode_text() {
         let query = SearchQuery::new("MUN");
-        assert!(query.matches_fields(&["账号 MUN-01 / München"]));
+        assert!(query.matches_value("账号 MUN-01 / München"));
     }
 
     #[test]
     fn unicode_query_uses_lowercase_fallback() {
         let query = SearchQuery::new("münchen");
-        assert!(query.matches_fields(&["MÜNCHEN"]));
-        assert!(!query.matches_fields(&["Berlin"]));
+        assert!(query.matches_value("MÜNCHEN"));
+        assert!(!query.matches_value("Berlin"));
     }
 }
