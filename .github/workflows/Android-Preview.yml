@@ -12,6 +12,7 @@ on:
       - 'Monica for Android/gradle/**'
       - 'Monica for Android/rust-core/**'
       - 'Monica for Android/rust-jni/**'
+      - '.github/workflows/Android-Preview.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
@@ -23,6 +24,7 @@ on:
       - 'Monica for Android/gradle/**'
       - 'Monica for Android/rust-core/**'
       - 'Monica for Android/rust-jni/**'
+      - '.github/workflows/Android-Preview.yml'
   workflow_dispatch:
 
 permissions:
@@ -100,7 +102,7 @@ jobs:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
           DEBUG_STORE_PASSWORD: ${{ secrets.DEBUG_STORE_PASSWORD }}
           DEBUG_KEY_ALIAS: ${{ secrets.DEBUG_KEY_ALIAS }}
-          DEBUG_KEY_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD }}
+          DEBUG_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD }}
 
       - name: Decode keystore
         if: github.event_name != 'pull_request'
@@ -185,6 +187,15 @@ jobs:
             echo "::error title=Rust JNI missing::armeabi-v7a library was not packaged."
             exit 1
           }
+
+      - name: Upload PR debug APKs
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: monica-debug-apks-${{ github.sha }}
+          path: Monica for Android/app/build/outputs/apk/debug/*.APK
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload preview build log
         if: always()
