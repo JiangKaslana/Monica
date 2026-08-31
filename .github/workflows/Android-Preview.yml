@@ -12,7 +12,6 @@ on:
       - 'Monica for Android/gradle/**'
       - 'Monica for Android/rust-core/**'
       - 'Monica for Android/rust-jni/**'
-      - '.github/workflows/Android-Preview.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
@@ -24,7 +23,6 @@ on:
       - 'Monica for Android/gradle/**'
       - 'Monica for Android/rust-core/**'
       - 'Monica for Android/rust-jni/**'
-      - '.github/workflows/Android-Preview.yml'
   workflow_dispatch:
 
 permissions:
@@ -188,15 +186,6 @@ jobs:
             exit 1
           }
 
-      - name: Upload PR debug APKs
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v7
-        with:
-          name: monica-debug-apks-${{ github.sha }}
-          path: Monica for Android/app/build/outputs/apk/debug/*.APK
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Upload preview build log
         if: always()
         uses: actions/upload-artifact@v7
@@ -303,7 +292,7 @@ jobs:
             > *   **Generated APK Count**: `${{ steps.preview_apk_meta.outputs.preview_apk_count }}`
             > **Generated APKs:**
             ${{ steps.preview_apk_meta.outputs.preview_apk_list }}
-            > *   **Commit SHA**: `${{ github.sha }}
+            > *   **Commit SHA**: `${{ github.sha }}`
             > *   **Ref**: `${{ github.ref }}`
           files: |
             Monica for Android/app/build/outputs/apk/release/*.APK
