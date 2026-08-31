@@ -21,10 +21,13 @@ impl SearchQuery {
     }
 
     pub(crate) fn matches_fields(&self, fields: &[&str]) -> bool {
-        self.is_empty() || fields.iter().any(|value| self.matches(value))
+        self.is_empty() || fields.iter().any(|value| self.matches_value(value))
     }
 
-    fn matches(&self, value: &str) -> bool {
+    pub(crate) fn matches_value(&self, value: &str) -> bool {
+        if self.is_empty() {
+            return true;
+        }
         if self.ascii {
             let query = self.normalized.as_bytes();
             return value
