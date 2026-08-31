@@ -102,7 +102,7 @@ jobs:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
           DEBUG_STORE_PASSWORD: ${{ secrets.DEBUG_STORE_PASSWORD }}
           DEBUG_KEY_ALIAS: ${{ secrets.DEBUG_KEY_ALIAS }}
-          DEBUG_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD }}
+          DEBUG_KEY_PASSWORD: ${{ secrets.DEBUG_KEY_PASSWORD }}
 
       - name: Decode keystore
         if: github.event_name != 'pull_request'
@@ -303,7 +303,7 @@ jobs:
             > *   **Generated APK Count**: `${{ steps.preview_apk_meta.outputs.preview_apk_count }}`
             > **Generated APKs:**
             ${{ steps.preview_apk_meta.outputs.preview_apk_list }}
-            > *   **Commit SHA**: `${{ github.sha }}`
+            > *   **Commit SHA**: `${{ github.sha }}
             > *   **Ref**: `${{ github.ref }}`
           files: |
             Monica for Android/app/build/outputs/apk/release/*.APK
