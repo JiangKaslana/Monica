@@ -34,7 +34,7 @@ import takagi.ru.monica.workers.KeePassRemoteUploadWorker
  * Monica 应用程序入口
  *
  * 负责初始化全局依赖注入容器（Koin）。安全关键的锁状态检查仍然在首帧前同步完成；
- * 与首帧无关的恢复、清理和 launcher 修复则延迟到启动安静期执行。
+ * 与首帧无关的恢复、清理和诊断则延迟到启动安静期执行。
  */
 class MonicaApplication : Application() {
 
@@ -60,7 +60,6 @@ class MonicaApplication : Application() {
 
         initKoin()
         SyncTaskRunner.installNetworkGate(AndroidSyncNetworkGate(this))
-        MainThreadStallMonitor.start()
 
         // Logger initialization no longer performs file writes on this thread.
         MdbxDiagLogger.initialize(this)
@@ -81,13 +80,14 @@ class MonicaApplication : Application() {
     }
 
     /**
-     * Work that is important for eventual consistency but is not required to
-     * draw or authenticate the first screen. Delaying it avoids competing with
-     * class loading, Compose startup and database initialization.
+     * Work that is important for eventual consistency or diagnostics but is not
+     * required to draw or authenticate the first screen. Delaying it avoids
+     * competing with class loading, Compose startup and database initialization.
      */
     private fun schedulePostLaunchMaintenance() {
         startupScope.launch {
             delay(POST_LAUNCH_DELAY_MS)
+            MainThreadStallMonitor.start()
             scheduleKeePassRemoteUploadRecovery()
             syncLauncherEntryPointsWithSettings()
         }
