@@ -31,9 +31,9 @@ object SecurityDiagLogger {
     /**
      * Keep startup file I/O off the main thread.
      *
-     * The target file is published before the work is queued so subsequent
-     * append() calls use the same single-thread executor and therefore stay
-     * ordered after the session header without blocking application startup.
+     * The header task is queued before the target file is published. Subsequent
+     * append() calls therefore enter the same serial executor after the header,
+     * without blocking application startup or losing the first diagnostic line.
      */
     fun initialize(context: Context) {
         if (persistentLogFile != null) return
@@ -42,7 +42,6 @@ object SecurityDiagLogger {
             val appContext = context.applicationContext
             val logDir = File(appContext.filesDir, LOG_DIR_NAME)
             val file = File(logDir, LOG_FILE_NAME)
-            persistentLogFile = file
 
             writeExecutor.execute {
                 synchronized(fileLock) {
@@ -66,6 +65,7 @@ object SecurityDiagLogger {
                     }
                 }
             }
+            persistentLogFile = file
         }
     }
 
