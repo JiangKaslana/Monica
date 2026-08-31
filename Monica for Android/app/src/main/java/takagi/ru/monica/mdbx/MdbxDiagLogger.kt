@@ -30,8 +30,8 @@ object MdbxDiagLogger {
 
     /**
      * Prepare the logger without doing directory creation or file writes on the
-     * application's startup thread. append() shares the same serial executor,
-     * preserving header-before-log ordering.
+     * application's startup thread. The header task is queued before the file is
+     * published, preserving header-before-log ordering even under concurrent use.
      */
     fun initialize(context: Context) {
         if (persistentLogFile != null) return
@@ -40,7 +40,6 @@ object MdbxDiagLogger {
             val appContext = context.applicationContext
             val logDir = File(appContext.filesDir, LOG_DIR_NAME)
             val file = File(logDir, LOG_FILE_NAME)
-            persistentLogFile = file
 
             writeExecutor.execute {
                 synchronized(fileLock) {
@@ -66,6 +65,7 @@ object MdbxDiagLogger {
                     }
                 }
             }
+            persistentLogFile = file
         }
     }
 
