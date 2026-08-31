@@ -28,30 +28,43 @@ object SecurityDiagLogger {
     @Volatile
     private var persistentLogFile: File? = null
 
+    /**
+     * Keep startup file I/O off the main thread.
+     *
+     * The target file is published before the work is queued so subsequent
+     * append() calls use the same single-thread executor and therefore stay
+     * ordered after the session header without blocking application startup.
+     */
     fun initialize(context: Context) {
         if (persistentLogFile != null) return
         synchronized(fileLock) {
             if (persistentLogFile != null) return
-            runCatching {
-                val logDir = File(context.applicationContext.filesDir, LOG_DIR_NAME)
-                if (!logDir.exists()) {
-                    logDir.mkdirs()
+            val appContext = context.applicationContext
+            val logDir = File(appContext.filesDir, LOG_DIR_NAME)
+            val file = File(logDir, LOG_FILE_NAME)
+            persistentLogFile = file
+
+            writeExecutor.execute {
+                synchronized(fileLock) {
+                    runCatching {
+                        if (!logDir.exists()) {
+                            logDir.mkdirs()
+                        }
+                        val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+                        val header = buildString {
+                            appendLine("=== Monica Security Diag Session ===")
+                            appendLine("session_start=$time")
+                            appendLine("app_version=${BuildConfig.FULL_VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                            appendLine("app_display_version=${BuildConfig.VERSION_NAME}")
+                            appendLine("build_time=${BuildConfig.BUILD_TIME}")
+                            appendLine("git_sha=${BuildConfig.GIT_SHA}")
+                            appendLine("android_api=${Build.VERSION.SDK_INT}")
+                            appendLine("device=${Build.MANUFACTURER} ${Build.MODEL}")
+                            appendLine("===")
+                        }
+                        file.appendText(header)
+                    }
                 }
-                val file = File(logDir, LOG_FILE_NAME)
-                persistentLogFile = file
-                val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                val header = buildString {
-                    appendLine("=== Monica Security Diag Session ===")
-                    appendLine("session_start=$time")
-                    appendLine("app_version=${BuildConfig.FULL_VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-                    appendLine("app_display_version=${BuildConfig.VERSION_NAME}")
-                    appendLine("build_time=${BuildConfig.BUILD_TIME}")
-                    appendLine("git_sha=${BuildConfig.GIT_SHA}")
-                    appendLine("android_api=${Build.VERSION.SDK_INT}")
-                    appendLine("device=${Build.MANUFACTURER} ${Build.MODEL}")
-                    appendLine("===")
-                }
-                file.appendText(header)
             }
         }
     }
