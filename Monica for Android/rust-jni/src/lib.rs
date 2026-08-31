@@ -2,15 +2,14 @@
 
 mod search;
 
-use jni::objects::{JClass, JLongArray, JObjectArray, JString};
-use jni::sys::{jboolean, jlongArray, jstring, JNI_FALSE, JNI_TRUE};
+use jni::objects::{JClass, JIntArray, JObjectArray, JString};
+use jni::sys::{jboolean, jintArray, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use search::SearchQuery;
 
-const RUST_CORE_VERSION: &str = "monica-password-list-core/0.3.0-runtime";
+const RUST_CORE_VERSION: &str = "monica-rust-jni/0.3.0-index-search";
 
 struct MetadataArrays<'local, 'borrow> {
-    ids: &'borrow JLongArray<'local>,
     titles: &'borrow JObjectArray<'local>,
     usernames: &'borrow JObjectArray<'local>,
     websites: &'borrow JObjectArray<'local>,
@@ -35,7 +34,7 @@ pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativ
     _class: JClass,
 ) -> jboolean {
     let query = SearchQuery::new("github");
-    if query.matches_fields(&["GitHub", "octocat"]) {
+    if query.matches_value("GitHub") && !query.matches_value("example.cn") {
         JNI_TRUE
     } else {
         JNI_FALSE
@@ -43,55 +42,83 @@ pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativ
 }
 
 #[no_mangle]
-pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativeFilterIds(
+pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativeFilterIndices(
     mut env: JNIEnv,
     _class: JClass,
-    ids: JLongArray,
     titles: JObjectArray,
     usernames: JObjectArray,
     websites: JObjectArray,
     app_names: JObjectArray,
     app_package_names: JObjectArray,
     query: JString,
-) -> jlongArray {
-    let arrays = MetadataArrays { ids: &ids, titles: &titles, usernames: &usernames, websites: &websites, app_names: &app_names, app_package_names: &app_package_names };
-    filter_ids(&mut env, arrays, &query).unwrap_or(std::ptr::null_mut())
+) -> jintArray {
+    let arrays = MetadataArrays {
+        titles: &titles,
+        usernames: &usernames,
+        websites: &websites,
+        app_names: &app_names,
+        app_package_names: &app_package_names,
+    };
+    filter_indices(&mut env, arrays, &query).unwrap_or(std::ptr::null_mut())
 }
 
-fn filter_ids(env: &mut JNIEnv, arrays: MetadataArrays<'_, '_>, query: &JString) -> Option<jlongArray> {
-    let len = env.get_array_length(arrays.ids).ok()? as usize;
+fn filter_indices(
+    env: &mut JNIEnv,
+    arrays: MetadataArrays<'_, '_>,
+    query: &JString,
+) -> Option<jintArray> {
+    let len = env.get_array_length(arrays.titles).ok()? as usize;
+    for array in [
+        arrays.usernames,
+        arrays.websites,
+        arrays.app_names,
+        arrays.app_package_names,
+    ] {
+        if env.get_array_length(array).ok()? as usize != len {
+            return None;
+        }
+    }
+
     let query: String = env.get_string(query).ok()?.into();
-    let matcher = SearchQuery::new(&query);
+    let query = SearchQuery::new(&query);
 
-    let mut id_values = vec![0_i64; len];
-    env.get_long_array_region(arrays.ids, 0, &mut id_values).ok()?;
-    let titles = read_string_array(env, arrays.titles, len)?;
-    let usernames = read_string_array(env, arrays.usernames, len)?;
-    let websites = read_string_array(env, arrays.websites, len)?;
-    let app_names = read_string_array(env, arrays.app_names, len)?;
-    let app_package_names = read_string_array(env, arrays.app_package_names, len)?;
+    let mut selected = Vec::with_capacity(len);
+    if query.is_empty() {
+        selected.extend((0..len).map(|index| index as i32));
+    } else {
+        for index in 0..len {
+            if row_matches(env, &arrays, index, &query)? {
+                selected.push(index as i32);
+            }
+        }
+    }
 
-    let selected = (0..len)
-        .filter(|index| matcher.matches_fields(&[
-            &titles[*index],
-            &usernames[*index],
-            &websites[*index],
-            &app_names[*index],
-            &app_package_names[*index],
-        ]))
-        .map(|index| id_values[index])
-        .collect::<Vec<_>>();
-
-    let output = env.new_long_array(selected.len() as i32).ok()?;
-    env.set_long_array_region(&output, 0, &selected).ok()?;
+    let output: JIntArray<'_> = env.new_int_array(selected.len() as i32).ok()?;
+    env.set_int_array_region(&output, 0, &selected).ok()?;
     Some(output.into_raw())
 }
 
-fn read_string_array(env: &mut JNIEnv, array: &JObjectArray, len: usize) -> Option<Vec<String>> {
-    let mut values = Vec::with_capacity(len);
-    for index in 0..len {
+fn row_matches(
+    env: &mut JNIEnv,
+    arrays: &MetadataArrays<'_, '_>,
+    index: usize,
+    query: &SearchQuery,
+) -> Option<bool> {
+    for array in [
+        arrays.titles,
+        arrays.usernames,
+        arrays.websites,
+        arrays.app_names,
+        arrays.app_package_names,
+    ] {
         let object = env.get_object_array_element(array, index as i32).ok()?;
-        values.push(if object.is_null() { String::new() } else { env.get_string(&JString::from(object)).ok()?.into() });
+        if object.is_null() {
+            continue;
+        }
+        let value: String = env.get_string(&JString::from(object)).ok()?.into();
+        if query.matches_value(&value) {
+            return Some(true);
+        }
     }
-    Some(values)
+    Some(false)
 }
