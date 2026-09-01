@@ -32,26 +32,50 @@ object RustPasswordListCore {
     }
 
     fun filterEntries(entries: List<PasswordEntry>, query: String): List<PasswordEntry>? {
-        if (!ensureLoaded()) return null
         if (entries.isEmpty()) return emptyList()
 
-        val selectedIds = runCatching {
-            nativeFilterIds(
-                ids = entries.map { it.id }.toLongArray(),
-                titles = entries.map { it.title }.toTypedArray(),
-                usernames = entries.map { it.username }.toTypedArray(),
-                websites = entries.map { it.website }.toTypedArray(),
-                appNames = entries.map { it.appName }.toTypedArray(),
-                appPackageNames = entries.map { it.appPackageName }.toTypedArray(),
+        // The initial password screen normally has no search term. Returning the
+        // existing list here deliberately avoids loading the JNI library during
+        // cold start; native code is loaded only once the user actually searches.
+        if (query.isBlank()) return entries
+        if (!ensureLoaded()) return null
+
+        val size = entries.size
+        val titles = Array(size) { "" }
+        val usernames = Array(size) { "" }
+        val websites = Array(size) { "" }
+        val appNames = Array(size) { "" }
+        val appPackageNames = Array(size) { "" }
+
+        // Fill all JNI columns in one traversal rather than allocating five
+        // temporary List instances through map().
+        for (index in entries.indices) {
+            val entry = entries[index]
+            titles[index] = entry.title
+            usernames[index] = entry.username
+            websites[index] = entry.website
+            appNames[index] = entry.appName
+            appPackageNames[index] = entry.appPackageName
+        }
+
+        val selectedIndices = runCatching {
+            nativeFilterIndices(
+                titles = titles,
+                usernames = usernames,
+                websites = websites,
+                appNames = appNames,
+                appPackageNames = appPackageNames,
                 query = query,
             )
         }.getOrNull() ?: return null
 
-        val entriesById = entries.associateBy { it.id }
-        return selectedIds
-            .asSequence()
-            .mapNotNull { id -> entriesById[id] }
-            .toList()
+        return buildList(selectedIndices.size) {
+            for (index in selectedIndices) {
+                if (index in entries.indices) {
+                    add(entries[index])
+                }
+            }
+        }
     }
 
     fun diagnosticLabel(): String = if (!ensureLoaded()) {
@@ -67,13 +91,12 @@ object RustPasswordListCore {
     private external fun nativeSelfTest(): Boolean
 
     @JvmStatic
-    private external fun nativeFilterIds(
-        ids: LongArray,
+    private external fun nativeFilterIndices(
         titles: Array<String>,
         usernames: Array<String>,
         websites: Array<String>,
         appNames: Array<String>,
         appPackageNames: Array<String>,
         query: String,
-    ): LongArray?
+    ): IntArray?
 }
