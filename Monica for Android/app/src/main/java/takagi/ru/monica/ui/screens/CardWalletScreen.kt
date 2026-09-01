@@ -104,6 +104,7 @@ import takagi.ru.monica.ui.cardwallet.WalletListItem
 import takagi.ru.monica.ui.cardwallet.WalletListItemType
 import takagi.ru.monica.ui.cardwallet.bitwardenVaultIdForWalletSync
 import takagi.ru.monica.ui.cardwallet.isBitwardenWalletScope
+import takagi.ru.monica.ui.cardwallet.mergeVisibleWalletOrder
 import takagi.ru.monica.ui.cardwallet.toBillingAddressWalletListItem
 import takagi.ru.monica.ui.cardwallet.toBankCardWalletListItem
 import takagi.ru.monica.ui.cardwallet.toDocumentWalletListItem
@@ -123,7 +124,7 @@ import takagi.ru.monica.ui.category.rememberCategoryManagementState
 import takagi.ru.monica.ui.components.PullActionVisualState
 import takagi.ru.monica.ui.common.pull.calculateDampedPullOffset
 import takagi.ru.monica.ui.common.state.InitialListRenderState
-import takagi.ru.monica.ui.common.state.resolveInitialListRenderState
+import takagi.ru.monica.ui.common.state.resolveMergedListRenderState
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenu
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuDropdown
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuOffset
@@ -567,15 +568,16 @@ fun CardWalletScreen(
     val allItems = remember(cards, documents, billingAddresses) {
         (cards + documents + billingAddresses).sortedWith(
             compareByDescending<SecureItem> { it.isFavorite }
-                .thenByDescending { it.updatedAt.time }
                 .thenBy { it.sortOrder }
+                .thenByDescending { it.updatedAt.time }
         )
     }
     val allWalletItems = remember(walletItems) {
         walletItems.sortedWith(
             compareByDescending<WalletListItem> { it.item.isFavorite }
-                .thenByDescending { it.item.updatedAt.time }
                 .thenBy { it.item.sortOrder }
+                .thenBy { it.id }
+                .thenByDescending { it.item.updatedAt.time }
         )
     }
 
@@ -901,7 +903,7 @@ fun CardWalletScreen(
             }
             .toList()
     }
-    val initialRenderState = resolveInitialListRenderState(
+    val initialRenderState = resolveMergedListRenderState(
         isReady = walletItemsReady,
         itemCount = filteredItems.size,
     )
@@ -1288,8 +1290,11 @@ fun CardWalletScreen(
 
                     else -> {
                         var localFilteredItems by remember(filteredItems) { mutableStateOf(filteredItems) }
+                        var walletWasDragging by remember { mutableStateOf(false) }
                         LaunchedEffect(filteredItems) {
-                            localFilteredItems = filteredItems
+                            if (!walletWasDragging) {
+                                localFilteredItems = filteredItems
+                            }
                         }
                         val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
                             if (isSelectionMode) {
@@ -1299,19 +1304,25 @@ fun CardWalletScreen(
                             }
                         }
                         LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
-                            if (!reorderableLazyListState.isAnyItemDragging && isSelectionMode) {
-                                val bankOrders = localFilteredItems
-                                    .filter { it.type == WalletListItemType.BANK_CARD }
-                                    .mapIndexed { index, walletItem -> walletItem.id to index }
-                                val docOrders = localFilteredItems
-                                    .filter { it.type == WalletListItemType.DOCUMENT }
-                                    .mapIndexed { index, walletItem -> walletItem.id to index }
-                                val addressOrders = localFilteredItems
-                                    .filter { it.type == WalletListItemType.BILLING_ADDRESS }
-                                    .mapIndexed { index, walletItem -> walletItem.id to index }
-                                if (bankOrders.isNotEmpty()) bankCardViewModel.updateSortOrders(bankOrders)
-                                if (docOrders.isNotEmpty()) documentViewModel.updateSortOrders(docOrders)
-                                if (addressOrders.isNotEmpty()) billingAddressViewModel.updateSortOrders(addressOrders)
+                            if (reorderableLazyListState.isAnyItemDragging) {
+                                walletWasDragging = true
+                            } else if (walletWasDragging && isSelectionMode) {
+                                val mergedIds = mergeVisibleWalletOrder(
+                                    allItemIds = allWalletItems.map(WalletListItem::id),
+                                    reorderedVisibleItemIds = localFilteredItems.map(WalletListItem::id)
+                                )
+                                val currentItemsById = allWalletItems.associateBy(WalletListItem::id)
+                                val newOrders = mergedIds.mapIndexedNotNull { index, id ->
+                                    val walletItem = currentItemsById[id] ?: return@mapIndexedNotNull null
+                                    if (walletItem.item.sortOrder == index) null else id to index
+                                }
+                                if (newOrders.isNotEmpty()) {
+                                    // 三种类型共用 SecureItemRepository，一次写入即可覆盖全部，
+                                    // 拆成每类型一次会让同一张表触发多次 Flow 失效，拖动结果被中间态回拉。
+                                    bankCardViewModel.updateSortOrders(newOrders)
+                                }
+                                delay(300)
+                                walletWasDragging = false
                             }
                         }
 
@@ -1329,7 +1340,8 @@ fun CardWalletScreen(
                                 ReorderableItem(
                                     reorderableLazyListState,
                                     key = walletItem.id,
-                                    enabled = isSelectionMode
+                                    enabled = isSelectionMode,
+                                    modifier = Modifier.animateItem()
                                 ) { isDragging ->
                                     val isSelected = selectedIds.contains(walletItem.id)
                                     val elevation by animateDpAsState(
