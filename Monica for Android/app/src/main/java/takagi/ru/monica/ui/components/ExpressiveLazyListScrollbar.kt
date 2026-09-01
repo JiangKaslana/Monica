@@ -73,60 +73,71 @@ private data class ExpressiveScrollbarMetrics(
     val travelPx: Float,
 )
 
-/** PixelPlayer-style measured item-stride tracker for variable-height cards. */
-private class ExpressiveScrollbarAxisTracker {
+/**
+ * Measured item-stride tracker for variable-height cards.
+ *
+ * Observations accumulate per index instead of folding into a running average. [observe] runs
+ * inside the metrics snapshot producer, so it has to be idempotent: a history-dependent estimate
+ * makes the same layout yield different progress values and the handle jitters during a fling.
+ */
+internal class ExpressiveScrollbarAxisTracker {
     private var trackedTotalItems = -1
     private var trackedSpacingPx = Int.MIN_VALUE
-    private var representativeStridePx = 1f
-    private var representativeItemSizePx = 1f
     private val observedStrides = mutableMapOf<Int, Float>()
     private val observedItemSizes = mutableMapOf<Int, Float>()
+    private var strideSum = 0f
+    private var itemSizeSum = 0f
 
     fun resetIfNeeded(totalItems: Int, spacingPx: Int) {
         if (trackedTotalItems == totalItems && trackedSpacingPx == spacingPx) return
         trackedTotalItems = totalItems
         trackedSpacingPx = spacingPx
-        representativeStridePx = 1f
-        representativeItemSizePx = 1f
         observedStrides.clear()
         observedItemSizes.clear()
+        strideSum = 0f
+        itemSizeSum = 0f
     }
 
     fun observe(layout: LazyListLayoutInfo) {
         resetIfNeeded(layout.totalItemsCount, layout.mainAxisItemSpacing)
         val visible = layout.visibleItemsInfo
         if (visible.isEmpty()) return
-        val sizeSample = visible.map { it.size.toFloat() }.sorted().let { values -> values[values.size / 2] }
-        representativeItemSizePx = if (representativeItemSizePx == 1f) sizeSample else (representativeItemSizePx + sizeSample) / 2f
-        visible.forEach { item -> observedItemSizes[item.index] = item.size.toFloat() }
-        visible.zipWithNext().forEach { (current, next) ->
-            if (next.index == current.index + 1) {
-                val stride = (next.offset - current.offset).toFloat()
-                if (stride > 0f) {
-                    observedStrides[current.index] = stride
-                    representativeStridePx = if (representativeStridePx == 1f) stride else (representativeStridePx + stride) / 2f
-                }
-            }
+        visible.forEach { item ->
+            val size = item.size.toFloat()
+            itemSizeSum += size - (observedItemSizes.put(item.index, size) ?: 0f)
         }
-        visible.lastOrNull()?.let { last ->
-            if (last.index < layout.totalItemsCount - 1) {
-                val stride = (last.size + layout.mainAxisItemSpacing).toFloat().coerceAtLeast(1f)
-                observedStrides[last.index] = stride
-                representativeStridePx = if (representativeStridePx == 1f) stride else (representativeStridePx + stride) / 2f
-            }
+        visible.zipWithNext().forEach { (current, next) ->
+            if (next.index != current.index + 1) return@forEach
+            val stride = (next.offset - current.offset).toFloat()
+            if (stride <= 0f) return@forEach
+            strideSum += stride - (observedStrides.put(current.index, stride) ?: 0f)
         }
     }
 
+    private fun averageStride(): Float = if (observedStrides.isEmpty()) {
+        averageItemSize()
+    } else {
+        (strideSum / observedStrides.size).coerceAtLeast(1f)
+    }
+
+    private fun averageItemSize(): Float = if (observedItemSizes.isEmpty()) {
+        1f
+    } else {
+        (itemSizeSum / observedItemSizes.size).coerceAtLeast(1f)
+    }
+
+    /** Measured strides where known, mean elsewhere; monotonically increasing in [index]. */
     fun distanceBefore(index: Int): Float {
         if (index <= 0) return 0f
+        val average = averageStride()
         val correction = observedStrides.entries.sumOf { (observedIndex, stride) ->
-            if (observedIndex < index) (stride - representativeStridePx).toDouble() else 0.0
+            if (observedIndex < index) (stride - average).toDouble() else 0.0
         }.toFloat()
-        return (index * representativeStridePx + correction).coerceAtLeast(0f)
+        return (index * average + correction).coerceAtLeast(0f)
     }
 
-    fun itemSize(index: Int): Float = observedItemSizes[index] ?: representativeItemSizePx
-    fun stride(): Float = representativeStridePx.coerceAtLeast(1f)
+    fun itemSize(index: Int): Float = observedItemSizes[index] ?: averageItemSize()
+    fun stride(): Float = averageStride()
 }
 
 private fun expressiveScrollbarMetrics(
