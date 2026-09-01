@@ -129,6 +129,7 @@ import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenu
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuDropdown
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuOffset
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
+import takagi.ru.monica.ui.components.UnifiedTypeQuickFilter
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
@@ -162,6 +163,36 @@ enum class CardWalletTab {
     DOCUMENTS,
     BILLING_ADDRESSES
 }
+
+private fun cardWalletTypeQuickFilters(
+    currentTab: CardWalletTab,
+    onTabSelected: (CardWalletTab) -> Unit
+): List<UnifiedTypeQuickFilter> = listOf(
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.filter_all,
+        icon = Icons.Default.FilterList,
+        isSelected = currentTab == CardWalletTab.ALL,
+        onSelect = { onTabSelected(CardWalletTab.ALL) }
+    ),
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.nav_bank_cards_short,
+        icon = Icons.Default.CreditCard,
+        isSelected = currentTab == CardWalletTab.BANK_CARDS,
+        onSelect = { onTabSelected(CardWalletTab.BANK_CARDS) }
+    ),
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.nav_documents_short,
+        icon = Icons.Default.Description,
+        isSelected = currentTab == CardWalletTab.DOCUMENTS,
+        onSelect = { onTabSelected(CardWalletTab.DOCUMENTS) }
+    ),
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.billing_address,
+        icon = Icons.Default.Home,
+        isSelected = currentTab == CardWalletTab.BILLING_ADDRESSES,
+        onSelect = { onTabSelected(CardWalletTab.BILLING_ADDRESSES) }
+    )
+)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1086,6 +1117,13 @@ fun CardWalletScreen(
                                 getKeePassGroups = getKeePassGroups,
                                 categoryEditMode = categoryMgmt.categoryEditMode,
                                 onRequestCategoryAction = { categoryMgmt.categoryActionTarget = it },
+                                typeQuickFilters = cardWalletTypeQuickFilters(
+                                    currentTab = currentTab,
+                                    onTabSelected = { tab ->
+                                        onTabSelected(tab)
+                                        showCategoryFilterDialog = false
+                                    }
+                                ),
                                 trailingContent = {
                                     CategoryManagementTrailingContent(
                                         state = categoryMgmt,
@@ -1115,6 +1153,8 @@ fun CardWalletScreen(
                                     }
                                 )
                             }
+                            // CHIP_MENU 模式下类型筛选已并入快捷筛选，避免重复入口
+                            if (appSettings.categorySelectionUiMode != takagi.ru.monica.data.CategorySelectionUiMode.CHIP_MENU) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.filter_all)) },
                                 leadingIcon = { Icon(Icons.Default.FilterList, contentDescription = null) },
@@ -1167,6 +1207,7 @@ fun CardWalletScreen(
                                     onTabSelected(CardWalletTab.BILLING_ADDRESSES)
                                 }
                             )
+                            }
                             if (selectedBitwardenVaultId != null) {
                                 DropdownMenuItem(
                                     text = {
