@@ -1137,6 +1137,10 @@
     <string name="bitwarden_status_queued">Синхронизация в очереди</string>
     <string name="bitwarden_status_synced">Синхронизировано</string>
 
+    <!-- Haptic Feedback -->
+    <string name="haptic_feedback">Тактильная отдача</string>
+    <string name="haptic_feedback_description">Вибрация при жестах потягивания, долгом нажатии и других действиях</string>
+
     <!-- Validator Vibration -->
     <string name="validator_vibration">Вибрация аутентификатора</string>
     <string name="validator_vibration_description">Вибрировать перед окончанием обратного отсчёта</string>

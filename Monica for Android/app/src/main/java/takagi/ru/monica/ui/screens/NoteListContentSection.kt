@@ -62,7 +62,7 @@ import takagi.ru.monica.ui.common.state.InitialListRenderState
 import takagi.ru.monica.ui.common.state.rememberSaveableLazyListState
 import takagi.ru.monica.ui.common.state.rememberSaveableLazyStaggeredGridState
 import takagi.ru.monica.ui.common.state.resolveInitialListRenderState
-import takagi.ru.monica.util.VibrationPatterns
+import takagi.ru.monica.ui.haptic.rememberHapticFeedback
 
 @Composable
 fun NoteListContent(
@@ -102,15 +102,7 @@ fun NoteListContent(
     var syncFeedbackIsSuccess by remember { mutableStateOf(false) }
     var canTriggerPullToSearch by remember { mutableStateOf(false) }
     val collapseAnimatable = remember { Animatable(0f) }
-    val vibrator = remember {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            val vibratorManager = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
-            vibratorManager?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-        }
-    }
+    val pullHaptic = rememberHapticFeedback()
 
     suspend fun resolveSyncableVaultId(): Long? {
         val activeVault = bitwardenRepository.getActiveVault() ?: run {
@@ -123,18 +115,7 @@ fun NoteListContent(
     }
 
     fun vibratePullThreshold(isSyncStage: Boolean) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            if (isSyncStage && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                vibrator?.vibrate(
-                    android.os.VibrationEffect.createPredefined(android.os.VibrationEffect.EFFECT_DOUBLE_CLICK)
-                )
-            } else {
-                vibrator?.vibrate(android.os.VibrationEffect.createWaveform(VibrationPatterns.TICK, -1))
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator?.vibrate(if (isSyncStage) 36 else 20)
-        }
+        pullHaptic.performPullThreshold(isSyncStage)
     }
 
     fun updatePullThresholdHaptics(oldOffset: Float, newOffset: Float) {

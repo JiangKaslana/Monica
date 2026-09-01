@@ -1614,6 +1614,10 @@
     <string name="keepass_dx_like_mutation_title">KeePass DX 类引擎</string>
     <string name="keepass_dx_like_mutation_description">实验功能：KeePass 操作使用内存变更 + 异步落盘（默认关闭）</string>
     
+    <!-- 触觉反馈 -->
+    <string name="haptic_feedback">触觉反馈</string>
+    <string name="haptic_feedback_description">下拉手势、长按等交互时震动</string>
+
     <!-- 验证器震动 -->
     <string name="validator_vibration">验证器震动</string>
     <string name="validator_vibration_description">倒计时快结束时震动提醒</string>

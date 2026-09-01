@@ -217,7 +217,6 @@ import takagi.ru.monica.ui.screens.AddEditSendScreen
 import takagi.ru.monica.ui.theme.MonicaTheme
 import takagi.ru.monica.util.TotpDataResolver
 import takagi.ru.monica.util.TotpGenerator
-import takagi.ru.monica.util.VibrationPatterns
 import takagi.ru.monica.data.model.OtpType
 import kotlin.math.PI
 import kotlin.math.cos
@@ -444,25 +443,16 @@ fun TotpListContent(
     var isScreenResumed by remember {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
-    val vibrator = remember(context) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            val manager = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
-            manager?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-        }
-    }
-    DisposableEffect(lifecycleOwner, vibrator) {
+    DisposableEffect(lifecycleOwner, haptic) {
         val lifecycle = lifecycleOwner.lifecycle
         val observer = LifecycleEventObserver { _, _ ->
             isScreenResumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-            if (!isScreenResumed) vibrator?.cancel()
+            if (!isScreenResumed) haptic.cancel()
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
-            vibrator?.cancel()
+            haptic.cancel()
         }
     }
     val expiringRemainingSeconds = remember(
@@ -494,16 +484,7 @@ fun TotpListContent(
             appSettings.validatorVibrationEnabled &&
             vibrationGate.shouldVibrate(sharedTickSeconds, expiringRemainingSeconds)
         ) {
-            vibrator?.let { activeVibrator ->
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    activeVibrator.vibrate(
-                        android.os.VibrationEffect.createWaveform(VibrationPatterns.TICK, -1)
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    activeVibrator.vibrate(VibrationPatterns.TICK, -1)
-                }
-            }
+            haptic.performCountdownTick()
         }
     }
 
@@ -854,6 +835,43 @@ fun TotpListContent(
                                 onClick = {
                                     showTopActionsMenu = false
                                     onQuickScanTotp()
+                                }
+                            )
+                            val isTileLayout =
+                                appSettings.authenticatorLayoutMode == AuthenticatorLayoutMode.TILE
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (isTileLayout) {
+                                                R.string.authenticator_layout_standard
+                                            } else {
+                                                R.string.authenticator_layout_tile
+                                            }
+                                        )
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (isTileLayout) {
+                                            Icons.Default.ViewList
+                                        } else {
+                                            Icons.Default.GridView
+                                        },
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showTopActionsMenu = false
+                                    scope.launch {
+                                        settingsManager.updateAuthenticatorLayoutMode(
+                                            if (isTileLayout) {
+                                                AuthenticatorLayoutMode.STANDARD
+                                            } else {
+                                                AuthenticatorLayoutMode.TILE
+                                            }
+                                        )
+                                    }
                                 }
                             )
                             if (showStandaloneSettingsEntry) {

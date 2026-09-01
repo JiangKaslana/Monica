@@ -1626,6 +1626,10 @@
     <string name="bitwarden_status_queued">Synchronisierung in der Warteschlange</string>
     <string name="bitwarden_status_synced">Synchronisiert</string>
 
+    <!-- Haptic Feedback -->
+    <string name="haptic_feedback">Haptisches Feedback</string>
+    <string name="haptic_feedback_description">Bei Wischgesten, langem Drücken und anderen Interaktionen vibrieren</string>
+
     <!-- Validator Vibration -->
     <string name="validator_vibration">Validator-Vibration</string>
     <string name="validator_vibration_description">Vibrieren, wenn der Countdown bald zu Ende geht</string>

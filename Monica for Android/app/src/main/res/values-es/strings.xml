@@ -1626,6 +1626,10 @@
     <string name="bitwarden_status_queued">Sincronización en cola</string>
     <string name="bitwarden_status_synced">Sincronizada</string>
 
+    <!-- Haptic Feedback -->
+    <string name="haptic_feedback">Respuesta háptica</string>
+    <string name="haptic_feedback_description">Vibrar al deslizar, pulsar de forma prolongada y en otras interacciones</string>
+
     <!-- Validator Vibration -->
     <string name="validator_vibration">Vibración del validador</string>
     <string name="validator_vibration_description">Vibrar cuando la cuenta atrás esté a punto de finalizar</string>
