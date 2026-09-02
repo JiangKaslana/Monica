@@ -74,7 +74,7 @@ Android:
 3. Нажмите «Загрузить распакованное расширение» и выберите папку `dist`.
 
 ### Известное ограничение
-- Из-за ограничений совместимости Monica for Android сейчас не может создавать passkeys на некоторых устройствах Xiaomi HyperOS.
+- Из-за ограничений совместимости Monica for Android сейчас не может создавать passkeys на некоторых устройствах Xiaomi HyperOS. Можно попробовать модуль [HyperMonica](https://github.com/Wuming155/HyperMonica) от 酷 U.
 
 ---
 

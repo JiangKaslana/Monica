@@ -74,7 +74,7 @@ Tien ich trinh duyet (Chrome / Edge):
 3. Chon Load unpacked va tro den thu muc `dist`.
 
 ### Gioi han da biet
-- Do han che tuong thich he thong, Monica for Android hien tai khong the tao passkey tren mot so thiet bi Xiaomi HyperOS.
+- Do han che tuong thich he thong, Monica for Android hien tai khong the tao passkey tren mot so thiet bi Xiaomi HyperOS. Co the thu module [HyperMonica](https://github.com/Wuming155/HyperMonica) do 酷 U cung cap.
 
 ---
 

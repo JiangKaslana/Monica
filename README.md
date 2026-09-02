@@ -75,7 +75,7 @@ Android:
 3. 选择“加载已解压的扩展程序”，导入 `dist` 目录。
 
 ### 已知限制
-- 由于系统兼容性原因，Monica for Android 目前在部分小米 HyperOS 设备上无法创建通行密钥（Passkey）。
+- 由于系统兼容性原因，Monica for Android 目前在部分小米 HyperOS 设备上无法创建通行密钥（Passkey）。可以尝试酷 U 提供的解决模块：[HyperMonica](https://github.com/Wuming155/HyperMonica)。
 
 ---
 

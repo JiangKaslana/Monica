@@ -74,7 +74,7 @@ Android:
 3. 「パッケージ化されていない拡張機能を読み込む」で `dist` を選択。
 
 ### 既知の制限
-- システム互換性の都合により、Monica for Android は一部の Xiaomi HyperOS 端末でパスキーを作成できません。
+- システム互換性の都合により、Monica for Android は一部の Xiaomi HyperOS 端末でパスキーを作成できません。酷 U さん提供の解決モジュール [HyperMonica](https://github.com/Wuming155/HyperMonica) をお試しください。
 
 ---
 
