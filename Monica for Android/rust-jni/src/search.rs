@@ -50,10 +50,7 @@ impl SearchQuery {
 /// Parsing is allocation-free for field values: every candidate is borrowed
 /// directly from the single JNI byte buffer. This keeps JNI traffic constant
 /// per search instead of crossing the boundary once per field and row.
-pub(crate) fn filter_metadata_batch(
-    payload: &[u8],
-    query: &SearchQuery,
-) -> Option<Vec<i32>> {
+pub(crate) fn filter_metadata_batch(payload: &[u8], query: &SearchQuery) -> Option<Vec<i32>> {
     let mut cursor = BatchCursor::new(payload);
     if cursor.read_u32()? != METADATA_BATCH_MAGIC {
         return None;
