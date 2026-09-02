@@ -19,7 +19,7 @@ env:
 
 jobs:
   size-probe:
-    name: MDBX3 ABI + size probe
+    name: MDBX3 ABI + APK probe
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Monica
@@ -135,5 +135,128 @@ jobs:
             mdbx3-abi-report.json
             mdbx3-jniLibs/arm64-v8a/libmdbx_ffi.so
             mdbx3-jniLibs/armeabi-v7a/libmdbx_ffi.so
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Set up JDK 17 for candidate APK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle for candidate APK
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+
+      - name: Build Monica Rust JNI for candidate APK
+        working-directory: "monica/Monica for Android"
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi
+          (
+            cd rust-jni
+            cargo ndk \
+              -t arm64-v8a \
+              -t armeabi-v7a \
+              -o ../app/src/main/jniLibs \
+              build --release
+          )
+          test -f app/src/main/jniLibs/arm64-v8a/libmonica_rust_jni.so
+          test -f app/src/main/jniLibs/armeabi-v7a/libmonica_rust_jni.so
+
+      - name: Overlay ABI-compatible MDBX3 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for abi in arm64-v8a armeabi-v7a; do
+            src="$GITHUB_WORKSPACE/mdbx3-jniLibs/$abi/libmdbx_ffi.so"
+            dst="$GITHUB_WORKSPACE/monica/Monica for Android/mdbx-engine/src/main/jniLibs/$abi/libmdbx_ffi.so"
+            test -f "$src"
+            test -f "$dst"
+            cp "$src" "$dst"
+            cmp -s "$src" "$dst"
+          done
+          echo "MDBX3 candidate overlaid into the checked-out Android workspace only."
+
+      - name: Build unsigned Release APK with MDBX3
+        working-directory: "monica/Monica for Android"
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          suffix="mdbx3.${GITHUB_RUN_NUMBER}"
+          ./gradlew --stop
+          ./gradlew :app:assembleRelease \
+            --no-daemon \
+            --stacktrace \
+            --info \
+            -Pkotlin.incremental=false \
+            -Dkotlin.compiler.execution.strategy=in-process \
+            -PpreviewVersionSuffix="$suffix" \
+            2>&1 | tee "$RUNNER_TEMP/mdbx3-apk-build.log"
+
+      - name: Verify MDBX3 is packaged and report APK sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$GITHUB_WORKSPACE/monica/Monica for Android/app/build/outputs/apk/release"
+          report="$GITHUB_WORKSPACE/mdbx3-apk-size-report.md"
+          mapfile -t apks < <(find "$release_dir" -maxdepth 1 -type f -iname '*.apk' | sort)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "No MDBX3 candidate APK generated." >&2
+            exit 1
+          fi
+
+          printf '| APK | Bytes | MiB |\n' > "$report"
+          printf '| --- | ---: | ---: |\n' >> "$report"
+
+          arm64_found=0
+          armv7_found=0
+          for apk in "${apks[@]}"; do
+            bytes=$(stat -c %s "$apk")
+            mib=$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1048576 }')
+            printf '| `%s` | %s | %s |\n' "$(basename "$apk")" "$bytes" "$mib" >> "$report"
+
+            entries="$(unzip -Z1 "$apk")"
+            for abi in arm64-v8a armeabi-v7a; do
+              entry="lib/$abi/libmdbx_ffi.so"
+              if grep -qx "$entry" <<< "$entries"; then
+                expected=$(sha256sum "$GITHUB_WORKSPACE/mdbx3-jniLibs/$abi/libmdbx_ffi.so" | awk '{print $1}')
+                actual=$(unzip -p "$apk" "$entry" | sha256sum | awk '{print $1}')
+                if [ "$expected" != "$actual" ]; then
+                  echo "MDBX3 packaging hash mismatch for $abi in $apk" >&2
+                  exit 1
+                fi
+                if [ "$abi" = "arm64-v8a" ]; then arm64_found=1; else armv7_found=1; fi
+              fi
+            done
+          done
+
+          test "$arm64_found" -eq 1 || { echo "arm64-v8a MDBX3 library was not packaged" >&2; exit 1; }
+          test "$armv7_found" -eq 1 || { echo "armeabi-v7a MDBX3 library was not packaged" >&2; exit 1; }
+
+          {
+            echo
+            echo '## MDBX3 candidate APK sizes'
+            echo
+            cat "$report"
+            echo
+            echo 'The packaged libmdbx_ffi.so SHA-256 is verified against the ABI-compatible candidate built earlier in this job.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat "$report"
+
+      - name: Upload MDBX3 candidate APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdbx3-unsigned-release-apks
+          path: |
+            monica/Monica for Android/app/build/outputs/apk/release/*.APK
+            mdbx3-apk-size-report.md
+            ${{ runner.temp }}/mdbx3-apk-build.log
           if-no-files-found: error
           retention-days: 7
