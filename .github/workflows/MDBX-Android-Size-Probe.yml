@@ -46,8 +46,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager "ndk;$NDK_VERSION" >/dev/null
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          ndk_path="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          if [ ! -d "$ndk_path" ]; then
+            sdkmanager_path="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print -quit)"
+            if [ -z "$sdkmanager_path" ]; then
+              echo "sdkmanager not found under $ANDROID_SDK_ROOT/cmdline-tools" >&2
+              exit 1
+            fi
+            yes | "$sdkmanager_path" "ndk;$NDK_VERSION" >/dev/null
+          fi
+          test -d "$ndk_path"
+          echo "ANDROID_NDK_HOME=$ndk_path" >> "$GITHUB_ENV"
           cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
 
       - name: Build MDBX3 for Monica release ABIs
