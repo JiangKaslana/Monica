@@ -39,8 +39,17 @@
 # Compose - 保持必要的类
 -dontwarn androidx.compose.**
 
-# Google Play 服务仍由登录/凭据链路使用
+# CameraX
+-dontwarn androidx.camera.**
+
+# ML Kit
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.odml.** { *; }
+-dontwarn com.google.mlkit.**
 -dontwarn com.google.android.gms.**
+
+# ZXing
+-dontwarn com.google.zxing.**
 
 # WebDAV (Sardine)
 -dontwarn com.thegrizzlylabs.sardineandroid.**
