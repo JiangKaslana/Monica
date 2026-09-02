@@ -90,7 +90,7 @@ Android 小猫这样做喵：
 
 ### 现在还会有一点点遗憾喵
 
-- 因为系统兼容性原因，Monica for Android 目前在部分小米 HyperOS 设备上可能无法创建通行密钥（Passkey）喵。这个锅人家会记在小本本上喵。
+- 因为系统兼容性原因，Monica for Android 目前在部分小米 HyperOS 设备上可能无法创建通行密钥（Passkey）喵。可以尝试酷 U 提供的解决模块：[HyperMonica](https://github.com/Wuming155/HyperMonica) 喵。
 
 ---
 

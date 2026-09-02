@@ -1052,7 +1052,8 @@ fun MonicaContent(
     @OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
     androidx.compose.runtime.CompositionLocalProvider(
         takagi.ru.monica.ui.LocalSharedTransitionScope provides null,
-        takagi.ru.monica.ui.LocalReduceAnimations provides true
+        takagi.ru.monica.ui.LocalReduceAnimations provides true,
+        takagi.ru.monica.ui.LocalHapticFeedbackEnabled provides settings.hapticFeedbackEnabled
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             NavHost(
@@ -3536,6 +3537,10 @@ fun MonicaContent(
                     navController.navigate(Screen.QuickSetup.route)
                 },
                 isPlusActivated = settings.isPlusActivated,
+                hapticFeedbackEnabled = settings.hapticFeedbackEnabled,
+                onHapticFeedbackChange = { enabled ->
+                    settingsViewModel.updateHapticFeedbackEnabled(enabled)
+                },
                 validatorVibrationEnabled = settings.validatorVibrationEnabled,
                 onValidatorVibrationChange = { enabled ->
                     settingsViewModel.updateValidatorVibrationEnabled(enabled)

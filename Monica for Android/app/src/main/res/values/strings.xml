@@ -1629,6 +1629,10 @@
     <string name="bitwarden_status_queued">Sync queued</string>
     <string name="bitwarden_status_synced">Synced</string>
     
+    <!-- Haptic Feedback -->
+    <string name="haptic_feedback">Haptic Feedback</string>
+    <string name="haptic_feedback_description">Vibrate on pull gestures, long press and other interactions</string>
+
     <!-- Validator Vibration -->
     <string name="validator_vibration">Validator Vibration</string>
     <string name="validator_vibration_description">Vibrate when countdown is about to end</string>

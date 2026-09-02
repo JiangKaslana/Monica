@@ -715,6 +715,10 @@
     <string name="validator_settings_section">Cài đặt xác thực</string>
     <string name="experimental_features_section">Tính năng thử nghiệm</string>
     
+    <!-- Phản hồi xúc giác -->
+    <string name="haptic_feedback">Phản hồi xúc giác</string>
+    <string name="haptic_feedback_description">Rung khi kéo, nhấn giữ và các tương tác khác</string>
+
     <!-- Rung xác thực -->
     <string name="validator_vibration">Rung xác thực</string>
     <string name="validator_vibration_description">Rung khi đếm ngược sắp kết thúc</string>

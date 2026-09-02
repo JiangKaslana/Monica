@@ -1626,6 +1626,10 @@
     <string name="bitwarden_status_queued">동기화 대기 중</string>
     <string name="bitwarden_status_synced">동기화됨</string>
 
+    <!-- Haptic Feedback -->
+    <string name="haptic_feedback">햅틱 피드백</string>
+    <string name="haptic_feedback_description">당겨서 새로 고침, 길게 누르기 등 상호작용 시 진동</string>
+
     <!-- Validator Vibration -->
     <string name="validator_vibration">검증기 진동</string>
     <string name="validator_vibration_description">카운트다운이 끝나려고 할 때 진동</string>

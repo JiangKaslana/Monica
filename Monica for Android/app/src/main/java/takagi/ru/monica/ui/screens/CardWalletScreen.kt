@@ -104,6 +104,7 @@ import takagi.ru.monica.ui.cardwallet.WalletListItem
 import takagi.ru.monica.ui.cardwallet.WalletListItemType
 import takagi.ru.monica.ui.cardwallet.bitwardenVaultIdForWalletSync
 import takagi.ru.monica.ui.cardwallet.isBitwardenWalletScope
+import takagi.ru.monica.ui.cardwallet.mergeVisibleWalletOrder
 import takagi.ru.monica.ui.cardwallet.toBillingAddressWalletListItem
 import takagi.ru.monica.ui.cardwallet.toBankCardWalletListItem
 import takagi.ru.monica.ui.cardwallet.toDocumentWalletListItem
@@ -123,11 +124,12 @@ import takagi.ru.monica.ui.category.rememberCategoryManagementState
 import takagi.ru.monica.ui.components.PullActionVisualState
 import takagi.ru.monica.ui.common.pull.calculateDampedPullOffset
 import takagi.ru.monica.ui.common.state.InitialListRenderState
-import takagi.ru.monica.ui.common.state.resolveInitialListRenderState
+import takagi.ru.monica.ui.common.state.resolveMergedListRenderState
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenu
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuDropdown
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterChipMenuOffset
 import takagi.ru.monica.ui.components.UnifiedCategoryFilterSelection
+import takagi.ru.monica.ui.components.UnifiedTypeQuickFilter
 import takagi.ru.monica.ui.components.UnifiedMoveAction
 import takagi.ru.monica.ui.components.UnifiedMoveCategoryTarget
 import takagi.ru.monica.ui.components.UnifiedMoveToCategoryBottomSheet
@@ -161,6 +163,36 @@ enum class CardWalletTab {
     DOCUMENTS,
     BILLING_ADDRESSES
 }
+
+private fun cardWalletTypeQuickFilters(
+    currentTab: CardWalletTab,
+    onTabSelected: (CardWalletTab) -> Unit
+): List<UnifiedTypeQuickFilter> = listOf(
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.filter_all,
+        icon = Icons.Default.FilterList,
+        isSelected = currentTab == CardWalletTab.ALL,
+        onSelect = { onTabSelected(CardWalletTab.ALL) }
+    ),
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.nav_bank_cards_short,
+        icon = Icons.Default.CreditCard,
+        isSelected = currentTab == CardWalletTab.BANK_CARDS,
+        onSelect = { onTabSelected(CardWalletTab.BANK_CARDS) }
+    ),
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.nav_documents_short,
+        icon = Icons.Default.Description,
+        isSelected = currentTab == CardWalletTab.DOCUMENTS,
+        onSelect = { onTabSelected(CardWalletTab.DOCUMENTS) }
+    ),
+    UnifiedTypeQuickFilter(
+        labelRes = R.string.billing_address,
+        icon = Icons.Default.Home,
+        isSelected = currentTab == CardWalletTab.BILLING_ADDRESSES,
+        onSelect = { onTabSelected(CardWalletTab.BILLING_ADDRESSES) }
+    )
+)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -567,15 +599,16 @@ fun CardWalletScreen(
     val allItems = remember(cards, documents, billingAddresses) {
         (cards + documents + billingAddresses).sortedWith(
             compareByDescending<SecureItem> { it.isFavorite }
-                .thenByDescending { it.updatedAt.time }
                 .thenBy { it.sortOrder }
+                .thenByDescending { it.updatedAt.time }
         )
     }
     val allWalletItems = remember(walletItems) {
         walletItems.sortedWith(
             compareByDescending<WalletListItem> { it.item.isFavorite }
-                .thenByDescending { it.item.updatedAt.time }
                 .thenBy { it.item.sortOrder }
+                .thenBy { it.id }
+                .thenByDescending { it.item.updatedAt.time }
         )
     }
 
@@ -901,7 +934,7 @@ fun CardWalletScreen(
             }
             .toList()
     }
-    val initialRenderState = resolveInitialListRenderState(
+    val initialRenderState = resolveMergedListRenderState(
         isReady = walletItemsReady,
         itemCount = filteredItems.size,
     )
@@ -1084,6 +1117,13 @@ fun CardWalletScreen(
                                 getKeePassGroups = getKeePassGroups,
                                 categoryEditMode = categoryMgmt.categoryEditMode,
                                 onRequestCategoryAction = { categoryMgmt.categoryActionTarget = it },
+                                typeQuickFilters = cardWalletTypeQuickFilters(
+                                    currentTab = currentTab,
+                                    onTabSelected = { tab ->
+                                        onTabSelected(tab)
+                                        showCategoryFilterDialog = false
+                                    }
+                                ),
                                 trailingContent = {
                                     CategoryManagementTrailingContent(
                                         state = categoryMgmt,
@@ -1113,6 +1153,8 @@ fun CardWalletScreen(
                                     }
                                 )
                             }
+                            // CHIP_MENU 模式下类型筛选已并入快捷筛选，避免重复入口
+                            if (appSettings.categorySelectionUiMode != takagi.ru.monica.data.CategorySelectionUiMode.CHIP_MENU) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.filter_all)) },
                                 leadingIcon = { Icon(Icons.Default.FilterList, contentDescription = null) },
@@ -1165,6 +1207,7 @@ fun CardWalletScreen(
                                     onTabSelected(CardWalletTab.BILLING_ADDRESSES)
                                 }
                             )
+                            }
                             if (selectedBitwardenVaultId != null) {
                                 DropdownMenuItem(
                                     text = {
@@ -1288,8 +1331,11 @@ fun CardWalletScreen(
 
                     else -> {
                         var localFilteredItems by remember(filteredItems) { mutableStateOf(filteredItems) }
+                        var walletWasDragging by remember { mutableStateOf(false) }
                         LaunchedEffect(filteredItems) {
-                            localFilteredItems = filteredItems
+                            if (!walletWasDragging) {
+                                localFilteredItems = filteredItems
+                            }
                         }
                         val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
                             if (isSelectionMode) {
@@ -1299,19 +1345,25 @@ fun CardWalletScreen(
                             }
                         }
                         LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
-                            if (!reorderableLazyListState.isAnyItemDragging && isSelectionMode) {
-                                val bankOrders = localFilteredItems
-                                    .filter { it.type == WalletListItemType.BANK_CARD }
-                                    .mapIndexed { index, walletItem -> walletItem.id to index }
-                                val docOrders = localFilteredItems
-                                    .filter { it.type == WalletListItemType.DOCUMENT }
-                                    .mapIndexed { index, walletItem -> walletItem.id to index }
-                                val addressOrders = localFilteredItems
-                                    .filter { it.type == WalletListItemType.BILLING_ADDRESS }
-                                    .mapIndexed { index, walletItem -> walletItem.id to index }
-                                if (bankOrders.isNotEmpty()) bankCardViewModel.updateSortOrders(bankOrders)
-                                if (docOrders.isNotEmpty()) documentViewModel.updateSortOrders(docOrders)
-                                if (addressOrders.isNotEmpty()) billingAddressViewModel.updateSortOrders(addressOrders)
+                            if (reorderableLazyListState.isAnyItemDragging) {
+                                walletWasDragging = true
+                            } else if (walletWasDragging && isSelectionMode) {
+                                val mergedIds = mergeVisibleWalletOrder(
+                                    allItemIds = allWalletItems.map(WalletListItem::id),
+                                    reorderedVisibleItemIds = localFilteredItems.map(WalletListItem::id)
+                                )
+                                val currentItemsById = allWalletItems.associateBy(WalletListItem::id)
+                                val newOrders = mergedIds.mapIndexedNotNull { index, id ->
+                                    val walletItem = currentItemsById[id] ?: return@mapIndexedNotNull null
+                                    if (walletItem.item.sortOrder == index) null else id to index
+                                }
+                                if (newOrders.isNotEmpty()) {
+                                    // 三种类型共用 SecureItemRepository，一次写入即可覆盖全部，
+                                    // 拆成每类型一次会让同一张表触发多次 Flow 失效，拖动结果被中间态回拉。
+                                    bankCardViewModel.updateSortOrders(newOrders)
+                                }
+                                delay(300)
+                                walletWasDragging = false
                             }
                         }
 
@@ -1329,7 +1381,8 @@ fun CardWalletScreen(
                                 ReorderableItem(
                                     reorderableLazyListState,
                                     key = walletItem.id,
-                                    enabled = isSelectionMode
+                                    enabled = isSelectionMode,
+                                    modifier = Modifier.animateItem()
                                 ) { isDragging ->
                                     val isSelected = selectedIds.contains(walletItem.id)
                                     val elevation by animateDpAsState(

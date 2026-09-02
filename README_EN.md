@@ -74,7 +74,7 @@ Browser extension (Chrome / Edge):
 3. Load unpacked and choose the `dist` folder.
 
 ### Known limitation
-- Due to system compatibility constraints, Monica for Android currently cannot create passkeys on some Xiaomi HyperOS devices.
+- Due to system compatibility constraints, Monica for Android currently cannot create passkeys on some Xiaomi HyperOS devices. You can try [HyperMonica](https://github.com/Wuming155/HyperMonica), a workaround module contributed by a Coolapk community member.
 
 ---
 

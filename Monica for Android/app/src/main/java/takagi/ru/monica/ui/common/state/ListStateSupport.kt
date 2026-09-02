@@ -22,6 +22,19 @@ internal fun resolveInitialListRenderState(
     else -> InitialListRenderState.Empty
 }
 
+/**
+ * 合并多个来源时，任一来源未就绪就先停在 Loading。
+ * 否则先到的来源会立刻切进 Content，后到的来源只能往已渲染的列表里追加，出现卡片分批出现的效果。
+ */
+internal fun resolveMergedListRenderState(
+    isReady: Boolean,
+    itemCount: Int,
+): InitialListRenderState = when {
+    !isReady -> InitialListRenderState.Loading
+    itemCount > 0 -> InitialListRenderState.Content
+    else -> InitialListRenderState.Empty
+}
+
 @Composable
 internal fun rememberSaveableLazyListState(
     initialFirstVisibleItemIndex: Int = 0,
