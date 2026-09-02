@@ -43,11 +43,7 @@ pub extern "system" fn Java_takagi_ru_monica_rustcore_RustPasswordListCore_nativ
     filter_indices(&mut env, &metadata, &query).unwrap_or(std::ptr::null_mut())
 }
 
-fn filter_indices(
-    env: &mut JNIEnv,
-    metadata: &JByteArray,
-    query: &JString,
-) -> Option<jintArray> {
+fn filter_indices(env: &mut JNIEnv, metadata: &JByteArray, query: &JString) -> Option<jintArray> {
     // One JNI copy replaces five object arrays plus up to 5*N element/string
     // lookups. The parser then borrows UTF-8 slices directly from this buffer.
     let metadata = env.convert_byte_array(metadata).ok()?;
