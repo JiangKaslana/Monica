@@ -228,7 +228,7 @@ jobs:
               unzip -l "$apk" \
                 | awk 'NR > 3 && $1 ~ /^[0-9]+$/ && NF >= 4 { print $1 "\t" $4 }' \
                 | sort -nr \
-                | head -30
+                | awk 'NR <= 30'
               echo
             } | tee -a "$report"
           done
