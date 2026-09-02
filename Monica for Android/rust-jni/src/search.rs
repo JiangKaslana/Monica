@@ -120,12 +120,12 @@ impl<'a> BatchCursor<'a> {
 mod tests {
     use super::{filter_metadata_batch, SearchQuery, METADATA_BATCH_MAGIC};
 
-    fn encode_rows(rows: &[&[&str; 5]]) -> Vec<u8> {
+    fn encode_rows(rows: &[[&str; 5]]) -> Vec<u8> {
         let mut payload = Vec::new();
         payload.extend_from_slice(&METADATA_BATCH_MAGIC.to_le_bytes());
         payload.extend_from_slice(&(rows.len() as u32).to_le_bytes());
         for row in rows {
-            for value in *row {
+            for value in row {
                 let bytes = value.as_bytes();
                 payload.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
                 payload.extend_from_slice(bytes);
@@ -164,14 +164,10 @@ mod tests {
     #[test]
     fn metadata_batch_returns_original_indices() {
         let rows = [
-            &["GitHub", "octocat", "github.com", "", ""][..],
-            &["Mail", "alice", "mail.example", "", ""][..],
-            &["Android", "", "", "Monica", "takagi.ru.monica"][..],
+            ["GitHub", "octocat", "github.com", "", ""],
+            ["Mail", "alice", "mail.example", "", ""],
+            ["Android", "", "", "Monica", "takagi.ru.monica"],
         ];
-        let rows: Vec<&[&str; 5]> = rows
-            .iter()
-            .map(|row| <&[&str; 5]>::try_from(*row).unwrap())
-            .collect();
         let payload = encode_rows(&rows);
 
         assert_eq!(
@@ -186,7 +182,7 @@ mod tests {
 
     #[test]
     fn malformed_metadata_batch_is_rejected() {
-        let mut payload = encode_rows(&[&["one", "two", "three", "four", "five"]]);
+        let mut payload = encode_rows(&[["one", "two", "three", "four", "five"]]);
         payload.pop();
         assert_eq!(
             filter_metadata_batch(&payload, &SearchQuery::new("one")),
