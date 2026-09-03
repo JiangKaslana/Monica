@@ -98,9 +98,8 @@ mod tests {
     #[test]
     fn pbkdf2_sha256_matches_known_vector() {
         let derived = derive_pbkdf2_sha256(b"password", b"salt", 1).unwrap();
-        let expected = decode_hex(
-            "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b",
-        );
+        let expected =
+            decode_hex("120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b");
 
         assert_eq!(derived.as_slice(), expected.as_slice());
     }
@@ -108,9 +107,8 @@ mod tests {
     #[test]
     fn argon2id_v13_matches_known_vector() {
         let derived = derive_argon2id(b"password", b"somesalt", 2, 32, 1).unwrap();
-        let expected = decode_hex(
-            "31111cc053ba0a799c0884148fd7ec9dc3631f3e8cf476cca9521d4ccc5136e8",
-        );
+        let expected =
+            decode_hex("31111cc053ba0a799c0884148fd7ec9dc3631f3e8cf476cca9521d4ccc5136e8");
 
         assert_eq!(derived.as_slice(), expected.as_slice());
     }
