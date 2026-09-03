@@ -1,0 +1,106 @@
+name: MDBX3 Pin Candidates
+
+on:
+  push:
+    branches: [ci/mdbx3-pin-662315c-20260903]
+    paths:
+      - '.github/workflows/MDBX3-Pin-Candidates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  MDBX_COMMIT: 5cf8af697727095654884e0a76bec6ca12d0ce6b
+  RUST_VERSION: 1.86.0
+  CARGO_NDK_VERSION: 4.1.2
+  NDK_VERSION: 28.2.13676358
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Monica pin branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Checkout pinned MDBX3 source
+        uses: actions/checkout@v6
+        with:
+          repository: Monica-Pass/Mdbx
+          ref: ${{ env.MDBX_COMMIT }}
+          path: .tmp-mdbx3
+
+      - name: Install pinned Rust and NDK toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          ndk_path="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          if [ ! -d "$ndk_path" ]; then
+            sdkmanager_path="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print -quit)"
+            test -n "$sdkmanager_path"
+            yes | "$sdkmanager_path" "ndk;$NDK_VERSION" >/dev/null
+          fi
+          echo "ANDROID_NDK_HOME=$ndk_path" >> "$GITHUB_ENV"
+          cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+
+      - name: Build, strip, and ABI-gate all Android candidates
+        working-directory: .tmp-mdbx3
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo ndk \
+            -t arm64-v8a \
+            -t armeabi-v7a \
+            -t x86_64 \
+            -P 21 \
+            -o "$GITHUB_WORKSPACE/.tmp-mdbx3-jniLibs" \
+            build -p mdbx-ffi --profile mdbx3-release
+
+          llvm_bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            "$llvm_bin/llvm-strip" --strip-all "$GITHUB_WORKSPACE/.tmp-mdbx3-jniLibs/$abi/libmdbx_ffi.so"
+          done
+
+          python3 scripts/verify-mdbx3-ffi-abi.py verify-exports \
+            --baseline crates/mdbx-ffi/abi/mdbx2-uniffi-bindings-v1.json \
+            --nm "$llvm_bin/llvm-nm" \
+            --library "arm64-v8a=$GITHUB_WORKSPACE/.tmp-mdbx3-jniLibs/arm64-v8a/libmdbx_ffi.so" \
+            --library "armeabi-v7a=$GITHUB_WORKSPACE/.tmp-mdbx3-jniLibs/armeabi-v7a/libmdbx_ffi.so" \
+            --library "x86_64=$GITHUB_WORKSPACE/.tmp-mdbx3-jniLibs/x86_64/libmdbx_ffi.so" \
+            --output "$GITHUB_WORKSPACE/mdbx3-pinned-abi-report.json"
+
+      - name: Replace repository MDBX libraries and verify hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            src="$GITHUB_WORKSPACE/.tmp-mdbx3-jniLibs/$abi/libmdbx_ffi.so"
+            dst="$GITHUB_WORKSPACE/Monica for Android/mdbx-engine/src/main/jniLibs/$abi/libmdbx_ffi.so"
+            test -f "$src"
+            test -f "$dst"
+            cp "$src" "$dst"
+            cmp -s "$src" "$dst"
+            sha256sum "$dst"
+          done
+
+      - name: Commit pinned candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .tmp-mdbx3 .tmp-mdbx3-jniLibs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            'Monica for Android/mdbx-engine/src/main/jniLibs/arm64-v8a/libmdbx_ffi.so' \
+            'Monica for Android/mdbx-engine/src/main/jniLibs/armeabi-v7a/libmdbx_ffi.so' \
+            'Monica for Android/mdbx-engine/src/main/jniLibs/x86_64/libmdbx_ffi.so' \
+            mdbx3-pinned-abi-report.json
+          git diff --cached --stat
+          git commit -m 'perf(android): pin ABI-verified MDBX3 libraries'
+          git push origin HEAD:ci/mdbx3-pin-662315c-20260903
