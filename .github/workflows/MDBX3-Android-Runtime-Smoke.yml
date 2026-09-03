@@ -124,7 +124,7 @@ jobs:
         shell: bash
         run: chmod +x gradlew
 
-      - name: Prebuild instrumentation APKs before starting emulator
+      - name: Prebuild and lock instrumentation APKs before starting emulator
         working-directory: "monica/Monica for Android"
         shell: bash
         run: |
@@ -142,7 +142,7 @@ jobs:
           mapfile -t apks < <(find "$debug_dir" -maxdepth 1 -type f -iname '*.apk' | sort)
           test "${#apks[@]}" -gt 0
 
-          found=0
+          selected=""
           for apk in "${apks[@]}"; do
             if unzip -Z1 "$apk" | grep -qx 'lib/x86_64/libmdbx_ffi.so'; then
               actual="$(unzip -p "$apk" 'lib/x86_64/libmdbx_ffi.so' | sha256sum | awk '{print $1}')"
@@ -150,13 +150,30 @@ jobs:
                 echo "MDBX3 candidate packaging hash mismatch in $apk" >&2
                 exit 1
               }
-              found=1
+              if [ -n "$selected" ]; then
+                echo "More than one Debug APK contains x86_64 libmdbx_ffi.so" >&2
+                exit 1
+              fi
+              selected="$apk"
             fi
           done
-          test "$found" -eq 1 || {
+          test -n "$selected" || {
             echo "No prebuilt Debug APK contained x86_64 libmdbx_ffi.so" >&2
             exit 1
           }
+
+          test_dir="$GITHUB_WORKSPACE/monica/Monica for Android/app/build/outputs/apk/androidTest/debug"
+          mapfile -t test_apks < <(find "$test_dir" -type f -iname '*.apk' | sort)
+          test "${#test_apks[@]}" -eq 1 || {
+            printf 'Expected exactly one AndroidTest APK, found %s\n' "${#test_apks[@]}" >&2
+            printf '%s\n' "${test_apks[@]}" >&2
+            exit 1
+          }
+
+          echo "MDBX3_DEBUG_APK=$selected" >> "$GITHUB_ENV"
+          echo "MDBX3_TEST_APK=${test_apks[0]}" >> "$GITHUB_ENV"
+          printf 'Locked runtime app APK: %s\n' "$selected"
+          printf 'Locked runtime test APK: %s\n' "${test_apks[0]}"
 
       - name: Enable KVM
         shell: bash
@@ -176,12 +193,61 @@ jobs:
           disable-animations: true
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: "monica/Monica for Android"
-          script: >-
-            ./gradlew :app:connectedDebugAndroidTest
-            --no-daemon
-            --stacktrace
-            -PincludeX86TestAbi
-            -Pandroid.testInstrumentationRunnerArguments.class=takagi.ru.monica.repository.Mdbx2CreationInstrumentedTest,takagi.ru.monica.repository.Mdbx2FeatureParityInstrumentedTest,takagi.ru.monica.repository.Mdbx2HardeningInstrumentedTest,takagi.ru.monica.repository.Mdbx2MigrationInstrumentedTest,takagi.ru.monica.repository.MdbxVaultStoreInstrumentedCompatibilityTest,takagi.ru.monica.utils.Mdbx2BackupInstrumentedTest,takagi.ru.monica.rustcore.BitwardenRustKdfInstrumentedTest
+          script: |
+            set -euo pipefail
+            test -f "$MDBX3_DEBUG_APK"
+            test -f "$MDBX3_TEST_APK"
+
+            adb wait-for-device
+            adb install -r "$MDBX3_DEBUG_APK"
+            adb install -r "$MDBX3_TEST_APK"
+
+            mkdir -p "$GITHUB_WORKSPACE/mdbx3-instrumentation-logs"
+            instrumentation_list="$GITHUB_WORKSPACE/mdbx3-instrumentation-logs/instrumentation-list.txt"
+            adb shell pm list instrumentation | tr -d '\r' | tee "$instrumentation_list"
+            instrumentation_line="$(grep '(target=takagi.ru.monica)' "$instrumentation_list" | head -n 1)"
+            test -n "$instrumentation_line" || {
+              echo "No instrumentation runner targeting takagi.ru.monica was installed" >&2
+              exit 1
+            }
+            instrumentation="${instrumentation_line#instrumentation:}"
+            instrumentation="${instrumentation%% *}"
+            printf 'Using instrumentation: %s\n' "$instrumentation"
+
+            test_classes=(
+              takagi.ru.monica.repository.Mdbx2CreationInstrumentedTest
+              takagi.ru.monica.repository.Mdbx2FeatureParityInstrumentedTest
+              takagi.ru.monica.repository.Mdbx2HardeningInstrumentedTest
+              takagi.ru.monica.repository.Mdbx2MigrationInstrumentedTest
+              takagi.ru.monica.repository.MdbxVaultStoreInstrumentedCompatibilityTest
+              takagi.ru.monica.utils.Mdbx2BackupInstrumentedTest
+              takagi.ru.monica.rustcore.BitwardenRustKdfInstrumentedTest
+            )
+
+            for test_class in "${test_classes[@]}"; do
+              safe_name="${test_class//./_}"
+              log_file="$GITHUB_WORKSPACE/mdbx3-instrumentation-logs/${safe_name}.txt"
+              echo "Running $test_class"
+              set +e
+              adb shell am instrument -w -r \
+                -e class "$test_class" \
+                "$instrumentation" | tr -d '\r' | tee "$log_file"
+              adb_status=${PIPESTATUS[0]}
+              set -e
+
+              test "$adb_status" -eq 0 || {
+                echo "adb instrumentation command failed for $test_class" >&2
+                exit "$adb_status"
+              }
+              if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|shortMsg=Process crashed' "$log_file"; then
+                echo "Instrumentation reported a failure for $test_class" >&2
+                exit 1
+              fi
+              grep -Eq '^OK \([1-9][0-9]* tests?\)' "$log_file" || {
+                echo "Instrumentation did not report a non-zero passing test count for $test_class" >&2
+                exit 1
+              }
+            done
 
       - name: Upload MDBX3 runtime reports
         if: always()
@@ -190,6 +256,7 @@ jobs:
           name: mdbx3-runtime-smoke-reports
           path: |
             mdbx3-x86_64-abi-report.json
+            mdbx3-instrumentation-logs/**
             monica/Monica for Android/app/build/reports/androidTests/**
             monica/Monica for Android/app/build/outputs/androidTest-results/**
           if-no-files-found: warn
