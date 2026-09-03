@@ -8,6 +8,7 @@ on:
       - 'Monica for Android/app/src/androidTest/**'
       - 'Monica for Android/mdbx-engine/**'
       - 'Monica for Android/rust-jni/**'
+      - 'Monica for Android/rust-crypto/**'
   workflow_dispatch:
 
 permissions:
@@ -131,7 +132,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Run deterministic MDBX3 instrumentation suite
+      - name: Run deterministic MDBX3 and Rust KDF instrumentation suite
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -146,7 +147,7 @@ jobs:
             --no-daemon
             --stacktrace
             -PincludeX86TestAbi
-            -Pandroid.testInstrumentationRunnerArguments.class=takagi.ru.monica.repository.Mdbx2CreationInstrumentedTest,takagi.ru.monica.repository.Mdbx2FeatureParityInstrumentedTest,takagi.ru.monica.repository.Mdbx2HardeningInstrumentedTest,takagi.ru.monica.repository.Mdbx2MigrationInstrumentedTest,takagi.ru.monica.repository.MdbxVaultStoreInstrumentedCompatibilityTest,takagi.ru.monica.utils.Mdbx2BackupInstrumentedTest
+            -Pandroid.testInstrumentationRunnerArguments.class=takagi.ru.monica.repository.Mdbx2CreationInstrumentedTest,takagi.ru.monica.repository.Mdbx2FeatureParityInstrumentedTest,takagi.ru.monica.repository.Mdbx2HardeningInstrumentedTest,takagi.ru.monica.repository.Mdbx2MigrationInstrumentedTest,takagi.ru.monica.repository.MdbxVaultStoreInstrumentedCompatibilityTest,takagi.ru.monica.utils.Mdbx2BackupInstrumentedTest,takagi.ru.monica.rustcore.BitwardenRustKdfInstrumentedTest
 
       - name: Upload MDBX3 runtime reports
         if: always()
