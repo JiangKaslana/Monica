@@ -63,7 +63,21 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run lint
-        run: ./gradlew :app:lintDebug --stacktrace --no-daemon
+        shell: bash
+        run: |
+          set +e
+          ./gradlew :app:lintDebug --stacktrace --no-daemon
+          lint_status=$?
+          set -e
+
+          report="app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+          if [ -f "$report" ]; then
+            echo "::group::Full Android lint report"
+            cat "$report"
+            echo "::endgroup::"
+          fi
+
+          exit "$lint_status"
 
       - name: Run unit tests (diagnostic)
         continue-on-error: true
