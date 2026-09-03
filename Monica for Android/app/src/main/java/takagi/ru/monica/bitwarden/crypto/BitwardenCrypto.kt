@@ -328,15 +328,18 @@ object BitwardenCrypto {
         var preferredResult: ByteArray? = null
         var stdResult: ByteArray? = null
         return try {
-            preferredResult = pbkdf2Sha256(passwordBytes, saltBytes, iterations, AES_KEY_SIZE)
-            stdResult = pbkdf2Sha256Standard(passwordBytes, saltBytes, iterations, AES_KEY_SIZE)
+            val preferred = pbkdf2Sha256(passwordBytes, saltBytes, iterations, AES_KEY_SIZE)
+            preferredResult = preferred
+            val standard = pbkdf2Sha256Standard(passwordBytes, saltBytes, iterations, AES_KEY_SIZE)
+            stdResult = standard
 
-            val preferredHex = preferredResult.joinToString("") { "%02x".format(it) }
-            val stdHex = stdResult.joinToString("") { "%02x".format(it) }
+            val matches = MessageDigest.isEqual(preferred, standard)
+            val preferredHex = preferred.joinToString("") { "%02x".format(it) }
+            val stdHex = standard.joinToString("") { "%02x".format(it) }
             """
                 Preferred: $preferredHex
                 Standard API: $stdHex
-                Match: ${preferredHex == stdHex}
+                Match: $matches
             """.trimIndent()
         } finally {
             preferredResult?.fill(0)
