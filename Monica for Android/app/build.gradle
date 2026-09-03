@@ -328,6 +328,9 @@ dependencies {
     
     // Scrypt for Aegis decryption
     implementation libs.scrypt
+
+    // Password strength analysis, same engine used by Keyguard
+    implementation 'com.nulab-inc:zxcvbn:1.9.0'
     
     // ==== Bitwarden Integration ====
     // Retrofit for API calls
@@ -365,4 +368,3 @@ dependencies {
     debugImplementation libs.androidx.ui.tooling
     debugImplementation libs.androidx.ui.test.manifest
 }
-
