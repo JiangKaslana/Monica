@@ -1,0 +1,132 @@
+name: Promote validated MDBX3 native core
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/MDBX3-Promote-Native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  MDBX_COMMIT: 5cf8af697727095654884e0a76bec6ca12d0ce6b
+  RUST_VERSION: 1.86.0
+  CARGO_NDK_VERSION: 4.1.2
+  NDK_VERSION: 28.2.13676358
+
+jobs:
+  promote:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Monica PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+          path: monica
+
+      - name: Checkout pinned MDBX3 source
+        uses: actions/checkout@v4
+        with:
+          repository: Monica-Pass/Mdbx
+          ref: ${{ env.MDBX_COMMIT }}
+          path: mdbx
+          persist-credentials: false
+
+      - name: Install pinned Rust and Android native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+          ndk_path="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
+          if [ ! -d "$ndk_path" ]; then
+            sdkmanager_path="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print -quit)"
+            test -n "$sdkmanager_path"
+            yes | "$sdkmanager_path" "ndk;$NDK_VERSION" >/dev/null
+          fi
+          test -d "$ndk_path"
+          echo "ANDROID_NDK_HOME=$ndk_path" >> "$GITHUB_ENV"
+          cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+
+      - name: Build stripped MDBX3 candidates
+        working-directory: mdbx
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/mdbx3-jniLibs"
+          cargo ndk -t arm64-v8a -t armeabi-v7a -P 26 -o "$out" \
+            build -p mdbx-ffi --profile mdbx3-release
+          cargo ndk -t x86_64 -P 21 -o "$out" \
+            build -p mdbx-ffi --profile mdbx3-release
+
+          llvm_bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            candidate="$out/$abi/libmdbx_ffi.so"
+            test -f "$candidate"
+            "$llvm_bin/llvm-strip" --strip-all "$candidate"
+            sha256sum "$candidate"
+          done
+
+          python3 scripts/verify-mdbx3-ffi-abi.py verify-exports \
+            --baseline crates/mdbx-ffi/abi/mdbx2-uniffi-bindings-v1.json \
+            --nm "$llvm_bin/llvm-nm" \
+            --library "arm64-v8a=$out/arm64-v8a/libmdbx_ffi.so" \
+            --library "armeabi-v7a=$out/armeabi-v7a/libmdbx_ffi.so" \
+            --library "x86_64=$out/x86_64/libmdbx_ffi.so" \
+            --output "$GITHUB_WORKSPACE/mdbx3-promotion-abi-report.json"
+
+      - name: Replace only Monica MDBX native binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/monica/Monica for Android/mdbx-engine/src/main/jniLibs"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            src="$GITHUB_WORKSPACE/mdbx3-jniLibs/$abi/libmdbx_ffi.so"
+            dst="$root/$abi/libmdbx_ffi.so"
+            test -f "$src"
+            test -f "$dst"
+            cp "$src" "$dst"
+            cmp -s "$src" "$dst"
+          done
+
+      - name: Commit exactly three promoted binaries
+        working-directory: monica
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          paths=(
+            'Monica for Android/mdbx-engine/src/main/jniLibs/arm64-v8a/libmdbx_ffi.so'
+            'Monica for Android/mdbx-engine/src/main/jniLibs/armeabi-v7a/libmdbx_ffi.so'
+            'Monica for Android/mdbx-engine/src/main/jniLibs/x86_64/libmdbx_ffi.so'
+          )
+          git add -- "${paths[@]}"
+          mapfile -t staged < <(git diff --cached --name-only)
+          test "${#staged[@]}" -eq 3
+          for path in "${paths[@]}"; do
+            printf '%s\n' "${staged[@]}" | grep -Fx -- "$path" >/dev/null
+          done
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'perf(android): promote validated MDBX3 native core'
+          git push origin "HEAD:$HEAD_REF"
+
+      - name: Upload promotion report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdbx3-promotion-report
+          path: |
+            mdbx3-promotion-abi-report.json
+            mdbx3-jniLibs/**/libmdbx_ffi.so
+          if-no-files-found: warn
+          retention-days: 7
