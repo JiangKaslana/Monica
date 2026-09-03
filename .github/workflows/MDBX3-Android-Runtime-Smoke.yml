@@ -124,6 +124,40 @@ jobs:
         shell: bash
         run: chmod +x gradlew
 
+      - name: Prebuild instrumentation APKs before starting emulator
+        working-directory: "monica/Monica for Android"
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew \
+            :app:assembleDebug \
+            :app:assembleDebugAndroidTest \
+            --no-daemon \
+            --stacktrace \
+            -PincludeX86TestAbi
+
+          candidate="$GITHUB_WORKSPACE/mdbx3-jniLibs/x86_64/libmdbx_ffi.so"
+          expected="$(sha256sum "$candidate" | awk '{print $1}')"
+          debug_dir="$GITHUB_WORKSPACE/monica/Monica for Android/app/build/outputs/apk/debug"
+          mapfile -t apks < <(find "$debug_dir" -maxdepth 1 -type f -iname '*.apk' | sort)
+          test "${#apks[@]}" -gt 0
+
+          found=0
+          for apk in "${apks[@]}"; do
+            if unzip -Z1 "$apk" | grep -qx 'lib/x86_64/libmdbx_ffi.so'; then
+              actual="$(unzip -p "$apk" 'lib/x86_64/libmdbx_ffi.so' | sha256sum | awk '{print $1}')"
+              test "$actual" = "$expected" || {
+                echo "MDBX3 candidate packaging hash mismatch in $apk" >&2
+                exit 1
+              }
+              found=1
+            fi
+          done
+          test "$found" -eq 1 || {
+            echo "No prebuilt Debug APK contained x86_64 libmdbx_ffi.so" >&2
+            exit 1
+          }
+
       - name: Enable KVM
         shell: bash
         run: |
