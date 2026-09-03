@@ -118,6 +118,11 @@ jobs:
           cmp -s "$src" "$dst"
           echo "MDBX3 x86_64 candidate overlaid into the checked-out test workspace only."
 
+      - name: Grant Gradle wrapper execute permission
+        working-directory: "monica/Monica for Android"
+        shell: bash
+        run: chmod +x gradlew
+
       - name: Enable KVM
         shell: bash
         run: |
